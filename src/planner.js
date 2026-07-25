@@ -104,6 +104,7 @@ export function generateTripPlan(trip, options = {}) {
   const constraints = buildTravelerConstraintProfile(normalized);
   const scored = scoreCandidates(destinationProfile, normalized, constraints);
   const days = buildDays(destinationProfile, normalized, constraints, scored);
+  const hotelBase = buildHotelBase(destinationProfile, normalized, days);
   const foodPlan = buildFoodPlan(destinationProfile, normalized, constraints, days);
   const routeSummary = buildRouteSummary(destinationProfile, days);
   const budgetSummary = buildBudgetSummary(normalized, days);
@@ -122,6 +123,7 @@ export function generateTripPlan(trip, options = {}) {
     travelers: normalized.travelers,
     preferencesSnapshot: structuredClone(normalized),
     overview: buildOverview(destinationProfile, normalized, days, budgetSummary, routeSummary),
+    hotelBase,
     days,
     foodPlan,
     routeSummary,
@@ -130,6 +132,7 @@ export function generateTripPlan(trip, options = {}) {
     unresolvedConflicts: advisories.filter((item) => item.severity === "conflict" || item.severity === "blocking"),
     generationMetadata: {
       destinationProfileId: destinationProfile.id,
+      hotelBase,
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
       unsupportedPreferences: normalized.unknownPreferences
@@ -141,6 +144,25 @@ export function generateTripPlan(trip, options = {}) {
     plan.advisories.push(...validation.blocking);
   }
   return { status: "ready", plan };
+}
+
+function buildHotelBase(profile, input, days) {
+  const regions = days.map((day) => day.region);
+  const wantsQuiet = (input.alcohol.preferences || []).some((item) => /quiet|walk|sunset/i.test(item));
+  const wantsNightlife = (input.alcohol.preferences || []).some((item) => /nightlife|live music|bars/i.test(item)) && input.alcohol.primary !== "No Alcohol";
+  const lowWalking = /minimal|easy/i.test(input.walkingLimit || "");
+  let primary = "Beverly Grove / Museum Row";
+  if (regions.some((region) => /Santa Monica|Malibu|Venice/.test(region)) && wantsQuiet) primary = "Santa Monica";
+  if (wantsNightlife) primary = "West Hollywood or Beverly Grove";
+  if (regions.filter((region) => /Downtown|Little Tokyo|Arts/.test(region)).length >= 2) primary = "Downtown Los Angeles";
+  if (regions.some((region) => /Pasadena/.test(region)) && input.numberOfDays <= 3) primary = "Pasadena";
+  return {
+    primary,
+    alternatives: ["Santa Monica", "West Hollywood", "Beverly Grove / Museum Row"].filter((item) => item !== primary).slice(0, 2),
+    reason: `${primary} is suggested as a planning base because it balances the selected regions, ${input.pace.toLowerCase()} pace, and evening preferences without claiming hotel availability.`,
+    tradeoffs: lowWalking ? "Choose lodging with parking, elevator access, and short pickup/drop-off paths." : "Los Angeles is spread out; even a central base still requires daily drive-time buffers.",
+    splitStaySuggestion: input.numberOfDays >= 7 && input.lodging.changeHotels !== "Stay in one place" ? "A westside plus Pasadena/Downtown split stay could reduce some late-trip driving, but it is optional." : "One base is preferred for this trip."
+  };
 }
 
 export function buildTravelerConstraintProfile(input) {
@@ -727,7 +749,21 @@ export function compatibleAlternatives(plan, itemId) {
   return scoreCandidates(profile, input, constraints)
     .filter(({ place }) => place.id !== current.placeId && (!current.neighborhood || place.regionId === current.neighborhood || place.accessibility === "good"))
     .slice(0, 6)
-    .map(({ place, reasons }) => ({ placeId: place.id, title: place.name, description: place.shortDescription, duration: place.typicalDurationMinutes, cost: moneyRange(place.estimatedCostLow, place.estimatedCostHigh), reason: reasons[0] || "Compatible with this route and preference profile." }));
+    .map(({ place, reasons }) => ({
+      placeId: place.id,
+      title: place.name,
+      description: place.shortDescription,
+      region: regionName(profile, place.regionId),
+      category: place.categories[0] || "activity",
+      duration: place.typicalDurationMinutes,
+      cost: moneyRange(place.estimatedCostLow, place.estimatedCostHigh),
+      indoorOutdoor: place.indoorOutdoor,
+      walkingLevel: place.accessibility === "limited" ? "Higher walking" : place.accessibility === "good" ? "Lower walking" : "Moderate walking",
+      accessibilityFit: constraints.minimalWalking && place.accessibility === "good" ? "Strong accessibility fit" : place.accessibility === "limited" ? "Accessibility caution" : "Standard accessibility check",
+      routeImpact: place.regionId === current.neighborhood ? "Low route impact" : "Timing may shift for route fit",
+      group: place.regionId === current.neighborhood ? "Nearby Alternative" : place.indoorOutdoor === "indoor" ? "Indoor Backup" : place.estimatedCostHigh <= 20 ? "Lower-Cost Option" : "Best Fit",
+      reason: reasons[0] || "Compatible with this route and preference profile."
+    }));
 }
 
 function normalizeDayCount(trip) {

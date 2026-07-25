@@ -3,7 +3,15 @@
   "short_name": "RouteMosaic",
   "start_url": "/",
   "display": "standalone",
+  "description": "Personalized day-by-day trip planning based on your dates, travelers, interests, pace, food, comfort, and budget.",
   "background_color": "#f6f8fb",
   "theme_color": "#102a43",
-  "icons": []
+  "icons": [
+    {
+      "src": "/public/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }

@@ -720,6 +720,25 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .planning-diagnostics { margin-top: 18px; padding: 14px; border: 1px dashed #9bc4f2; border-radius: 14px; background: #f8fcff; }
 .planning-diagnostics summary { cursor: pointer; font-weight: 900; color: var(--blue); }
 .planning-diagnostics pre { overflow: auto; white-space: pre-wrap; font-size: 0.78rem; color: #1a3452; }
+.sample-trip-panel { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 14px 16px; margin-bottom: 18px; border: 1px solid #cfe9f5; border-radius: 14px; background: linear-gradient(135deg, #f2fbff, #fff8ef); }
+.sample-trip-panel p { margin: 3px 0 0; color: var(--muted); }
+.saved-trips-button { width: 100%; min-height: 42px; margin: 8px 0 14px; justify-content: center; background: rgb(255 255 255 / 0.08); color: #fff; border-color: rgb(255 255 255 / 0.18); }
+.saved-trips-drawer { width: min(560px, calc(100vw - 24px)); max-height: min(82vh, 760px); overflow: auto; margin-left: auto; padding: 20px; border-radius: 18px 0 0 18px; background: #fff; box-shadow: var(--shadow); }
+.saved-trip-list { display: grid; gap: 10px; }
+.saved-trip-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #f9fcff; }
+.saved-trip-list small { display: block; color: var(--muted); }
+.saved-trip-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.saved-trip-actions button { min-height: 34px; padding: 0 9px; }
+.global-footer { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: center; padding: 18px; color: #50677f; font-size: 0.86rem; }
+.global-footer a { color: var(--blue); font-weight: 800; text-decoration: none; }
+.static-page { min-height: 100vh; padding: 28px; background: linear-gradient(135deg, #eefaff, #fffaf4); }
+.static-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--navy); text-decoration: none; margin-bottom: 22px; }
+.static-card { max-width: 900px; margin: 0 auto; padding: clamp(22px, 4vw, 44px); border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: var(--shadow); }
+.static-card h1 { margin: 0 0 14px; font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1; }
+.static-card h2 { margin-top: 24px; }
+.static-card p, .static-card li { color: #27425f; line-height: 1.65; }
+.primary-link { display: inline-flex; min-height: 44px; align-items: center; padding: 0 16px; border-radius: 12px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 900; }
+.runtime-error-banner { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; padding: 12px 16px; background: #fff3e0; color: #7a3f00; border-bottom: 1px solid #ffc46b; }
 
 @media (max-width: 1050px) {
   .plan-hero { grid-template-columns: 1fr; }
@@ -737,4 +756,21 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .timeline-dot { display: none; }
   .timeline-time { display: flex; gap: 8px; }
   .plan-hero-actions { justify-content: flex-start; }
+  .sample-trip-panel, .saved-trip-list article { grid-template-columns: 1fr; display: grid; }
+  .saved-trip-actions { justify-content: flex-start; }
+}
+
+@media print {
+  @page { margin: 0.55in; }
+  body { background: #fff !important; color: #111 !important; }
+  .side, .plan-tabs, .plan-hero-actions, .item-actions, .day-actions, .global-footer, .saved-trips-drawer, .restriction-layer, .planning-diagnostics, .toast { display: none !important; }
+  .app-shell, .plan-shell { display: block !important; }
+  .wizard-main, .trip-plan-main { padding: 0 !important; background: #fff !important; }
+  .plan-hero, .plan-metric, .plan-payoff-card, .itinerary-day, .timeline-body, .backup-options, .meal-day, .advisory-card { box-shadow: none !important; background: #fff !important; border-color: #bbb !important; color: #111 !important; }
+  .plan-hero::after { display: none !important; }
+  .plan-summary-strip, .plan-overview-grid, .meal-day-grid { grid-template-columns: 1fr 1fr !important; }
+  .plan-payoff-card.wide { grid-column: 1 / -1 !important; }
+  .timeline-item, .itinerary-day, .meal-day, .advisory-card, .backup-options article { break-inside: avoid; page-break-inside: avoid; }
+  a::after { content: " (" attr(href) ")"; font-size: 0.8em; }
+  .timeline-dot { color: #111 !important; background: #fff !important; box-shadow: none !important; border: 1px solid #111; }
 }

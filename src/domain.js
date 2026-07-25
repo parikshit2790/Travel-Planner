@@ -1,5 +1,6 @@
 export const STORAGE_KEY = "routemosaic-personalization-state-v3";
 export const SAVED_DRAFT_KEY = "routemosaic-explicit-draft-v1";
+export const SAVED_TRIPS_KEY = "routemosaic-local-saved-trips-v1";
 
 export const importanceWeights = {
   "Must have": 100,

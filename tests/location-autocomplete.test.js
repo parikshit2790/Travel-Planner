@@ -20,11 +20,11 @@ const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");
 const provider = readFileSync("src/location-provider.js", "utf8");
 
-assert.equal(initialState.trip.from, "Charlotte");
-assert.equal(initialState.trip.destination, "Los Angeles");
-assert.equal(initialState.trip.days, 5);
-assert.equal(initialState.trip.startDate, "2026-08-20");
-assert.equal(initialState.trip.endDate, "2026-08-25");
+assert.equal(initialState.trip.from, "");
+assert.equal(initialState.trip.destination, "");
+assert.equal(initialState.trip.days, "");
+assert.equal(initialState.trip.startDate, "");
+assert.equal(initialState.trip.endDate, "");
 assert.equal(initialState.trip.description, "");
 
 assert.equal(LOCATION_MIN_QUERY_LENGTH, 2);

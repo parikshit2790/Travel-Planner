@@ -1,5 +1,6 @@
-import { initialState } from "./seed.js?v=28";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=44";
 import {
+  SAVED_TRIPS_KEY,
   STORAGE_KEY,
   SAVED_DRAFT_KEY,
   addOrUpdatePreference,
@@ -30,6 +31,7 @@ import {
   travelerTotal,
   travelerWarnings,
   travelerRestrictionOptions,
+  uid,
   validateBasics
 } from "./domain.js";
 import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js";
@@ -85,6 +87,15 @@ let ui = {
 };
 
 let globalListenersBound = false;
+
+window.addEventListener("error", () => showFriendlyRuntimeError());
+window.addEventListener("unhandledrejection", () => showFriendlyRuntimeError());
+
+function showFriendlyRuntimeError() {
+  const app = document.querySelector("#app");
+  if (!app || app.querySelector(".runtime-error-banner")) return;
+  app.insertAdjacentHTML("afterbegin", `<div class="runtime-error-banner" role="alert"><strong>Something went wrong.</strong><span>Your current browser session is still local. Refresh the page or reopen a saved trip from this browser.</span></div>`);
+}
 
 const steps = [
   "Trip Basics",
@@ -147,13 +158,52 @@ function persist(message = "Saved") {
 
 function saveExplicitDraft() {
   reconcileTripStylePreferences(state.trip);
-  const draft = {
+  const draft = localTripRecord({
     savedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     activeStep: state.activeStep,
     trip: structuredClone(state.trip),
-    preview: structuredClone(state.preview)
+    preview: structuredClone(state.preview),
+    plan: structuredClone(state.plan || null)
+  });
+  try {
+    writeSavedTrip(draft);
+    localStorage.setItem(SAVED_DRAFT_KEY, JSON.stringify(draft));
+  } catch (error) {
+    ui.toast = error?.name === "QuotaExceededError" ? "Local storage is full. Delete an older saved trip and try again." : "We could not save this trip locally. Your current screen is still available.";
+  }
+}
+
+function localTripRecord(record) {
+  const destination = record.trip?.destinationDisplay || record.trip?.destination || "Untitled";
+  return {
+    schemaVersion: 1,
+    id: record.trip?.id || uid("saved"),
+    name: record.name || `${normalizePlaceName(destination)} trip`,
+    savedAt: record.savedAt || new Date().toISOString(),
+    updatedAt: record.updatedAt || new Date().toISOString(),
+    ...record
   };
-  localStorage.setItem(SAVED_DRAFT_KEY, JSON.stringify(draft));
+}
+
+function readSavedTrips() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_TRIPS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.schemaVersion === 1 && item.trip) : [];
+  } catch {
+    localStorage.removeItem(SAVED_TRIPS_KEY);
+    return [];
+  }
+}
+
+function writeSavedTrips(records) {
+  localStorage.setItem(SAVED_TRIPS_KEY, JSON.stringify(records));
+}
+
+function writeSavedTrip(record) {
+  const records = readSavedTrips().filter((item) => item.id !== record.id);
+  records.unshift(record);
+  writeSavedTrips(records.slice(0, 20));
 }
 
 function esc(value) {
@@ -232,7 +282,12 @@ function formatShortDateRange(startValue, endValue) {
 }
 
 function render() {
+  if (isStaticInfoRoute()) {
+    renderStaticInfoPage();
+    return;
+  }
   if (state.planStatus === "ready" && state.plan) {
+    document.title = state.plan.destination.includes("Los Angeles") ? "Your Los Angeles Trip Plan | RouteMosaic" : "Your Trip Plan | RouteMosaic";
     renderTripPlan();
     return;
   }
@@ -241,6 +296,7 @@ function render() {
     return;
   }
   const trip = state.trip;
+  document.title = state.activeStep === 6 ? "Review Your Trip | RouteMosaic" : "Plan a Trip | RouteMosaic";
   const travelerCount = travelerTotal(trip);
   const issueCount = visibleReviewIssues().length;
   const [heading, supportingText] = stepHeadings[state.activeStep - 1];
@@ -248,6 +304,7 @@ function render() {
     <div class="app-shell">
       <aside class="side">
         <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        <button class="saved-trips-button" data-action="toggleSavedTrips">Saved Trips</button>
         <nav class="steps">${steps.map((step, index) => stepNavButton(step, index + 1)).join("")}</nav>
         ${SidebarScenicIllustration()}
         ${PlanningPrinciplesFooter()}
@@ -272,9 +329,87 @@ function render() {
     ${locationAutocompleteOverlay()}
     ${experienceOverlay()}
     ${foodSectionOverlay()}
-    ${lodgingOverlay()}`;
+    ${lodgingOverlay()}
+    ${savedTripsDrawer()}
+    ${globalFooter()}`;
   bind();
   positionRestrictionOverlay();
+}
+
+function isStaticInfoRoute() {
+  return ["/privacy", "/terms", "/travel-disclaimer", "/contact", "/saved-trips"].includes(window.location.pathname);
+}
+
+function renderStaticInfoPage() {
+  document.title = {
+    "/privacy": "Privacy Policy | RouteMosaic",
+    "/terms": "Terms of Use | RouteMosaic",
+    "/travel-disclaimer": "Travel Disclaimer | RouteMosaic",
+    "/contact": "Contact | RouteMosaic",
+    "/saved-trips": "Saved Trips | RouteMosaic"
+  }[window.location.pathname] || "RouteMosaic";
+  document.querySelector("#app").innerHTML = `
+    <main class="static-page">
+      <a class="static-brand" href="/" data-link-home><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>RouteMosaic</strong></a>
+      ${staticPageContent(window.location.pathname)}
+      ${globalFooter()}
+    </main>`;
+  bind();
+}
+
+function staticPageContent(path) {
+  const effectiveDate = "July 25, 2026";
+  if (path === "/privacy") return `<article class="static-card"><p class="eyebrow">Effective ${effectiveDate}</p><h1>Privacy Policy</h1>
+    <p>RouteMosaic lets you enter trip dates, travelers, preferences, restrictions, notes, and generated itinerary details. At launch, there is no account system and saved trips are stored locally in your browser only when you choose Save.</p>
+    <h2>Information You Enter</h2><p>You decide what trip details to provide. Avoid entering sensitive information that is not needed for travel planning.</p>
+    <h2>Local Storage</h2><p>Saved trips are stored on this device in this browser. You can delete them from Saved Trips or by clearing browser site data.</p>
+    <h2>Hosting And Logs</h2><p>Vercel and related infrastructure providers may process basic technical logs such as IP address, browser, device, pages requested, and error diagnostics. RouteMosaic does not sell personal information.</p>
+    <h2>Cookies And Analytics</h2><p>No separate analytics product is configured in this codebase. If analytics are added later, this policy should be updated.</p>
+    <h2>Children</h2><p>RouteMosaic is not directed to children. Adults should enter any child-travel details only as needed for planning.</p>
+    <h2>Contact</h2><p>Privacy requests can be sent from the Contact page.</p></article>`;
+  if (path === "/terms") return `<article class="static-card"><p class="eyebrow">Effective ${effectiveDate}</p><h1>Terms of Use</h1>
+    <p>By using RouteMosaic, you agree to use it as an informational planning tool. RouteMosaic is not a travel agency, booking provider, safety authority, medical adviser, legal adviser, or accessibility certifier.</p>
+    <h2>Your Responsibility</h2><p>You are responsible for verifying hours, prices, availability, reservations, accessibility, dietary safety, weather, travel conditions, laws, visas, health requirements, and safety information before booking or traveling.</p>
+    <h2>No Guarantees</h2><p>Plans, budgets, travel times, routes, food suggestions, and advisories are estimates and may be wrong or incomplete.</p>
+    <h2>Acceptable Use</h2><p>Do not misuse the service, attempt to disrupt it, or use generated content as a substitute for official or qualified advice.</p>
+    <h2>Changes</h2><p>RouteMosaic may change, pause, or discontinue features. Coming Later controls are not promised release dates.</p></article>`;
+  if (path === "/travel-disclaimer") return `<article class="static-card"><p class="eyebrow">Planning estimates only</p><h1>Travel Disclaimer</h1>
+    <p>RouteMosaic provides planning estimates and suggestions. It does not verify live opening hours, live availability, reservations, accessibility, dietary safety, traffic, weather, or current prices.</p>
+    <p>Drive times and distances are curated estimates. Budget ranges are estimates. Food suggestions are style and area recommendations, not confirmed restaurant availability. Accessibility details may change and must be confirmed directly with venues.</p>
+    <p>Emergency, health, visa, legal, safety, and high-risk decisions require official sources or qualified professionals.</p></article>`;
+  if (path === "/contact") return `<article class="static-card"><p class="eyebrow">Contact</p><h1>Contact RouteMosaic</h1>
+    <p>For product feedback, bug reports, privacy requests, or general questions, email us. Clicking the link opens your email application.</p>
+    <p><a class="primary-link" href="mailto:support@routemosaic.com?subject=RouteMosaic%20feedback">support@routemosaic.com</a></p>
+    <ul><li>Product feedback</li><li>Bug report</li><li>Privacy request</li><li>General question</li></ul></article>`;
+  return `<article class="static-card"><h1>Saved Trips</h1>${savedTripsList()}</article>`;
+}
+
+function globalFooter() {
+  const year = new Date().getFullYear();
+  return `<footer class="global-footer"><span>RouteMosaic © ${year}</span><span>Planning estimates only</span><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/travel-disclaimer">Travel Disclaimer</a><a href="/contact">Contact</a></footer>`;
+}
+
+function savedTripsDrawer() {
+  if (!state.savedTripsOpen) return "";
+  return `<div class="restriction-layer" data-action="toggleSavedTrips"><aside class="saved-trips-drawer" role="dialog" aria-label="Saved Trips">
+    <div class="dialog-head"><div><h2>Saved Trips</h2><span>Saved locally in this browser</span></div><button class="icon-button" data-action="toggleSavedTrips" aria-label="Close saved trips">×</button></div>
+    <p class="muted">Trips saved here are stored in this browser and may not appear on another device.</p>
+    ${savedTripsList()}
+  </aside></div>`;
+}
+
+function savedTripsList() {
+  const records = readSavedTrips();
+  if (!records.length) return `<p class="empty">No saved trips yet. Use Save and Exit to save a local draft.</p>`;
+  return `<div class="saved-trip-list">${records.map((record) => `<article>
+    <div><strong>${esc(record.name)}</strong><small>Updated ${esc(formatSavedDate(record.updatedAt))}</small></div>
+    <div class="saved-trip-actions"><button data-action="openSavedTrip:${esc(record.id)}">Open</button><button data-action="duplicateSavedTrip:${esc(record.id)}">Duplicate</button><button data-action="renameSavedTrip:${esc(record.id)}">Rename</button><button data-action="deleteSavedTrip:${esc(record.id)}">Delete</button></div>
+  </article>`).join("")}</div>`;
+}
+
+function formatSavedDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "recently" : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function renderUnsupportedPlan() {
@@ -283,6 +418,7 @@ function renderUnsupportedPlan() {
     <div class="app-shell plan-shell">
       <aside class="side">
         <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        <button class="saved-trips-button" data-action="toggleSavedTrips">Saved Trips</button>
         <nav class="steps">${steps.map((step, index) => stepNavButton(step, index + 1)).join("")}</nav>
         ${SidebarScenicIllustration()}
         ${PlanningPrinciplesFooter()}
@@ -327,6 +463,7 @@ function renderTripPlan() {
             <button class="primary" data-action="regeneratePlan">Regenerate Plan</button>
             <button data-action="editPreferences">Edit Preferences</button>
             <button data-action="saveExit">Save Trip</button>
+            <button data-action="printPlan">Print / Save as PDF</button>
             <button disabled title="Coming Later">Export · Coming Later</button>
             <button disabled title="Coming Later">Share · Coming Later</button>
           </div>
@@ -346,7 +483,9 @@ function renderTripPlan() {
         ${planningDiagnosticsPanel()}
       </main>
     </div>
-    ${planDialog()}`;
+    ${planDialog()}
+    ${savedTripsDrawer()}
+    ${globalFooter()}`;
   bind();
 }
 
@@ -413,6 +552,7 @@ function planOverviewSection() {
       <article class="plan-payoff-card wide">
         <h2>Trip Overview</h2>
         <p>${esc(plan.overview.destinationSummary)}</p>
+        <p><strong>Planning estimates—not live availability.</strong> Verify current hours, availability, accessibility, menus, prices, weather, and travel conditions before booking or traveling. <a href="/travel-disclaimer">Read the travel disclaimer.</a></p>
         <div class="highlight-list">${plan.overview.planningHighlights.map((item) => `<span>${esc(item)}</span>`).join("")}</div>
       </article>
       <article class="plan-payoff-card"><h3>Activities</h3><strong>${plan.overview.totalScheduledActivities}</strong><p>${esc(formatMinutes(plan.overview.totalEstimatedActivityMinutes))} scheduled activity time</p></article>
@@ -422,6 +562,13 @@ function planOverviewSection() {
         <h3>Preferences Applied</h3>
         <p><strong>Diet:</strong> ${esc(plan.foodPlan.dietaryHandlingSummary)}</p>
         <p><strong>Accessibility:</strong> ${esc(state.plan.preferencesSnapshot ? planAccessibilitySummary() : "No special needs entered.")}</p>
+      </article>
+      <article class="plan-payoff-card wide">
+        <h3>Suggested Hotel Base</h3>
+        <p><strong>${esc(plan.hotelBase.primary)}</strong></p>
+        <p>${esc(plan.hotelBase.reason)}</p>
+        <p><strong>Alternatives:</strong> ${esc(plan.hotelBase.alternatives.join(", "))}</p>
+        <p><strong>Tradeoff:</strong> ${esc(plan.hotelBase.tradeoffs)} ${esc(plan.hotelBase.splitStaySuggestion)}</p>
       </article>
     </div>
     <div class="day-preview-grid">${plan.days.map((day) => `<button class="day-preview-card" data-action="jumpToDay:${day.id}"><span>Day ${day.dayNumber}</span><strong>${esc(day.title)}</strong><small>${esc(day.theme)} · ${esc(day.dailyBudget.label)}</small></button>`).join("")}</div>
@@ -547,7 +694,7 @@ function replaceDialog() {
   const alternatives = compatibleAlternatives(state.plan, ui.planDialogItemId);
   return `<div class="restriction-layer" data-action="closePlanDialog"><div class="choice-panel plan-dialog" role="dialog" aria-label="Replace activity">
     <div class="dialog-head"><div><h2>Replace Activity</h2><span>${alternatives.length} compatible options</span></div><button class="icon-button" data-action="closePlanDialog" aria-label="Close">×</button></div>
-    <div class="alternative-list">${alternatives.map((item) => `<button data-action="replaceWith:${esc(ui.planDialogItemId)}:${esc(item.placeId)}"><strong>${esc(item.title)}</strong><span>${esc(item.description)}</span><small>${esc(formatMinutes(item.duration))} · ${esc(item.cost)} · ${esc(item.reason)}</small></button>`).join("") || `<p>No compatible alternatives found for this item.</p>`}</div>
+    <div class="alternative-list">${alternatives.map((item) => `<button data-action="replaceWith:${esc(ui.planDialogItemId)}:${esc(item.placeId)}"><strong>${esc(item.group)} · ${esc(item.title)}</strong><span>${esc(item.description)}</span><small>${esc(item.region)} · ${esc(item.category)} · ${esc(formatMinutes(item.duration))} · ${esc(item.cost)} · ${esc(item.indoorOutdoor)} · ${esc(item.accessibilityFit)} · ${esc(item.routeImpact)} · ${esc(item.reason)}</small></button>`).join("") || `<p>No compatible alternatives found for this item.</p>`}</div>
   </div></div>`;
 }
 
@@ -843,6 +990,7 @@ function basicsStep() {
   const status = stepStatus(trip, issues);
   return `<section class="panel trip-basics-panel">
     <div class="panel-head"><div><p class="eyebrow">Step 1</p><h2>Trip Basics</h2></div>${badge(status)}</div>
+    ${sampleTripPanel(trip)}
     <div class="form-grid basics-grid">
       ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
       ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
@@ -861,6 +1009,16 @@ function basicsStep() {
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
   </section>
   ${quickInterpretTable()}`;
+}
+
+function sampleTripPanel(trip) {
+  const hasSample = Boolean(trip.sampleTrip);
+  return `<section class="sample-trip-panel">
+    <div><strong>${hasSample ? "Sample Trip" : "Want to try it first?"}</strong><p>${hasSample ? "You are editing a sample Los Angeles trip. All fields are editable." : "Load a realistic Los Angeles sample, or start blank and enter your own trip."}</p></div>
+    <div>
+      ${hasSample ? `<button data-action="clearSampleTrip">Clear Sample</button>` : `<button data-action="loadSampleTrip">Try a Sample Los Angeles Trip</button>`}
+    </div>
+  </section>`;
 }
 
 function fieldShell(labelText, control, helper = "") {
@@ -2335,6 +2493,75 @@ function setPath(root, path, value) {
 }
 
 function action(name) {
+  if (name === "loadSampleTrip") {
+    const hasMeaningfulData = Boolean(String(state.trip.from || state.trip.destination || state.trip.description || "").trim() || state.trip.preferences.length || state.trip.food.diet.length || state.trip.food.restrictions.length);
+    if (hasMeaningfulData && !confirm("Load the sample trip and replace your current unsaved entries?")) return;
+    state.trip = createSampleLosAngelesTrip();
+    state.activeStep = 1;
+    state.plan = null;
+    state.planStatus = "";
+    state.planStale = false;
+    ui.toast = "Sample Los Angeles trip loaded.";
+  }
+  if (name === "clearSampleTrip") {
+    if (!confirm("Clear the sample and start fresh?")) return;
+    state.trip = structuredClone(initialState.trip);
+    migrateTripState(state.trip);
+    syncTravelersToCounts(state.trip);
+    state.activeStep = 1;
+    state.plan = null;
+    state.planStatus = "";
+    ui.toast = "Sample cleared.";
+  }
+  if (name === "toggleSavedTrips") state.savedTripsOpen = !state.savedTripsOpen;
+  if (name.startsWith("openSavedTrip:")) {
+    const record = readSavedTrips().find((item) => item.id === name.split(":")[1]);
+    if (record) {
+      state.trip = structuredClone(record.trip);
+      migrateTripState(state.trip);
+      syncTravelersToCounts(state.trip);
+      state.preview = structuredClone(record.preview || null);
+      state.plan = structuredClone(record.plan || null);
+      state.planStatus = state.plan ? "ready" : "";
+      state.activeStep = record.activeStep || 1;
+      state.savedTripsOpen = false;
+      ui.toast = "Saved trip opened.";
+    }
+  }
+  if (name.startsWith("deleteSavedTrip:")) {
+    const id = name.split(":")[1];
+    if (!confirm("Delete this locally saved trip?")) return;
+    writeSavedTrips(readSavedTrips().filter((item) => item.id !== id));
+    ui.toast = "Saved trip deleted.";
+  }
+  if (name.startsWith("duplicateSavedTrip:")) {
+    const record = readSavedTrips().find((item) => item.id === name.split(":")[1]);
+    if (record) {
+      const copy = structuredClone(record);
+      copy.id = uid("saved");
+      copy.name = `${record.name} copy`;
+      copy.savedAt = new Date().toISOString();
+      copy.updatedAt = new Date().toISOString();
+      copy.trip.id = uid("trip");
+      writeSavedTrip(copy);
+      ui.toast = "Saved trip duplicated.";
+    }
+  }
+  if (name.startsWith("renameSavedTrip:")) {
+    const id = name.split(":")[1];
+    const records = readSavedTrips();
+    const record = records.find((item) => item.id === id);
+    if (record) {
+      const next = prompt("Rename saved trip", record.name);
+      if (next && next.trim()) {
+        record.name = next.trim().slice(0, 80);
+        record.updatedAt = new Date().toISOString();
+        writeSavedTrips(records);
+        ui.toast = "Saved trip renamed.";
+      }
+    }
+  }
+  if (name === "printPlan") window.print();
   if (name.startsWith("planSection:")) ui.planSection = name.split(":")[1];
   if (name === "editPreferences") {
     state.planStatus = "";

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { initialState } from "../src/seed.js";
-import { SAVED_DRAFT_KEY, STORAGE_KEY, createTripDraft, tripBasicsIssues, validateBasics } from "../src/domain.js";
+import { SAVED_DRAFT_KEY, SAVED_TRIPS_KEY, STORAGE_KEY, createTripDraft, tripBasicsIssues, validateBasics } from "../src/domain.js";
+import { createSampleLosAngelesTrip } from "../src/seed.js";
 
 const app = readFileSync("src/app.js", "utf8");
 
@@ -34,12 +35,20 @@ assert.equal(draft.lodging.styles.length, 0);
 assert.equal(initialState.activeStep, 1);
 assert.equal(initialState.preview, null);
 assert.equal(initialState.lastSaved, null);
-assert.equal(initialState.trip.from, "Charlotte");
-assert.equal(initialState.trip.destination, "Los Angeles");
-assert.equal(initialState.trip.days, 5);
-assert.equal(initialState.trip.startDate, "2026-08-20");
-assert.equal(initialState.trip.endDate, "2026-08-25");
+assert.equal(initialState.trip.from, "");
+assert.equal(initialState.trip.destination, "");
+assert.equal(initialState.trip.days, "");
+assert.equal(initialState.trip.startDate, "");
+assert.equal(initialState.trip.endDate, "");
 assert.equal(initialState.trip.interpretedSuggestions.length, 0);
+
+const sample = createSampleLosAngelesTrip(new Date(2026, 6, 25));
+assert.equal(sample.from, "Charlotte, North Carolina");
+assert.equal(sample.destination, "Los Angeles, California");
+assert.equal(sample.days, 5);
+assert.equal(sample.startDate, "2026-09-23");
+assert.equal(sample.endDate, "2026-09-27");
+assert.equal(sample.sampleTrip, true);
 
 assert.equal(validateBasics(draft).length, 2);
 assert.ok(!tripBasicsIssues(draft).some((issue) => issue.field === "trip.days"));
@@ -47,12 +56,18 @@ assert.ok(!tripBasicsIssues(draft).some((issue) => issue.field === "trip.days"))
 assert.ok(app.includes("clearTransientWizardStorage"));
 assert.ok(app.includes("structuredClone(initialState)"));
 assert.ok(!app.includes("localStorage.getItem(STORAGE_KEY)"));
-assert.equal(app.split("localStorage.setItem(").length - 1, 1);
+assert.ok(app.includes("SAVED_TRIPS_KEY"));
+assert.ok(app.includes("function readSavedTrips"));
+assert.ok(app.includes("function writeSavedTrip"));
 assert.ok(app.includes("localStorage.setItem(SAVED_DRAFT_KEY"));
 assert.ok(app.includes("if (name === \"saveExit\")"));
 assert.ok(app.includes("Draft saved."));
+assert.ok(app.includes("Saved locally in this browser"));
+assert.ok(app.includes("Try a Sample Los Angeles Trip"));
+assert.ok(app.includes("createSampleLosAngelesTrip"));
 assert.ok(app.includes("localStorage.removeItem(key)"));
 assert.equal(STORAGE_KEY, "routemosaic-personalization-state-v3");
 assert.equal(SAVED_DRAFT_KEY, "routemosaic-explicit-draft-v1");
+assert.equal(SAVED_TRIPS_KEY, "routemosaic-local-saved-trips-v1");
 
 console.log("Refresh reset tests passed");
