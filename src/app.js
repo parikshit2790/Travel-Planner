@@ -303,7 +303,7 @@ function render() {
   document.querySelector("#app").innerHTML = `
     <div class="app-shell">
       <aside class="side">
-        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        ${Brand()}
         <button class="saved-trips-button" data-action="toggleSavedTrips">Saved Trips</button>
         <nav class="steps">${steps.map((step, index) => stepNavButton(step, index + 1)).join("")}</nav>
         ${SidebarScenicIllustration()}
@@ -340,6 +340,14 @@ function isStaticInfoRoute() {
   return ["/privacy", "/terms", "/travel-disclaimer", "/contact", "/saved-trips"].includes(window.location.pathname);
 }
 
+function BrandIcon() {
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=45" alt="" /></span>`;
+}
+
+function Brand() {
+  return `<div class="brand">${BrandIcon()}<div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>`;
+}
+
 function renderStaticInfoPage() {
   document.title = {
     "/privacy": "Privacy Policy | RouteMosaic",
@@ -350,7 +358,7 @@ function renderStaticInfoPage() {
   }[window.location.pathname] || "RouteMosaic";
   document.querySelector("#app").innerHTML = `
     <main class="static-page">
-      <a class="static-brand" href="/" data-link-home><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>RouteMosaic</strong></a>
+      <a class="static-brand" href="/" data-link-home>${BrandIcon()}<strong>RouteMosaic</strong></a>
       ${staticPageContent(window.location.pathname)}
       ${globalFooter()}
     </main>`;
@@ -417,7 +425,7 @@ function renderUnsupportedPlan() {
   document.querySelector("#app").innerHTML = `
     <div class="app-shell plan-shell">
       <aside class="side">
-        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        ${Brand()}
         <button class="saved-trips-button" data-action="toggleSavedTrips">Saved Trips</button>
         <nav class="steps">${steps.map((step, index) => stepNavButton(step, index + 1)).join("")}</nav>
         ${SidebarScenicIllustration()}
@@ -444,7 +452,7 @@ function renderTripPlan() {
   document.querySelector("#app").innerHTML = `
     <div class="app-shell plan-shell">
       <aside class="side">
-        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        ${Brand()}
         <nav class="steps plan-side-nav">
           ${["Overview", "Itinerary", "Food", "Route", "Budget", "Advisories"].map((label) => `<button class="${ui.planSection === normalizePlanSection(label) ? "active" : ""}" data-action="planSection:${normalizePlanSection(label)}"><span>${planSectionIcon(label)}</span><strong>${esc(label)}</strong><small class="step-subtitle">${planSectionSubtitle(label)}</small></button>`).join("")}
         </nav>

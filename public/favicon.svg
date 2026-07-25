@@ -1,6 +1,35 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M22 19.2727C22 20.779 20.779 22 19.2727 22H14.7273C13.221 22 12 20.779 12 19.2727V12H19.2727C20.779 12 22 13.221 22 14.7273V19.2727Z" fill="#68C4FF"/>
-<path d="M20 2C21.1046 2 22 2.89543 22 4V7C22 8.10457 21.1046 9 20 9H17C15.8954 9 15 8.10457 15 7V4C15 2.89543 15.8954 2 17 2H20Z" fill="#0C79D8"/>
-<path d="M7 15C8.10457 15 9 15.8954 9 17V20C9 21.1046 8.10457 22 7 22H4C2.89543 22 2 21.1046 2 20V17C2 15.8954 2.89543 15 4 15H7Z" fill="#0C79D8"/>
-<path d="M12 12H4.72727C3.22104 12 2 10.779 2 9.27273V4.72727C2 3.22104 3.22104 2 4.72727 2H9.27273C10.779 2 12 3.22104 12 4.72727V12Z" fill="#2E9EFF"/>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>RouteMosaic travel route planner icon</title>
+  <defs>
+    <linearGradient id="tile" x1="74" y1="44" x2="438" y2="468" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A3B63"/>
+      <stop offset="0.58" stop-color="#062643"/>
+      <stop offset="1" stop-color="#041D34"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="139" y1="89" x2="384" y2="427" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#126B9F"/>
+      <stop offset="0.55" stop-color="#07446E"/>
+      <stop offset="1" stop-color="#052844"/>
+    </linearGradient>
+    <linearGradient id="water" x1="160" y1="292" x2="356" y2="403" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#83E2D7"/>
+      <stop offset="1" stop-color="#16A9CE"/>
+    </linearGradient>
+    <linearGradient id="route" x1="177" y1="310" x2="367" y2="253" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB23D"/>
+      <stop offset="1" stop-color="#FF6B00"/>
+    </linearGradient>
+    <filter id="shadow" x="58" y="38" width="396" height="424" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#02192D" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#tile)"/>
+  <path d="M390 222C390 321 282 407 256 427C230 407 122 321 122 222C122 143 181 84 256 84C331 84 390 143 390 222Z" fill="url(#pin)" filter="url(#shadow)"/>
+  <path d="M161 270L218 210L266 260L294 228L357 294V350H161V270Z" fill="#F9FBFF"/>
+  <path d="M161 294L216 237L258 281L292 247L357 316V350H161V294Z" fill="url(#water)"/>
+  <path d="M146 342C206 295 255 280 326 275" stroke="#F8FCFF" stroke-width="31" stroke-linecap="round"/>
+  <path d="M172 345C214 309 259 292 337 286" stroke="url(#route)" stroke-width="18" stroke-linecap="round" stroke-dasharray="34 22"/>
+  <circle cx="321" cy="177" r="48" fill="#FFF7DD"/>
+  <circle cx="321" cy="177" r="32" fill="#FF8A00"/>
+  <circle cx="363" cy="283" r="20" fill="#FF6B00" stroke="#FFF8E8" stroke-width="10"/>
 </svg>
