@@ -5,8 +5,8 @@ import {
   getTripIssues,
   travelerTotal,
   uid
-} from "./domain.js?v=47";
-import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=47";
+} from "./domain.js?v=49";
+import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=49";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 
@@ -232,11 +232,13 @@ export function scoreCandidates(profile, input, constraints) {
 
 export function buildDays(profile, input, constraints, scored) {
   const scheduled = new Set();
-  const themes = rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
+  const themes = destinationDayThemes(profile, input);
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const date = addDays(input.startDate, index);
     const themeRegions = themes[index % themes.length];
-    const candidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200);
+    const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200);
+    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200);
+    const candidates = [...themeCandidates, ...fillCandidates.slice(0, Math.max(0, input.maxActivities - themeCandidates.length))];
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const activityCount = fullDay && input.maxActivities <= 2 ? 1 : Math.min(input.maxActivities, fullDay ? 1 : candidates.length);
     const selected = (fullDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount);
@@ -265,6 +267,27 @@ export function buildDays(profile, input, constraints, scored) {
       locked: false,
       generationReasoningSummary: `Grouped ${themeRegions.map((id) => regionName(profile, id)).join(" + ")} stops for route efficiency and selected activities that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`
     };
+  });
+}
+
+function destinationDayThemes(profile, input) {
+  if (profile.id === "detroit") {
+    return rotate([
+      ["downtown", "santa-monica"],
+      ["griffith-park", "los-feliz", "hollywood"],
+      ["museum-row", "beverly-hills", "brentwood", "westwood"],
+      ["arts-district", "little-tokyo", "south-bay"],
+      ["venice", "santa-monica", "malibu"],
+      ["weho", "downtown"],
+      ["pasadena"]
+    ], input.variationSeed).slice(0, input.numberOfDays);
+  }
+  const profileRegions = profile.regions.map((region) => region.id);
+  const hasDefaultThemes = dayThemes.flat().some((regionId) => profileRegions.includes(regionId));
+  if (profile.id === "los-angeles" || hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
+  return Array.from({ length: input.numberOfDays }, (_, index) => {
+    const anchor = profile.regions[(index + input.variationSeed) % profile.regions.length] || profile.regions[0];
+    return [anchor.id, ...(anchor.neighboringRegionIds || [])].filter((regionId) => profileRegions.includes(regionId)).slice(0, input.pace === "Packed" ? 3 : 2);
   });
 }
 
@@ -329,6 +352,15 @@ function activityItem(place, start, constraints, index) {
     weatherDependency: place.weatherDependency,
     indoorOutdoor: place.indoorOutdoor,
     reservationRecommended: place.reservationRecommended,
+    sourceMetadata: place.sourceMetadata || {
+      provider: "unknown",
+      providerPlaceId: place.id,
+      retrievedName: place.name,
+      retrievedAt: "",
+      sourceUrl: "",
+      dataConfidence: "unknown",
+      dataFreshness: "unknown"
+    },
     mustDo: false,
     locked: false,
     source: "curated-local-data",

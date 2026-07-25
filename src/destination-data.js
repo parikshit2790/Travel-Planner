@@ -1,3 +1,5 @@
+const generatedDestinationProfiles = [];
+
 export const destinationProfiles = [
   {
     id: "los-angeles",
@@ -99,6 +101,92 @@ export const destinationProfiles = [
       route("griffith-hollywood-link", "Griffith Park and Hollywood link", "griffith-park", "hollywood", 18, 5, ["viewpoint", "film"], "afternoon", "Use for a scenery plus Hollywood day."),
       route("downtown-arts-link", "Downtown, Little Tokyo, and Arts District link", "downtown", "arts-district", 12, 3, ["culture", "food"], "afternoon", "Works best as one compact cultural day.")
     ]
+  },
+  {
+    id: "detroit",
+    canonicalName: "Detroit, Michigan, USA",
+    aliases: ["detroit", "detroit mi", "detroit michigan", "detroit michigan united states", "motor city"],
+    country: "United States",
+    state: "Michigan",
+    timezone: "America/Detroit",
+    currency: "USD",
+    summary: "A Great Lakes city best planned by district: riverfront and Belle Isle scenery, Midtown museums and Motown history, Eastern Market food, Corktown architecture, and a strong Dearborn day for The Henry Ford.",
+    seasonalNotes: [
+      "August is usually warm and good for riverfront, Belle Isle, and outdoor markets; keep indoor museum backups for storms or heat.",
+      "Check Tigers, Lions, concerts, and downtown events because they can change parking and traffic patterns.",
+      "Belle Isle and riverfront plans are strongest in daylight and around sunset, with weather flexibility."
+    ],
+    generalAdvisories: [
+      "Detroit attraction hours, timed tickets, event schedules, parking rules, and bridge/tunnel traffic should be verified before travel.",
+      "The Henry Ford and Greenfield Village can consume most of a day; do not overload that day.",
+      "Some neighborhoods are best navigated by car or rideshare; keep evening routes simple and confirm parking."
+    ],
+    planningRules: {
+      defaultHotelRegion: "downtown",
+      maxRegionChangesRelaxed: 1,
+      maxRegionChangesBalanced: 2,
+      maxRegionChangesPacked: 3
+    },
+    regions: [
+      region("santa-monica", "Detroit Riverfront", "RiverWalk, Hart Plaza, Cullen Plaza, skyline views, casual food, and sunset-friendly walks.", 42.3298, -83.0396, ["riverfront", "walkable", "sunset", "views"], ["downtown", "venice", "malibu"]),
+      region("venice", "Belle Isle", "Island park with conservatory, aquarium, skyline viewpoints, beach areas, and scenic drives.", 42.343, -82.9743, ["park", "waterfront", "nature", "scenic-drive"], ["santa-monica", "griffith-park"]),
+      region("malibu", "Grosse Pointe and lakefront drive", "A lower-key lakefront scenic extension for architecture, parks, and calmer Great Lakes views.", 42.3861, -82.9119, ["lakefront", "scenic-drive", "architecture"], ["venice", "santa-monica"]),
+      region("hollywood", "Midtown and New Center", "Detroit Institute of Arts, Motown Museum, Fisher Building, Wayne State area, and culture-heavy planning.", 42.3589, -83.0668, ["museum", "music", "architecture", "culture"], ["griffith-park", "los-feliz", "museum-row"]),
+      region("griffith-park", "Cultural Center", "DIA, Detroit Historical Museum, public library, science center, and walkable museum clustering.", 42.3594, -83.0633, ["museums", "indoor", "history"], ["hollywood", "museum-row"]),
+      region("los-feliz", "New Center and Boston-Edison", "Motown, Fisher Building, historic homes, cafes, and lower-key evening positioning.", 42.3694, -83.0769, ["music", "architecture", "historic"], ["hollywood", "griffith-park"]),
+      region("downtown", "Downtown Detroit", "Campus Martius, Guardian Building, Capitol Park, theatres, stadiums, and riverfront access.", 42.3314, -83.0458, ["architecture", "landmark", "food", "evening"], ["santa-monica", "arts-district", "little-tokyo"]),
+      region("arts-district", "Eastern Market", "Murals, market sheds, food vendors, cafes, and a strong Saturday morning anchor.", 42.3487, -83.0414, ["market", "food", "murals", "local-culture"], ["downtown", "little-tokyo"]),
+      region("little-tokyo", "Corktown and Michigan Central", "Historic streets, Michigan Central, restaurants, coffee, Roosevelt Park, and old Detroit character.", 42.3317, -83.077, ["historic", "food", "architecture"], ["downtown", "arts-district"]),
+      region("museum-row", "Dearborn and The Henry Ford", "The Henry Ford Museum, Greenfield Village, Ford Rouge Factory Tour, and Arab American dining.", 42.3033, -83.2341, ["museum", "history", "full-day", "family"], ["brentwood", "beverly-hills"]),
+      region("beverly-hills", "Ford campus and Greenfield Village", "Large-scale museum campus planning with historic buildings, exhibits, and ticketed experiences.", 42.303, -83.229, ["museum", "history", "low-walking"], ["museum-row", "westwood"]),
+      region("weho", "Downtown evening district", "Theatre District, Capitol Park, Greektown, jazz, dessert, and drinks-optional evening routes.", 42.335, -83.047, ["evening", "food", "live-music", "nightlife"], ["downtown", "santa-monica"]),
+      region("brentwood", "Dearborn food corridor", "Middle Eastern restaurants, bakeries, cafes, and dinner positioning around Dearborn.", 42.3223, -83.1763, ["food", "cafes", "local-neighborhood"], ["museum-row", "westwood"]),
+      region("westwood", "Arab American National Museum area", "Cultural museum, Dearborn downtown, bakeries, and neighborhood dining.", 42.322, -83.1765, ["culture", "museum", "food"], ["brentwood", "museum-row"]),
+      region("pasadena", "Detroit suburbs day trip", "Cranbrook, Royal Oak, Ferndale, or outer-area day planning when the trip has more time.", 42.489, -83.145, ["gardens", "architecture", "shopping"], ["hollywood", "downtown"]),
+      region("universal-city", "Major event or full-day anchor", "Sports, concerts, a full museum campus day, or a ticketed experience that should not be overpacked.", 42.34, -83.055, ["event", "family", "full-day"], ["downtown", "hollywood"]),
+      region("south-bay", "Southwest Detroit", "Mexicantown, murals, local food, and a compact cultural food-focused extension.", 42.3202, -83.0938, ["food", "culture", "local-neighborhood"], ["little-tokyo", "downtown"])
+    ],
+    places: [
+      place("detroit-riverwalk", "Detroit RiverWalk", "santa-monica", "Follow the riverfront path for skyline views, public art, Cullen Plaza, and an easy first orientation to the city.", ["riverfront", "walk", "viewpoint"], ["Evening walks", "Photography", "Sunset", "Easy outdoor walks"], 90, 0, 0, "outdoor", "high", "good", ["solo", "couple", "family", "senior"], "afternoon", 94),
+      place("hart-plaza-guardian", "Hart Plaza and Guardian Building", "downtown", "Pair the riverfront civic plaza with the Guardian Building's Art Deco lobby and downtown architecture.", ["architecture", "landmark", "history"], ["Architecture", "History", "Photography", "Famous landmarks"], 85, 0, 0, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "morning", 88),
+      place("campus-martius", "Campus Martius and Capitol Park", "downtown", "Use the central square and nearby streets for coffee, people-watching, and a compact downtown food break.", ["walk", "food", "downtown"], ["Local culture", "Cafes", "Casual dining"], 60, 0, 25, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 72),
+      place("dia", "Detroit Institute of Arts", "griffith-park", "A major art anchor with the Detroit Industry Murals and enough depth for a meaningful museum block.", ["museum", "art", "indoor"], ["Art", "Museums", "History"], 150, 10, 25, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 96),
+      place("detroit-historical", "Detroit Historical Museum", "griffith-park", "A practical companion to DIA for city history, neighborhood context, and indoor backup value.", ["museum", "history", "indoor"], ["Museums", "History", "Local culture"], 90, 0, 15, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 82),
+      place("motown-museum", "Motown Museum", "los-feliz", "A music-history must-do at Hitsville U.S.A.; timed-entry planning matters and it pairs well with Midtown/New Center.", ["music", "museum", "history"], ["Music", "Museums", "Local culture"], 90, 15, 30, "indoor", "low", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 92),
+      place("fisher-building", "Fisher Building", "los-feliz", "A dramatic Art Deco stop in New Center for architecture, photos, and a lower-walking culture break.", ["architecture", "landmark", "indoor"], ["Architecture", "Photography", "History"], 45, 0, 15, "indoor", "low", "good", ["solo", "couple", "senior"], "morning", 76),
+      place("belle-isle-conservatory", "Belle Isle Aquarium and Conservatory area", "venice", "Use Belle Isle's aquarium, conservatory, gardens, and skyline pull-offs as a scenic, flexible park day.", ["park", "aquarium", "garden"], ["Nature", "Gardens", "Family activities", "Photography"], 150, 0, 20, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 90),
+      place("belle-isle-sunset", "Belle Isle sunset viewpoint", "venice", "A low-cost scenic stop for Detroit skyline photos and relaxed Great Lakes evening energy.", ["viewpoint", "sunset", "scenic-drive"], ["Sunset", "Photography", "Scenic drives"], 60, 0, 0, "outdoor", "high", "moderate", ["solo", "couple", "family", "senior"], "evening", 78),
+      place("grosse-pointe-lakefront", "Grosse Pointe lakefront architecture drive", "malibu", "A calm lakefront extension for residential architecture, park edges, and a slower scenic drive after Belle Isle.", ["scenic-drive", "architecture", "lakefront"], ["Scenic drives", "Architecture", "Photography", "Relaxation"], 80, 0, 15, "outdoor", "medium", "moderate", ["solo", "couple", "senior"], "afternoon", 70),
+      place("eastern-market", "Eastern Market", "arts-district", "Plan market sheds, murals, local food, and coffee here; Saturday morning is the strongest version if dates align.", ["market", "food", "murals"], ["Local markets", "Street food", "Local culture", "Photography"], 120, 0, 35, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 88),
+      place("dequindre-cut", "Dequindre Cut Greenway", "arts-district", "A mural-lined greenway connecting Eastern Market toward the riverfront; good for a short walk or bike-style break.", ["walk", "murals", "greenway"], ["Evening walks", "Photography", "Outdoor Activities"], 50, 0, 0, "outdoor", "high", "good", ["solo", "couple", "family", "senior"], "afternoon", 74),
+      place("corktown-michigan-central", "Corktown and Michigan Central Station area", "little-tokyo", "Historic Corktown streets, Roosevelt Park, Michigan Central exterior, coffee, and dinner options in one compact district.", ["historic", "architecture", "food"], ["Architecture", "Local culture", "Cafes", "Photography"], 100, 0, 30, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "afternoon", 84),
+      place("mexicantown", "Mexicantown and Southwest Detroit", "south-bay", "A food-forward cultural district for murals, bakeries, tacos, and a relaxed local meal.", ["food", "culture", "local-neighborhood"], ["Mexican", "Bakeries", "Local culture", "Casual dining"], 90, 10, 35, "mixed", "low", "moderate", ["solo", "couple", "family"], "lunch", 80),
+      place("the-henry-ford", "The Henry Ford Museum of American Innovation", "museum-row", "A full, followable museum anchor for cars, aviation, civil-rights history, design, and American innovation.", ["museum", "history", "full-day"], ["Museums", "History", "Family activities", "Architecture"], 240, 25, 40, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 98),
+      place("greenfield-village", "Greenfield Village", "beverly-hills", "Historic village campus adjacent to The Henry Ford; best when the group wants a longer Dearborn day.", ["history", "outdoor", "full-day"], ["History", "Outdoor Activities", "Family activities"], 180, 25, 40, "outdoor", "high", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 86),
+      place("arab-american-museum", "Arab American National Museum", "westwood", "A meaningful Dearborn cultural stop that pairs naturally with Middle Eastern lunch or dinner.", ["museum", "culture", "indoor"], ["Museums", "Middle Eastern", "Local culture"], 90, 8, 15, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 76),
+      place("dearborn-food", "Dearborn Middle Eastern food and bakery stop", "brentwood", "Build in time for Lebanese, Yemeni, Iraqi, or bakery-style food; confirm dietary needs directly.", ["food", "bakery", "local-neighborhood"], ["Middle Eastern", "Bakeries", "Desserts", "Casual dining"], 75, 12, 35, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "dinner", 86),
+      place("fox-theatre-district", "Fox Theatre and downtown entertainment district", "weho", "A good evening zone for a show, music, dessert, or drinks-optional downtown walk.", ["evening", "architecture", "live-music"], ["Live music", "Entertainment", "Architecture", "Dessert or cafe evenings"], 105, 10, 70, "mixed", "low", "good", ["solo", "couple", "family"], "evening", 78),
+      place("greektown-evening", "Greektown evening area", "weho", "Dinner, dessert, and lively streets near downtown; use rideshare if drinking or after late events.", ["evening", "food", "nightlife"], ["Nightlife", "Bars", "Casual dining", "Desserts"], 90, 15, 55, "mixed", "low", "good", ["solo", "couple"], "evening", 70),
+      place("cranbrook", "Cranbrook Art Museum and gardens", "pasadena", "An outer-area architecture, art, and garden day when the trip has enough time for a suburb excursion.", ["museum", "garden", "architecture"], ["Art", "Gardens", "Architecture", "Photography"], 180, 10, 30, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 74),
+      place("sports-event-anchor", "Detroit sports or concert night", "universal-city", "Leave room for a Tigers, Lions, Red Wings, Pistons, concert, or theatre event if one matches your dates.", ["event", "entertainment", "full-day"], ["Entertainment", "Sports", "Live music"], 180, 30, 120, "mixed", "low", "good", ["solo", "couple", "family"], "evening", 68),
+      place("indoor-midtown-backup", "Midtown indoor backup cluster", "griffith-park", "Use DIA, Detroit Historical Museum, the science center area, or nearby indoor culture if weather turns.", ["museum", "backup", "indoor"], ["Museums", "Family activities", "Art"], 120, 0, 35, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 72)
+    ],
+    foodAreas: [
+      foodArea("downtown-detroit-food", "Downtown Detroit casual dining", "downtown", ["American", "Italian", "Mexican", "Vegetarian-friendly", "Cafes"], ["breakfast", "lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Avoid beef", "Gluten-free"], ["quiet", "lively"]),
+      foodArea("eastern-market-food", "Eastern Market food halls and vendors", "arts-district", ["Local cuisine", "Street food", "American", "Mexican", "Bakeries"], ["breakfast", "lunch"], ["budget", "moderate"], ["Vegetarian", "Avoid pork", "Avoid beef"], ["lively"]),
+      foodArea("corktown-food", "Corktown restaurants and coffee", "little-tokyo", ["American", "Mexican", "Cafes", "Casual dining"], ["lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Gluten-free"], ["quiet"]),
+      foodArea("midtown-food", "Midtown museum-day dining", "hollywood", ["American", "Mediterranean", "Cafes", "Vegetarian-friendly"], ["breakfast", "lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Vegan", "Dairy-free"], ["quiet"]),
+      foodArea("dearborn-food-area", "Dearborn Middle Eastern dining", "brentwood", ["Middle Eastern", "Bakeries", "Desserts", "Casual dining"], ["lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Halal", "Avoid pork"], ["quiet"]),
+      foodArea("riverfront-food", "Riverfront and downtown evening dining", "santa-monica", ["American", "Seafood", "Italian", "Desserts", "Cafes"], ["lunch", "dinner"], ["moderate"], ["Vegetarian", "Limited seafood"], ["sunset", "quiet"]),
+      foodArea("greektown-food", "Greektown and theatre district dining", "weho", ["Mediterranean", "American", "Desserts", "Bars"], ["dinner"], ["moderate", "premium"], ["Vegetarian", "Gluten-free"], ["nightlife", "live-music"])
+    ],
+    scenicRoutes: [
+      route("riverfront-belle-isle", "Detroit Riverfront to Belle Isle", "santa-monica", "venice", 15, 5, ["riverfront", "park", "scenic-drive"], "afternoon", "A natural scenic pairing; confirm Belle Isle access, parking, and event closures."),
+      route("downtown-midtown", "Downtown to Midtown cultural center", "downtown", "griffith-park", 12, 3, ["museum", "architecture"], "morning", "Good same-day pairing when museum hours align."),
+      route("midtown-new-center", "Midtown to New Center and Motown", "griffith-park", "los-feliz", 10, 3, ["music", "history"], "afternoon", "Keep timed Motown entry buffered."),
+      route("downtown-eastern-corktown", "Downtown, Eastern Market, and Corktown loop", "downtown", "little-tokyo", 14, 4, ["market", "food", "historic"], "afternoon", "Works well as a compact local-culture day."),
+      route("detroit-dearborn", "Detroit to Dearborn museum day", "downtown", "museum-row", 25, 12, ["museum", "history", "food"], "morning", "Leave early and avoid overpacking The Henry Ford day.")
+    ]
   }
 ];
 
@@ -131,7 +219,16 @@ function place(id, name, regionId, shortDescription, categories, tags, duration,
     conflictTags: accessibility === "limited" ? ["minimal-walking"] : [],
     priorityScore,
     coordinates: null,
-    backupForTags: indoorOutdoor === "indoor" ? ["weather", "heat", "rain"] : accessibility === "good" ? ["low-walking"] : []
+    backupForTags: indoorOutdoor === "indoor" ? ["weather", "heat", "rain"] : accessibility === "good" ? ["low-walking"] : [],
+    sourceMetadata: {
+      provider: "curated",
+      providerPlaceId: id,
+      retrievedName: name,
+      retrievedAt: "curated",
+      sourceUrl: "",
+      dataConfidence: "high",
+      dataFreshness: "curated"
+    }
   };
 }
 
@@ -145,11 +242,122 @@ function route(id, name, originRegionId, destinationRegionId, estimatedDriveMinu
 
 export function resolveDestinationProfile(destination) {
   const normalized = String(destination || "").toLowerCase().replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim();
-  return destinationProfiles.find((profile) => profile.aliases.some((alias) => normalized === alias.replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim()) || normalized.includes(profile.aliases[0])) || createGenericDestinationProfile(destination);
+  return [...generatedDestinationProfiles, ...destinationProfiles].find((profile) => profile.aliases.some((alias) => normalized === alias.replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim()) || normalized.includes(profile.aliases[0])) || createGenericDestinationProfile(destination);
 }
 
 export function getDestinationProfile(id) {
-  return destinationProfiles.find((profile) => profile.id === id) || null;
+  return [...generatedDestinationProfiles, ...destinationProfiles].find((profile) => profile.id === id) || null;
+}
+
+export function registerGeneratedDestinationProfile(profile) {
+  const normalized = normalizeGeneratedDestinationProfile(profile);
+  if (!normalized) return null;
+  const existingIndex = generatedDestinationProfiles.findIndex((item) => item.id === normalized.id);
+  if (existingIndex >= 0) generatedDestinationProfiles.splice(existingIndex, 1, normalized);
+  else generatedDestinationProfiles.unshift(normalized);
+  return normalized;
+}
+
+function normalizeGeneratedDestinationProfile(profile) {
+  if (!profile || typeof profile !== "object") return null;
+  const canonicalName = String(profile.canonicalName || "").trim();
+  if (!canonicalName) return null;
+  const id = String(profile.id || `generated-${canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`).slice(0, 72);
+  const aliases = Array.isArray(profile.aliases) && profile.aliases.length ? profile.aliases : [canonicalName.toLowerCase()];
+  const regions = Array.isArray(profile.regions) ? profile.regions.filter((item) => item?.id && item?.name).slice(0, 18) : [];
+  const places = Array.isArray(profile.places) ? profile.places.filter((item) => item?.id && item?.name && item?.regionId).slice(0, 42) : [];
+  const foodAreas = Array.isArray(profile.foodAreas) ? profile.foodAreas.filter((item) => item?.id && item?.name && item?.regionId).slice(0, 14) : [];
+  const scenicRoutes = Array.isArray(profile.scenicRoutes) ? profile.scenicRoutes.filter((item) => item?.id && item?.originRegionId && item?.destinationRegionId).slice(0, 14) : [];
+  if (regions.length < 4 || places.length < 8 || foodAreas.length < 3) return null;
+  return {
+    id,
+    canonicalName,
+    aliases,
+    country: String(profile.country || ""),
+    state: String(profile.state || ""),
+    timezone: String(profile.timezone || ""),
+    currency: String(profile.currency || "USD"),
+    summary: String(profile.summary || `${canonicalName} generated destination profile.`),
+    seasonalNotes: arrayOfStrings(profile.seasonalNotes, 4),
+    generalAdvisories: arrayOfStrings(profile.generalAdvisories, 5),
+    planningRules: {
+      defaultHotelRegion: String(profile.planningRules?.defaultHotelRegion || regions[0].id),
+      maxRegionChangesRelaxed: 1,
+      maxRegionChangesBalanced: 2,
+      maxRegionChangesPacked: 3
+    },
+    regions: regions.map((item) => ({
+      id: String(item.id),
+      name: String(item.name),
+      summary: String(item.summary || ""),
+      centerCoordinates: item.centerCoordinates || { lat: 0, lng: 0 },
+      tags: arrayOfStrings(item.tags, 8),
+      neighboringRegionIds: arrayOfStrings(item.neighboringRegionIds, 8),
+      typicalTravelMinutesToRegions: item.typicalTravelMinutesToRegions || {}
+    })),
+    places: places.map((item) => ({
+      id: String(item.id),
+      name: String(item.name),
+      regionId: String(item.regionId),
+      shortDescription: String(item.shortDescription || ""),
+      categories: arrayOfStrings(item.categories, 8),
+      tags: arrayOfStrings(item.tags, 10),
+      suitableFor: arrayOfStrings(item.suitableFor, 6).length ? arrayOfStrings(item.suitableFor, 6) : ["solo", "couple", "family", "senior"],
+      typicalDurationMinutes: Number(item.typicalDurationMinutes || 90),
+      minimumDurationMinutes: Number(item.minimumDurationMinutes || 45),
+      maximumDurationMinutes: Number(item.maximumDurationMinutes || 150),
+      estimatedCostLow: Number(item.estimatedCostLow || 0),
+      estimatedCostHigh: Number(item.estimatedCostHigh || 35),
+      indoorOutdoor: String(item.indoorOutdoor || "mixed"),
+      weatherDependency: String(item.weatherDependency || "medium"),
+      accessibility: String(item.accessibility || "moderate"),
+      dietaryRelevance: arrayOfStrings(item.dietaryRelevance, 6),
+      openingTimeGuidance: String(item.openingTimeGuidance || "Confirm current hours before travel."),
+      bestTimeOfDay: String(item.bestTimeOfDay || "afternoon"),
+      reservationRecommended: Boolean(item.reservationRecommended),
+      seasonalNotes: arrayOfStrings(item.seasonalNotes, 4),
+      conflictTags: arrayOfStrings(item.conflictTags, 6),
+      priorityScore: Number(item.priorityScore || 70),
+      coordinates: item.coordinates || null,
+      backupForTags: arrayOfStrings(item.backupForTags, 8)
+      ,
+      sourceMetadata: item.sourceMetadata || {
+        provider: "generated-provider",
+        providerPlaceId: String(item.id),
+        retrievedName: String(item.name),
+        retrievedAt: new Date().toISOString(),
+        sourceUrl: "",
+        dataConfidence: "medium",
+        dataFreshness: "retrieved"
+      }
+    })),
+    foodAreas: foodAreas.map((item) => ({
+      id: String(item.id),
+      name: String(item.name),
+      regionId: String(item.regionId),
+      cuisines: arrayOfStrings(item.cuisines, 10),
+      mealTypes: arrayOfStrings(item.mealTypes, 5),
+      budgetLevels: arrayOfStrings(item.budgetLevels, 5),
+      dietarySupport: arrayOfStrings(item.dietarySupport, 10),
+      eveningSuitability: arrayOfStrings(item.eveningSuitability, 6),
+      shortDescription: String(item.shortDescription || "")
+    })),
+    scenicRoutes: scenicRoutes.map((item) => ({
+      id: String(item.id),
+      name: String(item.name),
+      originRegionId: String(item.originRegionId),
+      destinationRegionId: String(item.destinationRegionId),
+      estimatedDriveMinutes: Number(item.estimatedDriveMinutes || 20),
+      estimatedDistanceMiles: Number(item.estimatedDistanceMiles || 8),
+      tags: arrayOfStrings(item.tags, 8),
+      bestTimeOfDay: String(item.bestTimeOfDay || "afternoon"),
+      notes: String(item.notes || "Confirm current conditions before departure.")
+    }))
+  };
+}
+
+function arrayOfStrings(value, limit) {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean).slice(0, limit) : [];
 }
 
 export function createGenericDestinationProfile(destination) {

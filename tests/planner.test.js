@@ -99,6 +99,24 @@ assert.ok(!JSON.stringify(genericDestination).includes("Your Los Angeles trip is
 const genericAlternative = compatibleAlternatives(genericDestination.plan, genericDestination.plan.days[0].scheduleItems.find((item) => item.type === "activity").id);
 assert.ok(genericAlternative.length > 0);
 
+const detroit = generateTripPlan(fixture({ destination: "Detroit, Michigan, United States" }));
+assert.equal(detroit.status, "ready");
+assert.equal(detroit.plan.generationMetadata.destinationProfileId, "detroit");
+assert.equal(detroit.plan.generationMetadata.usesGenericDestinationProfile, false);
+const detroitText = JSON.stringify(detroit.plan);
+[
+  "Detroit Institute of Arts",
+  "Motown Museum",
+  "Detroit RiverWalk",
+  "Belle Isle",
+  "Eastern Market",
+  "The Henry Ford"
+].forEach((expected) => assert.ok(detroitText.includes(expected), `Detroit plan should include ${expected}`));
+assert.ok(detroit.plan.foodPlan.foodAreas.some((area) => area.name.includes("Dearborn")));
+assert.ok(detroit.plan.routeSummary.routeLogicExplanation.includes("Detroit, Michigan, USA"));
+assert.ok(detroit.plan.days.every((day) => day.scheduleItems.filter((item) => item.type === "activity").length >= 2));
+assert.ok(!detroitText.includes("Detailed local planning data is currently available for Los Angeles"));
+
 let editable = structuredClone(fiveDay.plan);
 const firstActivity = editable.days[0].scheduleItems.find((item) => item.type === "activity");
 const alternatives = compatibleAlternatives(editable, firstActivity.id);

@@ -1,4 +1,4 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=47";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=49";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -33,8 +33,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=47";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=47";
+} from "./domain.js?v=49";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=49";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -48,7 +48,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=47";
+} from "./planner.js?v=49";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=49";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -342,7 +343,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=47" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=49" alt="" /></span>`;
 }
 
 function Brand() {
@@ -2020,6 +2021,10 @@ function bind() {
   });
   document.querySelectorAll("[data-action]").forEach((el) => el.addEventListener("click", (event) => {
     if ((el.matches(".restriction-layer") || el.matches(".location-layer")) && event.target !== el) return;
+    if (el.dataset.action === "buildTripPlan" || el.dataset.action === "regeneratePlan") {
+      buildTripPlanAction(el.dataset.action);
+      return;
+    }
     action(el.dataset.action);
   }));
   document.querySelectorAll("[data-segment]").forEach((el) => el.addEventListener("keydown", (event) => {
@@ -2514,6 +2519,72 @@ function setPath(root, path, value) {
   target[last] = typeof target[last] === "number" ? Number(value) : value === "true" ? true : value === "false" ? false : value;
 }
 
+async function buildTripPlanAction(name) {
+  if (blockingValidationIssues().length) {
+    ui.showWarnings = true;
+    ui.toast = "Resolve blocking issues before building your trip.";
+    persist("Updated");
+    return;
+  }
+  ui.generatingPlan = true;
+  ui.planAnnouncement = "Building destination intelligence, grouping nearby experiences, applying traveler needs, and scheduling your days.";
+  ui.toast = "Building your trip plan...";
+  render();
+  try {
+    if (name !== "regeneratePlan") await ensureDestinationIntelligence();
+    const result = name === "regeneratePlan" && state.plan
+      ? { status: "ready", plan: regeneratePlanPreservingLocks(state.plan) }
+      : generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
+    if (result.status === "ready") {
+      state.plan = result.plan;
+      state.planStatus = "ready";
+      state.planError = null;
+      state.planStale = false;
+      ui.planSection = "overview";
+      ui.planAnnouncement = "Trip plan generated.";
+      ui.toast = result.plan.generationMetadata.usesGenericDestinationProfile
+        ? "Starter trip plan generated. Add an OpenAI API key in Vercel for richer destination intelligence."
+        : "Trip plan generated.";
+      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+    } else {
+      state.planStatus = result.status;
+      state.planError = result;
+      ui.showWarnings = true;
+      ui.toast = result.message || "Trip plan could not be generated yet.";
+    }
+  } catch (error) {
+    state.planStatus = "";
+    state.planError = null;
+    ui.showWarnings = true;
+    ui.toast = error?.message || "Trip plan could not be generated yet.";
+  }
+  ui.generatingPlan = false;
+  persist("Updated");
+}
+
+async function ensureDestinationIntelligence() {
+  const destination = state.trip.destinationDisplay || state.trip.destination || "";
+  const existing = resolveDestinationProfile(destination);
+  if (existing && !existing.id.startsWith("generic-")) return existing;
+  try {
+    const response = await fetch("/api/destination-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trip: state.trip })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      if (error.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Destination planning providers are not configured yet. Add place and route providers in Vercel, then retry.");
+      throw new Error(error.error || "Destination research failed. Please retry.");
+    }
+    const data = await response.json();
+    return registerGeneratedDestinationProfile(data.profile) || existing;
+  } catch (error) {
+    if (existing && !existing.id.startsWith("generic-")) return existing;
+    throw error instanceof Error ? error : new Error("Destination research is unavailable right now. Your trip details are preserved.");
+  }
+}
+
 function action(name) {
   if (name === "loadSampleTrip") {
     const hasMeaningfulData = Boolean(String(state.trip.from || state.trip.destination || state.trip.description || "").trim() || state.trip.preferences.length || state.trip.food.diet.length || state.trip.food.restrictions.length);
@@ -2600,31 +2671,6 @@ function action(name) {
     state.planStatus = "";
     state.planError = null;
     state.activeStep = 6;
-  }
-  if (name === "buildTripPlan" || name === "regeneratePlan") {
-    if (blockingValidationIssues().length) {
-      ui.showWarnings = true;
-      ui.toast = "Resolve blocking issues before building your trip.";
-    } else {
-      ui.generatingPlan = true;
-      ui.planAnnouncement = "Organizing your days, grouping nearby experiences, applying traveler needs, and building your route.";
-      const result = name === "regeneratePlan" && state.plan ? { status: "ready", plan: regeneratePlanPreservingLocks(state.plan) } : generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
-      if (result.status === "ready") {
-        state.plan = result.plan;
-        state.planStatus = "ready";
-        state.planError = null;
-        state.planStale = false;
-        ui.planSection = "overview";
-        ui.planAnnouncement = "Trip plan generated.";
-        requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
-      } else {
-        state.planStatus = result.status;
-        state.planError = result;
-        ui.showWarnings = true;
-        ui.toast = result.status === "unsupported" ? result.message : "Trip plan could not be generated yet.";
-      }
-      ui.generatingPlan = false;
-    }
   }
   if (name.startsWith("jumpToDay:")) {
     ui.planSection = "itinerary";
