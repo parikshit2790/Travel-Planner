@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TravelerProfile {
+  id        String   @id @default(cuid())
+  userId    String?
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  preferences TravelerPreference[]
+}
+
+model Traveler {
+  id       String  @id @default(cuid())
+  tripId   String
+  profileId String?
+  name     String?
+  ageGroup String?
+  gender   String?
+  role     String?
+  notes    String?
+  restrictions TravelerRestriction[]
+}
+
+model PreferenceDefinition {
+  id        String  @id @default(cuid())
+  key       String  @unique
+  category  String
+  label     String
+  valueType String
+  active    Boolean @default(true)
+}
+
+model TravelerPreference {
+  id                String @id @default(cuid())
+  travelerProfileId String
+  travelerProfile   TravelerProfile @relation(fields: [travelerProfileId], references: [id])
+  key               String
+  value             Json
+  importance        String
+  weight            Int
+}
+
+model TripPreference {
+  id         String @id @default(cuid())
+  tripId     String
+  key        String
+  value      Json
+  importance String
+  weight     Int
+  source     String
+}
+
+model TravelerRestriction {
+  id         String @id @default(cuid())
+  travelerId String
+  traveler   Traveler @relation(fields: [travelerId], references: [id])
+  type       String
+  value      String
+  severity   String
+  notes      String?
+}
+
+model PlanningConstraint {
+  id       String  @id @default(cuid())
+  tripId   String
+  type     String
+  value    Json
+  severity String
+  source   String
+  active   Boolean @default(true)
+}
+
+model TripFoodPreference {
+  id         String @id @default(cuid())
+  tripId     String
+  category   String
+  value      String
+  importance String?
+  source     String
+}

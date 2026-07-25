@@ -1,0 +1,9 @@
+{
+  "name": "RouteMosaic",
+  "short_name": "RouteMosaic",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fb",
+  "theme_color": "#102a43",
+  "icons": []
+}

@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const app = readFileSync("src/app.js", "utf8");
+const css = readFileSync("src/styles.css", "utf8");
+const domain = readFileSync("src/domain.js", "utf8");
+
+assert.ok(app.includes("Where should your next trip take you?"));
+assert.ok(app.includes("Add the essential details. RouteMosaic will use them to shape a realistic itinerary."));
+assert.ok(app.includes("Who is going on this trip?"));
+assert.ok(app.includes("Interpret My Trip"));
+assert.ok(app.includes("Apply Selected Preferences"));
+assert.ok(app.includes("Save and Exit"));
+assert.ok(app.includes("Continue"));
+assert.ok(app.includes("Build My Trip"));
+assert.ok(app.includes("Cities or Regions to Include"));
+assert.ok(app.includes("Select a suggestion to verify this location."));
+assert.ok(app.includes("locationField(\"from\""));
+assert.ok(app.includes("locationAutocompleteOverlay()"));
+assert.ok(app.includes("TravelHeaderIllustration()"));
+assert.ok(app.includes("SidebarScenicIllustration()"));
+assert.ok(app.includes("visibleReviewIssues"));
+assert.ok(app.includes("visibleTripBasicsIssues"));
+assert.ok(app.includes("Route time will be calculated during itinerary planning."));
+assert.ok(app.includes("Original Request"));
+assert.ok(app.includes("Interpreted Preferences"));
+assert.ok(app.includes("What does adventure mean to you?"));
+assert.ok(domain.includes("Add Cities or Regions"));
+assert.ok(app.includes("Issues"));
+assert.ok(app.includes("tripDateSummary"));
+assert.ok(app.includes("reconcileTripDates"));
+assert.ok(!app.includes("Website-first milestone"));
+assert.ok(!app.includes("Quick interpret"));
+assert.ok(!app.includes("Interpret description"));
+assert.ok(!app.includes("Apply interpretations"));
+assert.ok(!app.includes('badge("Ready")'));
+assert.ok(!app.includes("Warnings\", issueCount"));
+assert.ok(!app.includes("Generate preview"));
+assert.ok(css.includes(".field-shell"));
+assert.ok(css.includes(".location-results-panel"));
+assert.ok(css.includes(".travel-header-illustration"));
+assert.ok(css.includes(".sidebar-scenic-illustration"));
+assert.ok(css.includes(".derived-summary"));
+assert.ok(css.includes(".toast"));
+
+console.log("Trip basics screen tests passed");
