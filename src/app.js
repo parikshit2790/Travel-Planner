@@ -1,4 +1,4 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=44";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=45";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,

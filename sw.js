@@ -1,5 +1,5 @@
-const CACHE = "routemosaic-public-v44";
-const ASSETS = ["/", "/index.html", "/src/app.js", "/src/domain.js", "/src/seed.js", "/src/location-provider.js", "/src/destination-data.js", "/src/planner.js", "/src/styles.css", "/manifest.webmanifest", "/robots.txt", "/sitemap.xml", "/public/favicon.svg"];
+const CACHE = "routemosaic-public-v45";
+const ASSETS = ["/", "/index.html", "/src/app.js", "/src/domain.js", "/src/seed.js", "/src/location-provider.js", "/src/destination-data.js", "/src/planner.js", "/src/styles.css", "/manifest.webmanifest", "/robots.txt", "/sitemap.xml", "/public/favicon.svg", "/public/favicon.ico", "/public/favicon-16x16.png", "/public/favicon-32x32.png", "/public/apple-touch-icon.png", "/public/icon-192.png", "/public/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));

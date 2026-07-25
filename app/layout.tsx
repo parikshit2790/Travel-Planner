@@ -16,8 +16,13 @@ export const metadata: Metadata = {
   title: "RouteMosaic",
   description: "A personalized travel planning website that builds trips around the people going.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: [
+      { url: "/public/favicon.svg", type: "image/svg+xml" },
+      { url: "/public/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/public/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    shortcut: "/public/favicon.ico",
+    apple: "/public/apple-touch-icon.png",
   },
 };
 
