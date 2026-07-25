@@ -33,6 +33,20 @@ import {
   validateBasics
 } from "./domain.js";
 import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js";
+import {
+  addCustomStop,
+  compatibleAlternatives,
+  generateTripPlan,
+  moveActivity,
+  regenerateDay,
+  regenerateMeals,
+  regeneratePlanPreservingLocks,
+  removeScheduleItem,
+  replaceActivity,
+  toggleDayLock,
+  toggleItemLock,
+  toggleItemMustDo
+} from "./planner.js";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -51,6 +65,12 @@ let ui = {
   foodDraft: null,
   foodSearch: "",
   openLodgingPicker: false,
+  planSection: "overview",
+  planDialog: null,
+  planDialogItemId: "",
+  customStopDraft: null,
+  generatingPlan: false,
+  planAnnouncement: "",
   planningPrinciplesOpen: false,
   planningPrinciplesSuppressHover: false,
   focusPlanningPrinciples: false,
@@ -96,6 +116,10 @@ const stepHeadings = [
 function load() {
   clearTransientWizardStorage();
   const loaded = structuredClone(initialState);
+  loaded.plan = null;
+  loaded.planStatus = "";
+  loaded.planError = null;
+  loaded.planStale = false;
   migrateTripState(loaded.trip);
   reconcileTripStylePreferences(loaded.trip);
   syncTravelersToCounts(loaded.trip);
@@ -208,6 +232,14 @@ function formatShortDateRange(startValue, endValue) {
 }
 
 function render() {
+  if (state.planStatus === "ready" && state.plan) {
+    renderTripPlan();
+    return;
+  }
+  if (state.planStatus === "unsupported" && state.planError) {
+    renderUnsupportedPlan();
+    return;
+  }
   const trip = state.trip;
   const travelerCount = travelerTotal(trip);
   const issueCount = visibleReviewIssues().length;
@@ -243,6 +275,329 @@ function render() {
     ${lodgingOverlay()}`;
   bind();
   positionRestrictionOverlay();
+}
+
+function renderUnsupportedPlan() {
+  const error = state.planError;
+  document.querySelector("#app").innerHTML = `
+    <div class="app-shell plan-shell">
+      <aside class="side">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        <nav class="steps">${steps.map((step, index) => stepNavButton(step, index + 1)).join("")}</nav>
+        ${SidebarScenicIllustration()}
+        ${PlanningPrinciplesFooter()}
+      </aside>
+      <main class="wizard-main trip-plan-main">
+        <section class="unsupported-plan panel">
+          <p class="eyebrow">Destination data unavailable</p>
+          <h1>Detailed planning is not ready for ${esc(error.destination || "this destination")} yet.</h1>
+          <p>${esc(error.message)}</p>
+          <div class="unsupported-actions">
+            <button class="primary" data-action="editUnsupportedDestination">Edit Destination</button>
+            <button data-action="returnToReview">Return to Review</button>
+          </div>
+          <div class="callout"><strong>Your wizard answers are preserved.</strong><p>RouteMosaic did not substitute Los Angeles or fabricate destination-specific stops.</p></div>
+        </section>
+      </main>
+    </div>`;
+  bind();
+}
+
+function renderTripPlan() {
+  const plan = state.plan;
+  document.querySelector("#app").innerHTML = `
+    <div class="app-shell plan-shell">
+      <aside class="side">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>
+        <nav class="steps plan-side-nav">
+          ${["Overview", "Itinerary", "Food", "Route", "Budget", "Advisories"].map((label) => `<button class="${ui.planSection === normalizePlanSection(label) ? "active" : ""}" data-action="planSection:${normalizePlanSection(label)}"><span>${planSectionIcon(label)}</span><strong>${esc(label)}</strong><small class="step-subtitle">${planSectionSubtitle(label)}</small></button>`).join("")}
+        </nav>
+        ${SidebarScenicIllustration()}
+        ${PlanningPrinciplesFooter()}
+      </aside>
+      <main class="wizard-main trip-plan-main">
+        <header class="plan-hero">
+          <div>
+            <p class="eyebrow">Generated Trip Plan</p>
+            <h1>${esc(plan.overview.title)}</h1>
+            <p>${esc(plan.overview.subtitle)}</p>
+            ${state.planStale ? `<div class="stale-plan-warning" role="status"><strong>Preferences changed.</strong> This plan was generated from older preferences. Regenerate when you are ready.</div>` : ""}
+          </div>
+          <div class="plan-hero-actions">
+            <button class="primary" data-action="regeneratePlan">Regenerate Plan</button>
+            <button data-action="editPreferences">Edit Preferences</button>
+            <button data-action="saveExit">Save Trip</button>
+            <button disabled title="Coming Later">Export · Coming Later</button>
+            <button disabled title="Coming Later">Share · Coming Later</button>
+          </div>
+        </header>
+        <section class="plan-summary-strip" aria-label="Trip plan summary">
+          ${planMetric("Destination", plan.destination, "mapPin")}
+          ${planMetric("Dates", plan.overview.dateSummary, "calendar")}
+          ${planMetric("Travelers", plan.overview.travelerSummary, "person")}
+          ${planMetric("Pace", plan.overview.paceSummary, "scale")}
+          ${planMetric("Budget", plan.overview.estimatedTotalCost, "dollar")}
+        </section>
+        <nav class="plan-tabs" aria-label="Trip plan sections">
+          ${["overview", "itinerary", "food", "route", "budget", "advisories"].map((section) => `<button class="${ui.planSection === section ? "active" : ""}" data-action="planSection:${section}">${esc(titleCase(section))}</button>`).join("")}
+        </nav>
+        <div aria-live="polite" class="sr-only">${esc(ui.planAnnouncement)}</div>
+        ${tripPlanSection()}
+        ${planningDiagnosticsPanel()}
+      </main>
+    </div>
+    ${planDialog()}`;
+  bind();
+}
+
+function planningDiagnosticsPanel() {
+  if (!new URLSearchParams(window.location.search).has("debugPlan")) return "";
+  const metadata = state.plan?.generationMetadata || {};
+  const input = state.plan?.preferencesSnapshot || {};
+  return `<details class="planning-diagnostics">
+    <summary>Planning diagnostics</summary>
+    <pre>${esc(JSON.stringify({
+      normalizedInput: {
+        destination: input.destination,
+        numberOfDays: input.numberOfDays,
+        pace: input.pace,
+        maxActivities: input.maxActivities,
+        maxDrivingMinutes: input.maxDrivingMinutes,
+        travelers: input.travelers
+      },
+      constraints: {
+        food: state.plan.foodPlan.dietaryHandlingSummary,
+        advisories: state.plan.advisories.map((item) => ({ severity: item.severity, category: item.category, title: item.title }))
+      },
+      metadata
+    }, null, 2))}</pre>
+  </details>`;
+}
+
+function tripPlanSection() {
+  if (ui.planSection === "itinerary") return planItinerarySection();
+  if (ui.planSection === "food") return planFoodSection();
+  if (ui.planSection === "route") return planRouteSection();
+  if (ui.planSection === "budget") return planBudgetSection();
+  if (ui.planSection === "advisories") return planAdvisoriesSection();
+  return planOverviewSection();
+}
+
+function normalizePlanSection(label) {
+  return label.toLowerCase().replace(/[^a-z]+/g, "");
+}
+
+function planSectionIcon(label) {
+  return { Overview: "✓", Itinerary: "2", Food: "3", Route: "4", Budget: "5", Advisories: "!" }[label] || "•";
+}
+
+function planSectionSubtitle(label) {
+  return {
+    Overview: "Trip payoff",
+    Itinerary: "Day by day",
+    Food: "Meals and safety",
+    Route: "Regions and drives",
+    Budget: "Cost ranges",
+    Advisories: "Notes and conflicts"
+  }[label] || "";
+}
+
+function planMetric(label, value, icon) {
+  return `<article class="plan-metric"><span aria-hidden="true">${iconSvg(icon)}</span><div><small>${esc(label)}</small><strong>${esc(value)}</strong></div></article>`;
+}
+
+function planOverviewSection() {
+  const plan = state.plan;
+  return `<section class="plan-section overview-section">
+    <div class="plan-overview-grid">
+      <article class="plan-payoff-card wide">
+        <h2>Trip Overview</h2>
+        <p>${esc(plan.overview.destinationSummary)}</p>
+        <div class="highlight-list">${plan.overview.planningHighlights.map((item) => `<span>${esc(item)}</span>`).join("")}</div>
+      </article>
+      <article class="plan-payoff-card"><h3>Activities</h3><strong>${plan.overview.totalScheduledActivities}</strong><p>${esc(formatMinutes(plan.overview.totalEstimatedActivityMinutes))} scheduled activity time</p></article>
+      <article class="plan-payoff-card"><h3>Driving</h3><strong>${esc(formatMinutes(plan.overview.totalEstimatedDriveMinutes))}</strong><p>Estimated local driving across the trip</p></article>
+      <article class="plan-payoff-card"><h3>Budget</h3><strong>${esc(plan.overview.estimatedTotalCost)}</strong><p>${esc(plan.overview.estimatedCostPerPerson)} per person estimate</p></article>
+      <article class="plan-payoff-card wide">
+        <h3>Preferences Applied</h3>
+        <p><strong>Diet:</strong> ${esc(plan.foodPlan.dietaryHandlingSummary)}</p>
+        <p><strong>Accessibility:</strong> ${esc(state.plan.preferencesSnapshot ? planAccessibilitySummary() : "No special needs entered.")}</p>
+      </article>
+    </div>
+    <div class="day-preview-grid">${plan.days.map((day) => `<button class="day-preview-card" data-action="jumpToDay:${day.id}"><span>Day ${day.dayNumber}</span><strong>${esc(day.title)}</strong><small>${esc(day.theme)} · ${esc(day.dailyBudget.label)}</small></button>`).join("")}</div>
+  </section>`;
+}
+
+function planAccessibilitySummary() {
+  const text = state.plan.advisories.find((item) => item.category === "accessibility")?.message;
+  return text || "No individual accessibility restriction was specified; activity notes still include walking and access assumptions.";
+}
+
+function planItinerarySection() {
+  return `<section class="plan-section itinerary-section">
+    <div class="plan-section-head"><div><h2>Day-by-day Itinerary</h2><p>Morning, afternoon, meals, travel estimates, backups, and editable schedule items.</p></div><button data-action="openCustomStop">Add Custom Stop</button></div>
+    ${state.plan.days.map((day) => dayCard(day)).join("")}
+  </section>`;
+}
+
+function dayCard(day) {
+  return `<article class="itinerary-day" id="${esc(day.id)}">
+    <div class="day-card-head">
+      <div><p class="eyebrow">Day ${day.dayNumber} · ${esc(formatDateRange(day.date, day.date))}</p><h3>${esc(day.title)}</h3><p>${esc(day.summary)}</p></div>
+      <div class="day-actions">
+        <span class="badge">${esc(day.dailyBudget.label)}</span>
+        <span class="badge">${esc(formatMinutes(day.dailyDriveMinutes))} drive</span>
+        <button data-action="toggleDayLock:${esc(day.id)}">${day.locked ? "Unlock Day" : "Lock Day"}</button>
+        <button data-action="regenerateDay:${esc(day.id)}" ${day.locked ? "disabled" : ""}>Regenerate Day</button>
+      </div>
+    </div>
+    <div class="weather-note"><strong>Weather note:</strong> ${esc(day.weatherPlanningNote)}</div>
+    ${day.warnings.length ? `<div class="warning-list">${day.warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
+    <ol class="timeline">${day.scheduleItems.map((item) => timelineItem(item)).join("")}</ol>
+    <div class="backup-options"><h4>Backup options</h4>${day.backupOptions.length ? day.backupOptions.map((backup) => `<article><strong>${esc(backup.title)}</strong><p>${esc(backup.reason)}</p><small>${esc(formatMinutes(backup.estimatedDurationMinutes))} · ${esc(backup.indoorOutdoor)} · ${esc(backup.accessibilityNotes)}</small></article>`).join("") : `<p>No same-region backup is available in the local data for this day.</p>`}</div>
+    <p class="reasoning-summary">${esc(day.generationReasoningSummary)}</p>
+  </article>`;
+}
+
+function timelineItem(item) {
+  return `<li class="timeline-item item-${esc(item.type)} ${item.locked ? "locked" : ""} ${item.mustDo ? "must-do" : ""}">
+    <div class="timeline-time"><strong>${esc(item.startTime)}</strong><span>${esc(item.endTime)}</span></div>
+    <div class="timeline-dot" aria-hidden="true">${timelineIcon(item.type)}</div>
+    <div class="timeline-body">
+      <div class="timeline-title-row"><h4>${esc(item.title)}</h4><span>${esc(titleCase(item.type))}</span></div>
+      <p>${esc(item.description)}</p>
+      <div class="timeline-meta">
+        <span>${esc(formatMinutes(item.durationMinutes))}</span>
+        ${item.locationLabel ? `<span>${esc(item.locationLabel)}</span>` : ""}
+        ${item.estimatedCostPerPerson ? `<span>${esc(moneyRangeDisplay(item.estimatedCostPerPerson.low, item.estimatedCostPerPerson.high))} pp est.</span>` : ""}
+        ${item.travelFromPrevious ? `<span>${esc(item.travelFromPrevious.note)}</span>` : ""}
+        ${item.reservationRecommended ? `<span>Reservation recommended</span>` : ""}
+        ${item.customItem ? `<span>Custom</span>` : ""}
+      </div>
+      ${item.accessibilityNotes ? `<small class="timeline-note">${esc(item.accessibilityNotes)}</small>` : ""}
+      ${item.dietaryNotes ? `<small class="timeline-note">${esc(item.dietaryNotes)}</small>` : ""}
+      <div class="item-actions">
+        ${item.type === "activity" ? `<button data-action="openReplace:${esc(item.id)}">Replace</button><button data-action="toggleMustDo:${esc(item.id)}">${item.mustDo ? "Unset Must Do" : "Mark Must Do"}</button>` : ""}
+        ${item.replaceable ? `<button data-action="openMove:${esc(item.id)}">Move</button><button data-action="removeItem:${esc(item.id)}">Remove</button>` : ""}
+        <button data-action="toggleItemLock:${esc(item.id)}">${item.locked ? "Unlock" : "Lock"}</button>
+      </div>
+    </div>
+  </li>`;
+}
+
+function timelineIcon(type) {
+  return { breakfast: "☀", lunch: "☀", dinner: "☾", activity: "◆", travel: "→", freeTime: "⋯", rest: "◌", evening: "★", note: "i" }[type] || "•";
+}
+
+function planFoodSection() {
+  const food = state.plan.foodPlan;
+  return `<section class="plan-section food-plan-section">
+    <div class="plan-section-head"><div><h2>Food Plan</h2><p>${esc(food.dailyMealSummary)}</p></div><button data-action="regenerateMeals">Regenerate Meals</button></div>
+    <article class="plan-payoff-card wide"><h3>Dietary Handling</h3><p>${esc(food.dietaryHandlingSummary)}</p><p><strong>Cuisine coverage:</strong> ${esc(food.cuisineCoverage)}</p><p><strong>Reservations:</strong> ${esc(food.reservationNotes)}</p></article>
+    <div class="meal-day-grid">${food.mealRecommendations.map((day) => `<article class="meal-day"><h3>Day ${day.dayNumber}</h3>${day.meals.map((meal) => `<p><strong>${esc(titleCase(meal.type))} · ${esc(meal.time)}</strong><br>${esc(meal.recommendation)}<br><small>${esc(moneyRangeDisplay(meal.estimatedCostPerPerson.low, meal.estimatedCostPerPerson.high))} pp estimate</small></p>`).join("")}</article>`).join("")}</div>
+    <article class="plan-payoff-card wide"><h3>Food Areas</h3><div class="food-area-grid">${food.foodAreas.map((area) => `<span><strong>${esc(area.name)}</strong><small>${esc(area.cuisines.slice(0, 4).join(", "))}</small></span>`).join("")}</div></article>
+  </section>`;
+}
+
+function planRouteSection() {
+  const route = state.plan.routeSummary;
+  return `<section class="plan-section route-plan-section">
+    <div class="plan-section-head"><div><h2>Route Overview</h2><p>${esc(route.routeLogicExplanation)}</p></div><span class="badge">${esc(formatMinutes(route.totalEstimatedDriveMinutes))} estimated drive</span></div>
+    <div class="route-schematic">${route.mapPlaceholderData.map((day) => `<article><span>Day ${day.dayNumber}</span><strong>${esc(day.region)}</strong><small>${esc(day.stops.slice(0, 3).join(" → "))}</small></article>`).join("")}</div>
+    <article class="plan-payoff-card wide"><h3>Major Stop Sequence</h3><p>${esc(route.orderedStops.join(" → "))}</p><p>${esc(route.trafficDisclaimer)}</p><p>Estimated distance: ${route.totalEstimatedDistanceMiles} miles.</p></article>
+  </section>`;
+}
+
+function planBudgetSection() {
+  const budget = state.plan.budgetSummary;
+  const max = Math.max(...budget.categories.map((item) => item.high), 1);
+  return `<section class="plan-section budget-plan-section">
+    <div class="plan-section-head"><div><h2>Budget Estimate</h2><p>${esc(moneyRangeDisplay(budget.totalLow, budget.totalHigh))} total · ${esc(moneyRangeDisplay(budget.perPersonLow, budget.perPersonHigh))} per person</p></div><span class="badge">${esc(budget.currency)}</span></div>
+    <div class="budget-bars">${budget.categories.map((item) => `<article><div><strong>${esc(item.category)}</strong><span>${esc(moneyRangeDisplay(item.low, item.high))}</span></div><i style="--bar:${Math.max(8, Math.round((item.high / max) * 100))}%"></i><p>${esc(item.description)}</p></article>`).join("")}</div>
+    <article class="plan-payoff-card wide"><h3>Assumptions and Exclusions</h3><p><strong>Assumptions:</strong> ${esc(budget.assumptions.join(" "))}</p><p><strong>Excluded:</strong> ${esc(budget.excludedCosts.join(", "))}</p></article>
+  </section>`;
+}
+
+function planAdvisoriesSection() {
+  const grouped = groupAdvisories(state.plan.advisories);
+  return `<section class="plan-section advisories-plan-section">
+    <div class="plan-section-head"><div><h2>Issues and Advisories</h2><p>Practical notes, conflicts, and planning assumptions.</p></div><span class="badge">${state.plan.advisories.length || "No"} notes</span></div>
+    ${Object.entries(grouped).map(([severity, items]) => `<section class="advisory-group"><h3>${esc(titleCase(severity))}</h3>${items.length ? items.map((item) => `<article class="advisory-card ${esc(item.severity)}"><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p><small>${esc(item.resolutionSuggestion)}</small></article>`).join("") : `<p class="empty">No ${esc(severity)} advisories.</p>`}</section>`).join("")}
+  </section>`;
+}
+
+function groupAdvisories(advisories) {
+  return {
+    blocking: advisories.filter((item) => item.severity === "blocking"),
+    conflict: advisories.filter((item) => item.severity === "conflict"),
+    caution: advisories.filter((item) => item.severity === "caution"),
+    info: advisories.filter((item) => item.severity === "info")
+  };
+}
+
+function planDialog() {
+  if (!ui.planDialog) return "";
+  if (ui.planDialog === "replace") return replaceDialog();
+  if (ui.planDialog === "move") return moveDialog();
+  if (ui.planDialog === "custom") return customStopDialog();
+  return "";
+}
+
+function replaceDialog() {
+  const alternatives = compatibleAlternatives(state.plan, ui.planDialogItemId);
+  return `<div class="restriction-layer" data-action="closePlanDialog"><div class="choice-panel plan-dialog" role="dialog" aria-label="Replace activity">
+    <div class="dialog-head"><div><h2>Replace Activity</h2><span>${alternatives.length} compatible options</span></div><button class="icon-button" data-action="closePlanDialog" aria-label="Close">×</button></div>
+    <div class="alternative-list">${alternatives.map((item) => `<button data-action="replaceWith:${esc(ui.planDialogItemId)}:${esc(item.placeId)}"><strong>${esc(item.title)}</strong><span>${esc(item.description)}</span><small>${esc(formatMinutes(item.duration))} · ${esc(item.cost)} · ${esc(item.reason)}</small></button>`).join("") || `<p>No compatible alternatives found for this item.</p>`}</div>
+  </div></div>`;
+}
+
+function moveDialog() {
+  return `<div class="restriction-layer" data-action="closePlanDialog"><div class="choice-panel plan-dialog" role="dialog" aria-label="Move activity">
+    <div class="dialog-head"><div><h2>Move Activity</h2><span>Recalculate timing after move</span></div><button class="icon-button" data-action="closePlanDialog" aria-label="Close">×</button></div>
+    <div class="move-grid">
+      <button data-action="moveItem:${esc(ui.planDialogItemId)}:earlier">Earlier same day</button>
+      <button data-action="moveItem:${esc(ui.planDialogItemId)}:later">Later same day</button>
+      <button data-action="moveItem:${esc(ui.planDialogItemId)}:prevDay">Previous day</button>
+      <button data-action="moveItem:${esc(ui.planDialogItemId)}:nextDay">Next day</button>
+    </div>
+  </div></div>`;
+}
+
+function customStopDialog() {
+  const draft = ui.customStopDraft || defaultCustomStopDraft();
+  return `<div class="restriction-layer" data-action="closePlanDialog"><div class="choice-panel plan-dialog" role="dialog" aria-label="Add custom stop">
+    <div class="dialog-head"><div><h2>Add Custom Stop</h2><span>Custom stops participate in timing and budget estimates.</span></div><button class="icon-button" data-action="closePlanDialog" aria-label="Close">×</button></div>
+    <div class="details-editor">
+      <label>Title ${input("customStop.title", draft.title, "Title")}</label>
+      <label>Day ${select("customStop.dayNumber", String(draft.dayNumber), state.plan.days.map((day) => String(day.dayNumber)), "Day")}</label>
+      <label>Start Time ${input("customStop.startTime", draft.startTime, "Start Time")}</label>
+      <label>Duration Minutes ${input("customStop.durationMinutes", draft.durationMinutes, "Duration Minutes", "number")}</label>
+      <label>Type ${select("customStop.type", draft.type, ["activity", "breakfast", "lunch", "dinner", "evening", "freeTime", "note"], "Type")}</label>
+      <label>Location ${input("customStop.locationLabel", draft.locationLabel, "Location")}</label>
+      <label>Cost per Person ${input("customStop.cost", draft.cost, "Cost per Person", "number")}</label>
+      <label>Indoor / Outdoor ${select("customStop.indoorOutdoor", draft.indoorOutdoor, ["indoor", "outdoor", "mixed"], "Indoor or outdoor")}</label>
+      <label>Notes ${textarea("customStop.notes", draft.notes, "Notes")}</label>
+      <label class="small-chip">${checkbox("customStop.mustDo", draft.mustDo, "Must Do")} Must Do</label>
+      <label class="small-chip">${checkbox("customStop.locked", draft.locked, "Lock")} Lock</label>
+    </div>
+    <div class="restriction-actions"><button data-action="closePlanDialog">Cancel</button><button class="primary" data-action="saveCustomStop">Add Stop</button></div>
+  </div></div>`;
+}
+
+function defaultCustomStopDraft() {
+  return { title: "", dayNumber: 1, startTime: "3:00 PM", durationMinutes: 60, type: "activity", locationLabel: "", notes: "", cost: 0, indoorOutdoor: "mixed", mustDo: false, locked: false };
+}
+
+function formatMinutes(minutes) {
+  const value = Number(minutes || 0);
+  const hours = Math.floor(value / 60);
+  const mins = value % 60;
+  if (!hours) return `${mins} min`;
+  return `${hours} hr${hours === 1 ? "" : "s"}${mins ? ` ${mins} min` : ""}`;
+}
+
+function moneyRangeDisplay(low, high) {
+  return `$${Number(low || 0).toLocaleString()}-$${Number(high || 0).toLocaleString()}`;
 }
 
 function PageHeaderIllustration(stepNumber) {
@@ -1440,7 +1795,7 @@ function whyItFits() {
 
 function wizardFooter(backLabel, saveLabel, primaryLabel, primaryDisabled = "") {
   const backButton = backLabel ? button(backLabel, "prev") : "";
-  const primaryAction = primaryLabel === "Build My Trip" ? "generatePreview" : primaryLabel === "Continue" ? "next" : "noop";
+  const primaryAction = primaryLabel === "Build My Trip" ? "buildTripPlan" : primaryLabel === "Continue" ? "next" : "noop";
   return `<div class="wizard-footer">${backButton}${button(saveLabel, "saveExit")}<button class="primary" data-action="${primaryAction}" ${primaryDisabled}>${esc(primaryLabel)}</button></div>`;
 }
 
@@ -1802,6 +2157,7 @@ function closeRestrictions(id, restoreFocus = true) {
 
 function updateField(path, value) {
   if (path.startsWith("trip.")) ui.touchedBasicsFields.add(path);
+  if (path.startsWith("trip.") && state.plan) state.planStale = true;
   if (path.startsWith("prefImportance.")) {
     const pref = state.trip.preferences.find((item) => item.id === path.split(".")[1]);
     if (pref) {
@@ -1838,6 +2194,8 @@ function updateField(path, value) {
   } else if (path.startsWith("foodDraft.") && ui.foodDraft) {
     setPath(ui, path, value);
     if (path === "foodDraft.alcoholPrimary" && value === "No Alcohol") clearAlcoholFocusedSelections(ui.foodDraft.alcohol);
+  } else if (path.startsWith("customStop.") && ui.customStopDraft) {
+    setPath(ui, path, value);
   } else if (path.startsWith("childAge.")) {
     setChildAge(Number(path.split(".")[1]), value);
   } else {
@@ -1865,6 +2223,7 @@ function updateField(path, value) {
 
 function updateFieldDraft(path, value) {
   if (path.startsWith("trip.") || path.startsWith("childAge.")) ui.touchedBasicsFields.add(path);
+  if (path.startsWith("trip.") && state.plan) state.planStale = true;
   if (path.startsWith("interp.")) {
     const [, id, key] = path.split(".");
     const suggestion = state.trip.interpretedSuggestions.find((item) => item.id === id);
@@ -1911,6 +2270,7 @@ function canChangeTravelerCount(path, value) {
 
 function updateCheck(path, checked) {
   if (path.startsWith("pref.")) {
+    if (state.plan) state.planStale = true;
     const [, category, ...labelParts] = path.split(".");
     const label = labelParts.join(".");
     if (checked) addOrUpdatePreference(state.trip, category, label, "Nice to have");
@@ -1919,6 +2279,7 @@ function updateCheck(path, checked) {
       if (pref) removePreference(state.trip, pref.id);
     }
   } else if (path.startsWith("food.") || path.startsWith("alcohol.") || path.startsWith("lodging.")) {
+    if (state.plan && !ui.foodDraft) state.planStale = true;
     const parts = path.split(".");
     const option = parts.pop();
     const root = ui.foodDraft && ui.openFoodSection && (path.startsWith("food.") || path.startsWith("alcohol.")) ? ui.foodDraft : state.trip;
@@ -1935,6 +2296,7 @@ function updateCheck(path, checked) {
       root.alcohol.primary = "Interested in drinks";
     }
   } else if (path.startsWith("travelerRestriction.")) {
+    if (state.plan) state.planStale = true;
     const [, id, ...optionParts] = path.split(".");
     const option = optionParts.join(".");
     const traveler = state.trip.travelers.find((item) => item.id === id);
@@ -1952,6 +2314,8 @@ function updateCheck(path, checked) {
     const id = path.split(".")[1];
     const suggestion = state.trip.interpretedSuggestions.find((item) => item.id === id);
     if (suggestion && !suggestion.applied) suggestion.include = checked;
+  } else if (path.startsWith("customStop.") && ui.customStopDraft) {
+    setPath(ui, path, checked);
   } else {
     setPath(state, path, checked);
   }
@@ -1971,6 +2335,114 @@ function setPath(root, path, value) {
 }
 
 function action(name) {
+  if (name.startsWith("planSection:")) ui.planSection = name.split(":")[1];
+  if (name === "editPreferences") {
+    state.planStatus = "";
+    state.activeStep = 6;
+    ui.toast = state.planStale ? "Existing plan is based on older preferences. Regenerate when ready." : "Preferences are ready to edit.";
+  }
+  if (name === "editUnsupportedDestination") {
+    state.planStatus = "";
+    state.planError = null;
+    state.activeStep = 1;
+    ui.toast = "Edit the destination, then build again.";
+  }
+  if (name === "returnToReview") {
+    state.planStatus = "";
+    state.planError = null;
+    state.activeStep = 6;
+  }
+  if (name === "buildTripPlan" || name === "regeneratePlan") {
+    if (blockingValidationIssues().length) {
+      ui.showWarnings = true;
+      ui.toast = "Resolve blocking issues before building your trip.";
+    } else {
+      ui.generatingPlan = true;
+      ui.planAnnouncement = "Organizing your days, grouping nearby experiences, applying traveler needs, and building your route.";
+      const result = name === "regeneratePlan" && state.plan ? { status: "ready", plan: regeneratePlanPreservingLocks(state.plan) } : generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
+      if (result.status === "ready") {
+        state.plan = result.plan;
+        state.planStatus = "ready";
+        state.planError = null;
+        state.planStale = false;
+        ui.planSection = "overview";
+        ui.planAnnouncement = "Trip plan generated.";
+        requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+      } else {
+        state.planStatus = result.status;
+        state.planError = result;
+        ui.showWarnings = true;
+        ui.toast = result.status === "unsupported" ? result.message : "Trip plan could not be generated yet.";
+      }
+      ui.generatingPlan = false;
+    }
+  }
+  if (name.startsWith("jumpToDay:")) {
+    ui.planSection = "itinerary";
+    requestAnimationFrame(() => document.getElementById(name.split(":")[1])?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+  if (name.startsWith("openReplace:")) {
+    ui.planDialog = "replace";
+    ui.planDialogItemId = name.split(":")[1];
+  }
+  if (name.startsWith("openMove:")) {
+    ui.planDialog = "move";
+    ui.planDialogItemId = name.split(":")[1];
+  }
+  if (name === "openCustomStop") {
+    ui.planDialog = "custom";
+    ui.customStopDraft = defaultCustomStopDraft();
+  }
+  if (name === "closePlanDialog") {
+    ui.planDialog = null;
+    ui.planDialogItemId = "";
+    ui.customStopDraft = null;
+  }
+  if (name.startsWith("replaceWith:")) {
+    const [, itemId, placeId] = name.split(":");
+    state.plan = replaceActivity(state.plan, itemId, placeId);
+    ui.planDialog = null;
+    ui.planAnnouncement = "Activity replaced and plan recalculated.";
+  }
+  if (name.startsWith("moveItem:")) {
+    const [, itemId, direction] = name.split(":");
+    state.plan = moveActivity(state.plan, itemId, direction);
+    ui.planDialog = null;
+    ui.planAnnouncement = "Activity moved and affected days recalculated.";
+  }
+  if (name === "saveCustomStop" && ui.customStopDraft) {
+    state.plan = addCustomStop(state.plan, ui.customStopDraft);
+    ui.planDialog = null;
+    ui.customStopDraft = null;
+    ui.planAnnouncement = "Custom stop added to the itinerary.";
+  }
+  if (name.startsWith("removeItem:")) {
+    const itemId = name.split(":")[1];
+    const item = state.plan?.days.flatMap((day) => day.scheduleItems).find((candidate) => candidate.id === itemId);
+    if (item && (item.locked || item.mustDo) && !confirm("This item is locked or marked Must Do. Remove it anyway?")) return;
+    state.plan = removeScheduleItem(state.plan, itemId);
+    ui.planAnnouncement = "Item removed and schedule recalculated.";
+  }
+  if (name.startsWith("toggleItemLock:")) {
+    state.plan = toggleItemLock(state.plan, name.split(":")[1]);
+    ui.planAnnouncement = "Item lock state updated.";
+  }
+  if (name.startsWith("toggleMustDo:")) {
+    state.plan = toggleItemMustDo(state.plan, name.split(":")[1]);
+    ui.planAnnouncement = "Must Do state updated.";
+  }
+  if (name.startsWith("toggleDayLock:")) {
+    state.plan = toggleDayLock(state.plan, name.split(":")[1]);
+    ui.planAnnouncement = "Day lock state updated.";
+  }
+  if (name.startsWith("regenerateDay:")) {
+    state.plan = regenerateDay(state.plan, name.split(":")[1]);
+    ui.planAnnouncement = "Selected day regenerated while preserving locked and must-do items.";
+  }
+  if (name === "regenerateMeals") {
+    state.plan = regenerateMeals(state.plan);
+    ui.planAnnouncement = "Meals regenerated while activities stayed in place.";
+  }
   if (name === "next") state.activeStep = Math.min(6, state.activeStep + 1);
   if (name === "prev") state.activeStep = Math.max(1, state.activeStep - 1);
   if (name === "next" || name === "prev") {

@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+const css = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+
+assert.ok(app.includes("function renderTripPlan()"));
+assert.ok(app.includes("function renderUnsupportedPlan()"));
+assert.ok(app.includes("buildTripPlan"));
+assert.ok(app.includes("generateTripPlan(state.trip"));
+assert.ok(app.includes("Regenerate Plan"));
+assert.ok(app.includes("Edit Preferences"));
+assert.ok(app.includes("Coming Later"));
+assert.ok(app.includes("function planOverviewSection()"));
+assert.ok(app.includes("function planItinerarySection()"));
+assert.ok(app.includes("function planFoodSection()"));
+assert.ok(app.includes("function planRouteSection()"));
+assert.ok(app.includes("function planBudgetSection()"));
+assert.ok(app.includes("function planAdvisoriesSection()"));
+assert.ok(app.includes("openReplace:"));
+assert.ok(app.includes("openMove:"));
+assert.ok(app.includes("openCustomStop"));
+assert.ok(app.includes("regenerateDay:"));
+assert.ok(app.includes("regenerateMeals"));
+assert.ok(app.includes("toggleItemLock:"));
+assert.ok(app.includes("toggleDayLock:"));
+assert.ok(app.includes("toggleMustDo:"));
+assert.ok(app.includes("removeItem:"));
+assert.ok(app.includes("state.planStale = true"));
+assert.ok(app.includes("No same-region backup is available") || app.includes("Backup options"));
+
+assert.ok(css.includes(".plan-hero"));
+assert.ok(css.includes(".plan-tabs"));
+assert.ok(css.includes(".timeline-item"));
+assert.ok(css.includes(".backup-options"));
+assert.ok(css.includes(".route-schematic"));
+assert.ok(css.includes(".budget-bars"));
+assert.ok(css.includes(".advisory-card"));
+assert.ok(css.includes("@media (max-width: 700px)"));
+
+console.log("Trip plan UI tests passed");
