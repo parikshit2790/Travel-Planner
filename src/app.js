@@ -1,4 +1,4 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=46";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=47";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -33,8 +33,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js";
+} from "./domain.js?v=47";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=47";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -48,7 +48,7 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js";
+} from "./planner.js?v=47";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -342,7 +342,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=46" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=47" alt="" /></span>`;
 }
 
 function Brand() {
@@ -2891,5 +2891,13 @@ function removeTraveler(id) {
   syncTravelersToCounts(state.trip);
 }
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  let refreshingForServiceWorker = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshingForServiceWorker) return;
+    refreshingForServiceWorker = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register("/sw.js").then((registration) => registration.update()).catch(() => {});
+}
 render();
