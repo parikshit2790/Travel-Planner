@@ -6,6 +6,8 @@ const css = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8
 
 assert.ok(app.includes("function renderTripPlan()"));
 assert.ok(app.includes("function renderUnsupportedPlan()"));
+assert.ok(app.includes("function recoverUnsupportedPlan()"));
+assert.ok(app.includes("Starter trip plan generated for this destination."));
 assert.ok(app.includes("buildTripPlan"));
 assert.ok(app.includes("generateTripPlan(state.trip"));
 assert.ok(app.includes("Regenerate Plan"));

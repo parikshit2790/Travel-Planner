@@ -1,4 +1,4 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=45";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=46";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -292,6 +292,7 @@ function render() {
     return;
   }
   if (state.planStatus === "unsupported" && state.planError) {
+    if (recoverUnsupportedPlan()) return;
     renderUnsupportedPlan();
     return;
   }
@@ -341,11 +342,24 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=45" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=46" alt="" /></span>`;
 }
 
 function Brand() {
   return `<div class="brand">${BrandIcon()}<div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>`;
+}
+
+function recoverUnsupportedPlan() {
+  const retry = generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
+  if (retry.status !== "ready") return false;
+  state.plan = retry.plan;
+  state.planStatus = "ready";
+  state.planError = null;
+  state.planStale = false;
+  ui.planSection = "overview";
+  ui.toast = "Starter trip plan generated for this destination.";
+  renderTripPlan();
+  return true;
 }
 
 function renderStaticInfoPage() {
