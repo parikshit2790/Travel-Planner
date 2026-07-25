@@ -87,9 +87,17 @@ const relaxed = generateTripPlan(fixture({ pace: "Relaxed", majorActivities: 2 }
 const packed = generateTripPlan(fixture({ pace: "Packed", majorActivities: 4 })).plan;
 assert.ok(packed.overview.totalScheduledActivities >= relaxed.overview.totalScheduledActivities);
 
-const unsupported = generateTripPlan(fixture({ destination: "Tokyo, Japan" }));
-assert.equal(unsupported.status, "unsupported");
-assert.ok(!JSON.stringify(unsupported).includes("Santa Monica Pier"));
+const genericDestination = generateTripPlan(fixture({ destination: "Tokyo, Japan" }));
+assert.equal(genericDestination.status, "ready");
+assert.equal(genericDestination.plan.destination, "Tokyo, Japan");
+assert.equal(genericDestination.plan.generationMetadata.usesGenericDestinationProfile, true);
+assert.ok(genericDestination.plan.overview.title.includes("Tokyo, Japan"));
+assert.ok(genericDestination.plan.advisories.some((item) => item.message.includes("generic planning mode")));
+assert.ok(!JSON.stringify(genericDestination).includes("Santa Monica Pier"));
+assert.ok(!JSON.stringify(genericDestination).includes("Your Los Angeles trip is ready"));
+
+const genericAlternative = compatibleAlternatives(genericDestination.plan, genericDestination.plan.days[0].scheduleItems.find((item) => item.type === "activity").id);
+assert.ok(genericAlternative.length > 0);
 
 let editable = structuredClone(fiveDay.plan);
 const firstActivity = editable.days[0].scheduleItems.find((item) => item.type === "activity");

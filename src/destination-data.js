@@ -145,9 +145,89 @@ function route(id, name, originRegionId, destinationRegionId, estimatedDriveMinu
 
 export function resolveDestinationProfile(destination) {
   const normalized = String(destination || "").toLowerCase().replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim();
-  return destinationProfiles.find((profile) => profile.aliases.some((alias) => normalized === alias.replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim()) || normalized.includes(profile.aliases[0])) || null;
+  return destinationProfiles.find((profile) => profile.aliases.some((alias) => normalized === alias.replace(/\./g, "").replace(/[^a-z0-9]+/g, " ").trim()) || normalized.includes(profile.aliases[0])) || createGenericDestinationProfile(destination);
 }
 
 export function getDestinationProfile(id) {
   return destinationProfiles.find((profile) => profile.id === id) || null;
+}
+
+export function createGenericDestinationProfile(destination) {
+  const name = String(destination || "").trim();
+  if (!name) return null;
+  const canonicalName = name.replace(/\s+/g, " ");
+  return {
+    id: `generic-${canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "destination"}`,
+    canonicalName,
+    aliases: [canonicalName.toLowerCase()],
+    country: "",
+    state: "",
+    timezone: "",
+    currency: "USD",
+    summary: `${canonicalName} will be planned with a flexible starter itinerary. Recommendations use preference-based activity categories because detailed local attraction data has not been curated yet.`,
+    seasonalNotes: [
+      "Check local weather, opening hours, closures, and travel conditions before confirming the day.",
+      "Keep outdoor and scenic plans flexible until current conditions are verified."
+    ],
+    generalAdvisories: [
+      "This destination uses RouteMosaic's generic planning mode, not curated local venue data.",
+      "Verify exact locations, hours, reservations, accessibility, dietary safety, prices, and travel times before booking or traveling."
+    ],
+    planningRules: {
+      defaultHotelRegion: "downtown",
+      maxRegionChangesRelaxed: 1,
+      maxRegionChangesBalanced: 2,
+      maxRegionChangesPacked: 3
+    },
+    regions: [
+      region("santa-monica", "Arrival area", "A low-friction arrival or orientation area near lodging, transit, or the first meal.", 0, 0, ["arrival", "orientation", "easy"], ["downtown", "museum-row"]),
+      region("venice", "Local neighborhood", "A neighborhood-focused block for cafes, shopping streets, markets, and relaxed discovery.", 0, 0, ["local-neighborhood", "food", "shopping"], ["santa-monica", "downtown"]),
+      region("malibu", "Scenic edge", "A scenic route, viewpoint, waterfront, countryside, or landscape-focused outing.", 0, 0, ["scenic-drive", "nature", "viewpoint"], ["santa-monica", "griffith-park"]),
+      region("hollywood", "Signature sights", "Recognizable landmarks, main squares, public viewpoints, and first-time visitor anchors.", 0, 0, ["landmark", "tourist", "photo"], ["griffith-park", "downtown"]),
+      region("griffith-park", "Nature and viewpoints", "Parks, gardens, easy walks, viewpoints, and lower-intensity outdoor time.", 0, 0, ["nature", "viewpoint", "easy-walk"], ["hollywood", "malibu"]),
+      region("los-feliz", "Quiet evening area", "Calmer dinner, dessert, cafe, sunset, or evening-walk planning.", 0, 0, ["quiet-evening", "cafes", "sunset"], ["griffith-park", "downtown"]),
+      region("downtown", "Central district", "Museums, architecture, markets, local food, transit access, and compact urban planning.", 0, 0, ["culture", "food", "architecture", "museums"], ["arts-district", "little-tokyo", "museum-row"]),
+      region("arts-district", "Creative district", "Murals, galleries, design streets, maker spaces, casual food, and flexible evenings.", 0, 0, ["art", "food", "nightlife"], ["downtown", "little-tokyo"]),
+      region("little-tokyo", "Cultural quarter", "Heritage streets, local shops, food clusters, cultural districts, and compact walks.", 0, 0, ["culture", "food", "walkable"], ["downtown", "arts-district"]),
+      region("museum-row", "Museum and market area", "Indoor museums, markets, public art, and food halls for weather-flexible planning.", 0, 0, ["museums", "culture", "indoor-backup"], ["downtown", "beverly-hills"]),
+      region("beverly-hills", "Polished leisure area", "Gardens, premium shopping streets, lower-walking sightseeing, and relaxed breaks.", 0, 0, ["shopping", "gardens", "low-walking"], ["museum-row", "weho"]),
+      region("weho", "Dining and nightlife area", "Dinner zones, live music, dessert, bars, and nightlife if selected by the group.", 0, 0, ["evening", "nightlife", "food"], ["downtown", "museum-row"]),
+      region("brentwood", "Viewpoint and culture area", "A viewpoint, architectural site, garden, or larger culture anchor.", 0, 0, ["museum", "architecture", "viewpoint"], ["santa-monica", "museum-row"]),
+      region("westwood", "Campus or village area", "A village, university district, cafe zone, or residential neighborhood pause.", 0, 0, ["food", "local-neighborhood"], ["brentwood", "beverly-hills"]),
+      region("pasadena", "Day-trip district", "A self-contained day-trip area with gardens, old town streets, history, or scenic surroundings.", 0, 0, ["gardens", "culture", "low-walking"], ["downtown", "griffith-park"]),
+      region("universal-city", "Ticketed anchor area", "A full-day ticketed attraction, major tour, theme park, performance, or must-do anchor.", 0, 0, ["theme-park", "family", "full-day"], ["hollywood", "downtown"]),
+      region("south-bay", "Relaxed waterfront or park area", "A slower beach, lakefront, riverfront, garden, promenade, or sunset alternative.", 0, 0, ["beach", "sunset", "quiet-evening"], ["venice", "santa-monica"])
+    ],
+    places: [
+      place("arrival-orientation", `${canonicalName} arrival orientation`, "santa-monica", "Easy first-day orientation around lodging, transit, a casual meal, and a short scenic stroll.", ["arrival", "easy-walk", "food"], ["Relaxation", "Local culture", "Photography"], 90, 0, 20, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 82),
+      place("signature-landmarks", "Signature landmarks and viewpoints", "hollywood", "A focused block for the best-known landmark area, main viewpoint, or classic first-time sights.", ["landmark", "viewpoint", "photo"], ["Famous landmarks", "Photography", "Scenic drives"], 120, 0, 35, "outdoor", "medium", "moderate", ["solo", "couple", "family", "senior"], "morning", 88),
+      place("central-culture", "Central culture and architecture walk", "downtown", "Museums, architecture, historic streets, public spaces, and local context grouped in the central district.", ["culture", "architecture", "museum"], ["Museums", "Architecture", "History"], 150, 10, 45, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "morning", 86),
+      place("local-market", "Local market or food hall", "downtown", "A flexible lunch stop around local specialties, market stalls, or a food hall-style area.", ["food", "market", "casual"], ["Food experiences", "Local markets", "Casual dining"], 75, 15, 35, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "lunch", 84),
+      place("museum-weather-backup", "Museum or indoor backup", "museum-row", "Weather-flexible museum, gallery, science center, aquarium, or indoor cultural stop.", ["museum", "indoor", "backup"], ["Museums", "Art", "Family activities"], 130, 10, 40, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 80),
+      place("creative-neighborhood", "Creative neighborhood and local shops", "arts-district", "Galleries, murals, independent shops, coffee, casual dining, and local streets.", ["art", "shopping", "food"], ["Art", "Shopping", "Local culture"], 95, 0, 30, "mixed", "low", "moderate", ["solo", "couple", "family"], "afternoon", 76),
+      place("heritage-quarter", "Cultural quarter and heritage streets", "little-tokyo", "A compact area for local culture, heritage sites, specialty shops, sweets, and casual food.", ["culture", "food", "walk"], ["Local culture", "History", "Food experiences"], 85, 0, 30, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 78),
+      place("scenic-route", "Scenic route and viewpoint", "malibu", "A scenic drive, waterfront route, countryside loop, or viewpoint-centered outing.", ["scenic-drive", "viewpoint", "nature"], ["Scenic drives", "Photography", "Nature"], 150, 0, 30, "outdoor", "high", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 90),
+      place("easy-nature", "Easy nature, garden, or park time", "griffith-park", "Parks, botanical gardens, waterfront paths, or easy outdoor time tuned to walking comfort.", ["nature", "garden", "easy-walk"], ["Nature", "Gardens", "Easy outdoor walks"], 100, 0, 25, "outdoor", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 84),
+      place("premium-leisure", "Gardens, shopping, and relaxed leisure", "beverly-hills", "A polished lower-intensity area for gardens, shopping streets, cafes, or scenic rest time.", ["shopping", "garden", "relaxation"], ["Shopping", "Relaxation", "Photography"], 80, 0, 35, "mixed", "medium", "good", ["solo", "couple", "senior"], "afternoon", 70),
+      place("quiet-evening", "Quiet dinner, dessert, or evening walk", "los-feliz", "A calm evening plan centered on dinner, dessert, cafe time, sunset, or an easy stroll.", ["quiet-evening", "dessert", "food"], ["Dessert or cafe evenings", "Evening walks", "Relaxation"], 80, 15, 35, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "evening", 82),
+      place("nightlife-evening", "Live music or nightlife district", "weho", "A flexible evening zone for live music, cocktails, bars, or nightlife when those preferences are selected.", ["evening", "live-music", "nightlife"], ["Live music", "Nightlife", "Bars"], 120, 20, 70, "mixed", "low", "good", ["solo", "couple"], "evening", 74),
+      place("full-day-anchor", "Full-day ticketed or must-do anchor", "universal-city", "A theme park, guided tour, boat day, performance, major museum, or other full-day reservation anchor.", ["theme-park", "tour", "full-day"], ["Theme parks", "Tours", "Entertainment"], 420, 60, 160, "mixed", "low", "good", ["solo", "couple", "family"], "full-day", 72),
+      place("day-trip-area", "Self-contained day-trip area", "pasadena", "A nearby district or day-trip zone with enough sights and meals to avoid repeated cross-town travel.", ["day-trip", "gardens", "culture"], ["Gardens", "History", "Scenic drives"], 210, 15, 55, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 78),
+      place("relaxed-waterfront", "Relaxed waterfront, riverfront, or sunset area", "south-bay", "A lower-key scenic area for sunset, a gentle walk, and an easier evening pace.", ["beach", "sunset", "quiet"], ["Sunset", "Relaxation", "Photography"], 90, 0, 25, "outdoor", "high", "good", ["solo", "couple", "family", "senior"], "evening", 76)
+    ],
+    foodAreas: [
+      foodArea("central-food", "Central local dining area", "downtown", ["Local cuisine", "American", "Casual dining", "Vegetarian-friendly"], ["lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Avoid beef", "Gluten-free"], ["quiet"]),
+      foodArea("market-food", "Market or food hall options", "downtown", ["Local cuisine", "Street food", "Desserts", "Casual dining"], ["lunch"], ["budget", "moderate"], ["Vegetarian", "Avoid pork", "Avoid beef"], ["lively"]),
+      foodArea("neighborhood-cafes", "Neighborhood cafes and bakeries", "venice", ["Cafes", "Bakeries", "American", "Vegetarian-friendly"], ["breakfast", "lunch"], ["budget", "moderate"], ["Vegetarian", "Vegan", "Dairy-free"], ["quiet"]),
+      foodArea("cultural-dining", "Cultural quarter dining", "little-tokyo", ["Indian", "Italian", "Mexican", "Chinese", "Japanese", "Middle Eastern"], ["lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Halal", "Kosher", "Jain"], ["quiet"]),
+      foodArea("scenic-dining", "Scenic-route casual dining", "malibu", ["Local cuisine", "American", "Seafood", "Cafes"], ["lunch", "dinner"], ["moderate", "premium"], ["Vegetarian", "Limited seafood"], ["sunset"]),
+      foodArea("evening-dining", "Evening dining district", "weho", ["Italian", "Mediterranean", "American", "Fine dining"], ["dinner"], ["moderate", "premium"], ["Vegetarian", "Vegan", "Gluten-free"], ["nightlife", "live-music"])
+    ],
+    scenicRoutes: [
+      route("arrival-central-link", "Arrival area to central district", "santa-monica", "downtown", 25, 10, ["orientation", "short-drive"], "morning", "Use as a practical first route after confirming actual lodging."),
+      route("central-culture-link", "Central culture district link", "downtown", "museum-row", 18, 6, ["culture", "museum"], "afternoon", "Keep cultural stops grouped to reduce backtracking."),
+      route("scenic-edge-link", "Scenic edge route", "griffith-park", "malibu", 45, 24, ["scenic-drive", "nature"], "afternoon", "Confirm exact route conditions before departure."),
+      route("evening-link", "Central district to evening area", "downtown", "weho", 20, 7, ["evening", "food"], "evening", "Use rideshare or a designated driver if alcohol is involved.")
+    ]
+  };
 }

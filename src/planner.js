@@ -6,7 +6,7 @@ import {
   travelerTotal,
   uid
 } from "./domain.js";
-import { getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
+import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 
@@ -92,14 +92,7 @@ export function generateTripPlan(trip, options = {}) {
     return { status: "invalid", errors: [{ severity: "blocking", issue: "Trip dates are required before generating a plan.", action: "Edit Trip Basics" }], normalized };
   }
   const destinationProfile = resolveDestinationProfile(normalized.destination);
-  if (!destinationProfile) {
-    return {
-      status: "unsupported",
-      destination: normalized.destination,
-      normalized,
-      message: "Detailed local planning data is currently available for Los Angeles. Your wizard data is preserved so you can edit the destination or try again later."
-    };
-  }
+  if (!destinationProfile) return { status: "invalid", errors: [{ severity: "blocking", issue: "Destination is required before generating a plan.", action: "Edit Trip Basics" }], normalized };
 
   const constraints = buildTravelerConstraintProfile(normalized);
   const scored = scoreCandidates(destinationProfile, normalized, constraints);
@@ -132,6 +125,8 @@ export function generateTripPlan(trip, options = {}) {
     unresolvedConflicts: advisories.filter((item) => item.severity === "conflict" || item.severity === "blocking"),
     generationMetadata: {
       destinationProfileId: destinationProfile.id,
+      destinationProfileSnapshot: destinationProfile,
+      usesGenericDestinationProfile: destinationProfile.id.startsWith("generic-"),
       hotelBase,
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
@@ -148,6 +143,17 @@ export function generateTripPlan(trip, options = {}) {
 
 function buildHotelBase(profile, input, days) {
   const regions = days.map((day) => day.region);
+  if (profile.id !== "los-angeles") {
+    const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
+    const alternatives = profile.regions.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
+    return {
+      primary: primaryRegion.name,
+      alternatives,
+      reason: `${primaryRegion.name} is suggested as a practical planning base because it keeps the first itinerary pass central, flexible, and easier to verify for ${profile.canonicalName}.`,
+      tradeoffs: "This is a starter base recommendation. Confirm real lodging neighborhoods, transit access, parking, safety, and travel times before booking.",
+      splitStaySuggestion: input.numberOfDays >= 7 && input.lodging.changeHotels !== "Stay in one place" ? "A split stay may help if your verified must-do sights are far apart, but confirm distances first." : "One base is preferred until exact local distances are confirmed."
+    };
+  }
   const wantsQuiet = (input.alcohol.preferences || []).some((item) => /quiet|walk|sunset/i.test(item));
   const wantsNightlife = (input.alcohol.preferences || []).some((item) => /nightlife|live music|bars/i.test(item)) && input.alcohol.primary !== "No Alcohol";
   const lowWalking = /minimal|easy/i.test(input.walkingLimit || "");
@@ -571,13 +577,13 @@ export function regeneratePlanPreservingLocks(plan) {
       if (locked.length && draft.days[index]) draft.days[index].scheduleItems = [...locked, ...draft.days[index].scheduleItems];
     }
   });
-  refreshPlanTotals(draft, getDestinationProfile("los-angeles"));
+  refreshPlanTotals(draft, resolvePlanProfile(draft));
   return draft;
 }
 
 function mutatePlan(plan, fn) {
   const draft = structuredClone(plan);
-  const profile = getDestinationProfile(draft.generationMetadata.destinationProfileId);
+  const profile = resolvePlanProfile(draft);
   fn(draft, profile);
   refreshPlanTotals(draft, profile);
   return draft;
@@ -605,6 +611,13 @@ function refreshPlanTotals(plan, profile) {
   plan.overview = buildOverview(profile, plan.preferencesSnapshot, plan.days, plan.budgetSummary, plan.routeSummary);
 }
 
+function resolvePlanProfile(plan) {
+  return getDestinationProfile(plan.generationMetadata.destinationProfileId)
+    || plan.generationMetadata.destinationProfileSnapshot
+    || createGenericDestinationProfile(plan.destination)
+    || createGenericDestinationProfile(plan.preferencesSnapshot?.destination);
+}
+
 function buildFoodPlan(profile, input, constraints, days) {
   const mealRecommendations = days.map((day) => ({
     dayId: day.id,
@@ -621,7 +634,7 @@ function buildFoodPlan(profile, input, constraints, days) {
     dailyMealSummary: "Meals are placed around activity regions and preferred meal times using style recommendations rather than live restaurant availability.",
     dietaryHandlingSummary: constraints.dietarySummary,
     cuisineCoverage: (input.food.cuisine || []).length ? input.food.cuisine.join(", ") : "Varied local options",
-    reservationNotes: /reservation|must-do/i.test(input.food.reservations || "") ? "Plan reservations for must-do dinners, especially in West Hollywood, Santa Monica, and Malibu." : "Reservations are optional; verify hours and availability directly.",
+    reservationNotes: /reservation|must-do/i.test(input.food.reservations || "") ? `Plan reservations for must-do dinners in ${profile.canonicalName}, especially around the verified evening or central dining area.` : "Reservations are optional; verify hours and availability directly.",
     foodBudgetEstimate: input.food.foodBudgetPerPerson || "$15-$30 per person/day",
     mealRecommendations,
     foodAreas: profile.foodAreas.map((area) => ({ name: area.name, regionId: area.regionId, cuisines: area.cuisines, dietarySupport: area.dietarySupport })).slice(0, 6)
@@ -638,7 +651,7 @@ function buildRouteSummary(profile, days) {
     orderedStops,
     totalEstimatedDriveMinutes,
     totalEstimatedDistanceMiles,
-    routeLogicExplanation: "The planner groups each day by compatible Los Angeles regions to reduce repeated cross-city travel.",
+    routeLogicExplanation: `The planner groups each day by compatible ${profile.canonicalName} areas to reduce repeated cross-city travel.`,
     mapPlaceholderData: days.map((day) => ({ dayNumber: day.dayNumber, region: day.region, stops: day.scheduleItems.filter((item) => item.type === "activity").map((item) => item.title) })),
     trafficDisclaimer: "Drive times are planning estimates only; they are not live traffic predictions."
   };
@@ -661,7 +674,7 @@ function buildBudgetSummary(input, days) {
     { category: "Activities and admissions", low: roundMoney(activityLow), high: roundMoney(activityHigh), description: "Curated attraction cost estimates." },
     { category: "Food", low: roundMoney(foodLow), high: roundMoney(foodHigh), description: "Based on per-person food budget and three planned meals per day." },
     { category: "Local transportation or driving", low: roundMoney(driveLow), high: roundMoney(driveHigh), description: "Rental-car local driving and fuel-style planning estimate." },
-    { category: "Parking", low: roundMoney(parkingLow), high: roundMoney(parkingHigh), description: "Los Angeles parking varies by neighborhood and attraction." },
+    { category: "Parking", low: roundMoney(parkingLow), high: roundMoney(parkingHigh), description: "Parking varies by neighborhood, attraction, and lodging choice." },
     { category: "Optional evening activities", low: roundMoney(input.numberOfDays * 20), high: roundMoney(input.numberOfDays * 70), description: "Dessert, live music, or low-key evening options." },
     { category: "Contingency", low: contingencyLow, high: contingencyHigh, description: "Buffer for timing changes, snacks, and small route changes." }
   ];
@@ -696,8 +709,8 @@ function buildAdvisories(profile, input, constraints, days, budget) {
 function buildOverview(profile, input, days, budget, route) {
   const activities = days.flatMap((day) => day.scheduleItems).filter((item) => item.type === "activity");
   return {
-    title: `Your Los Angeles trip is ready`,
-    subtitle: `${input.numberOfDays} day${input.numberOfDays === 1 ? "" : "s"} from ${input.origin || "your origin"} to Los Angeles.`,
+    title: `Your ${profile.canonicalName} trip is ready`,
+    subtitle: `${input.numberOfDays} day${input.numberOfDays === 1 ? "" : "s"} from ${input.origin || "your origin"} to ${profile.canonicalName}.`,
     destinationSummary: profile.summary,
     travelerSummary: `${input.travelers} traveler${input.travelers === 1 ? "" : "s"} · ${input.groupType}`,
     dateSummary: `${formatDisplayDate(input.startDate)} – ${formatDisplayDate(input.endDate)} (${input.numberOfDays} days / ${calculateTripNights(input.numberOfDays)} nights)`,
@@ -705,7 +718,7 @@ function buildOverview(profile, input, days, budget, route) {
     planningHighlights: [
       "Regional days reduce unnecessary cross-city driving.",
       "Meal recommendations apply group food preferences and traveler restrictions.",
-      "Outdoor-heavy days include backup options when local data supports them.",
+      "Outdoor-heavy days include backup options where alternatives are available.",
       "Drive times, costs, and hours are estimates, not live data."
     ],
     estimatedTotalCost: moneyRange(budget.totalLow, budget.totalHigh),
@@ -741,7 +754,7 @@ function validateDay(day) {
 }
 
 export function compatibleAlternatives(plan, itemId) {
-  const profile = getDestinationProfile(plan.generationMetadata.destinationProfileId);
+  const profile = resolvePlanProfile(plan);
   const current = plan.days.flatMap((day) => day.scheduleItems).find((item) => item.id === itemId);
   if (!profile || !current) return [];
   const input = plan.preferencesSnapshot;

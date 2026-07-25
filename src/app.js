@@ -609,7 +609,7 @@ function dayCard(day) {
     <div class="weather-note"><strong>Weather note:</strong> ${esc(day.weatherPlanningNote)}</div>
     ${day.warnings.length ? `<div class="warning-list">${day.warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
     <ol class="timeline">${day.scheduleItems.map((item) => timelineItem(item)).join("")}</ol>
-    <div class="backup-options"><h4>Backup options</h4>${day.backupOptions.length ? day.backupOptions.map((backup) => `<article><strong>${esc(backup.title)}</strong><p>${esc(backup.reason)}</p><small>${esc(formatMinutes(backup.estimatedDurationMinutes))} · ${esc(backup.indoorOutdoor)} · ${esc(backup.accessibilityNotes)}</small></article>`).join("") : `<p>No same-region backup is available in the local data for this day.</p>`}</div>
+    <div class="backup-options"><h4>Backup options</h4>${day.backupOptions.length ? day.backupOptions.map((backup) => `<article><strong>${esc(backup.title)}</strong><p>${esc(backup.reason)}</p><small>${esc(formatMinutes(backup.estimatedDurationMinutes))} · ${esc(backup.indoorOutdoor)} · ${esc(backup.accessibilityNotes)}</small></article>`).join("") : `<p>No same-region backup is available for this day.</p>`}</div>
     <p class="reasoning-summary">${esc(day.generationReasoningSummary)}</p>
   </article>`;
 }
