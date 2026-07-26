@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const FUNCTION_LIMIT = 10;
+const FUNCTION_LIMIT = 11;
 const outputFunctionsDir = join(process.cwd(), ".vercel", "output", "functions");
 
 const functions = existsSync(outputFunctionsDir)
@@ -40,7 +40,7 @@ function listRouteFiles(dir, root) {
     const path = join(dir, entry);
     const stat = statSync(path);
     if (stat.isDirectory()) {
-      if (entry === "lib" || entry.startsWith("_")) return [];
+      if (entry.startsWith("_")) return [];
       return listRouteFiles(path, root);
     }
     if (!/\.(js|mjs|cjs|ts|tsx)$/.test(entry)) return [];

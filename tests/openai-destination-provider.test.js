@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { handlePlannerAction } from "../api/lib/planner-actions.js";
-import { providerStatus } from "../api/lib/env.js";
+import { handlePlannerAction } from "../server/lib/planner-actions.js";
+import { providerStatus } from "../server/lib/env.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = captureEnv();

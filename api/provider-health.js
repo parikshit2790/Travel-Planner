@@ -1,5 +1,5 @@
-import { parseActionRequest, sendActionError, sendSuccess } from "./lib/action-response.js";
-import { handleProviderHealthAction } from "./lib/provider-health-actions.js";
+import { parseActionRequest, sendActionError, sendSuccess } from "../server/lib/action-response.js";
+import { handleProviderHealthAction } from "../server/lib/provider-health-actions.js";
 
 export default async function handler(req, res) {
   setProviderHealthHeaders(res);

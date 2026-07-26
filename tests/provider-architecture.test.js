@@ -3,8 +3,8 @@ import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
 import { registerGeneratedDestinationProfile } from "../src/destination-data.js";
 import { generateTripPlan } from "../src/planner.js";
-import { mockDestinationResearch } from "../api/lib/mock-provider.js";
-import { providerStatus, validatePlanningProviders } from "../api/lib/env.js";
+import { mockDestinationResearch } from "../server/lib/mock-provider.js";
+import { providerStatus, validatePlanningProviders } from "../server/lib/env.js";
 
 const apiFiles = [
   "api/planner.js",
@@ -28,7 +28,7 @@ const removedApiFiles = [
 ];
 removedApiFiles.forEach((file) => assert.equal(fs.existsSync(file), false, `${file} should be removed`));
 
-const plannerActions = fs.readFileSync("api/lib/planner-actions.js", "utf8");
+const plannerActions = fs.readFileSync("server/lib/planner-actions.js", "utf8");
 assert.ok(!plannerActions.includes("https://api.openai.com/v1/responses"));
 assert.ok(plannerActions.includes("validatePlanningProviders"));
 assert.ok(plannerActions.includes("researchDestination"));
@@ -105,7 +105,7 @@ const devStatus = providerStatus({ production: false, development: true, placePr
 assert.ok(devStatus.diagnostics.placeProviderMissing.includes("PLACE_PROVIDER"));
 assert.ok(devStatus.diagnostics.routeProviderMissing.includes("ROUTE_PROVIDER"));
 
-const statusApi = fs.readFileSync("api/lib/provider-health-actions.js", "utf8");
+const statusApi = fs.readFileSync("server/lib/provider-health-actions.js", "utf8");
 assert.ok(statusApi.includes("includeDiagnostics"));
 assert.ok(statusApi.includes("config.development"));
 

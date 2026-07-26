@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { providerStatus } from "../api/lib/env.js";
-import { hasMockDestinationData, mockDestinationResearch, mockLocationSearch, mockRouteEstimate } from "../api/lib/mock-provider.js";
+import { providerStatus } from "../server/lib/env.js";
+import { hasMockDestinationData, mockDestinationResearch, mockLocationSearch, mockRouteEstimate } from "../server/lib/mock-provider.js";
 
 const configured = providerStatus({
   production: false,

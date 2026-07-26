@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
-import { handleLocationAction } from "../api/lib/location-actions.js";
-import { handlePlannerAction } from "../api/lib/planner-actions.js";
-import { handleProviderHealthAction } from "../api/lib/provider-health-actions.js";
+import { handleLocationAction } from "../server/lib/location-actions.js";
+import { handlePlannerAction } from "../server/lib/planner-actions.js";
+import { handleProviderHealthAction } from "../server/lib/provider-health-actions.js";
 import plannerHandler from "../api/planner.js";
 import providerHealthHandler from "../api/provider-health.js";
 
 const apiRouteFiles = fs.readdirSync("api").filter((entry) => /\.(js|ts)$/.test(entry)).sort();
 assert.deepEqual(apiRouteFiles, ["locations.js", "planner.js", "provider-health.js"]);
 
-const actionResponse = fs.readFileSync("api/lib/action-response.js", "utf8");
+const actionResponse = fs.readFileSync("server/lib/action-response.js", "utf8");
 assert.ok(actionResponse.includes("METHOD_NOT_ALLOWED"));
 assert.ok(actionResponse.includes("ACTION_REQUIRED") || fs.readFileSync("api/planner.js", "utf8").includes("ACTION_REQUIRED"));
-assert.equal(/\.\.\/\.\.\/src\/[^"']+\?v=/.test(fs.readFileSync("api/lib/planner-actions.js", "utf8")), false);
+assert.equal(/\.\.\/\.\.\/src\/[^"']+\?v=/.test(fs.readFileSync("server/lib/planner-actions.js", "utf8")), false);
 
 const unknownPlanner = await handlePlannerAction("not-real", {});
 assert.equal(unknownPlanner.status, 400);

@@ -1,5 +1,5 @@
-import { parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "./lib/action-response.js";
-import { handleLocationAction } from "./lib/location-actions.js";
+import { parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "../server/lib/action-response.js";
+import { handleLocationAction } from "../server/lib/location-actions.js";
 
 export default async function handler(req, res) {
   if (!requireActionPost(req, res)) return;

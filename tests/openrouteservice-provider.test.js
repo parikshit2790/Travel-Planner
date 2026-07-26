@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { providerStatus } from "../api/lib/env.js";
-import { handleLocationAction } from "../api/lib/location-actions.js";
-import { handlePlannerAction } from "../api/lib/planner-actions.js";
+import { providerStatus } from "../server/lib/env.js";
+import { handleLocationAction } from "../server/lib/location-actions.js";
+import { handlePlannerAction } from "../server/lib/planner-actions.js";
 import {
   openRouteServiceDestinationResearch,
   openRouteServiceLocationSearch,
   openRouteServiceRouteEstimate
-} from "../api/lib/openrouteservice-provider.js";
+} from "../server/lib/openrouteservice-provider.js";
 
 const secret = "ors-secret-value";
 const requiredLocations = new Map([

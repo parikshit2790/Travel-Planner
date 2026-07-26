@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { providerConfig, providerStatus } from "../api/lib/env.js";
-import { googleDestinationResearch, googleLocationSearch, googleProviderHealthCheck, googleRouteEstimate, googleRouteMatrixSmokeCheck } from "../api/lib/google-provider.js";
-import { handleLocationAction } from "../api/lib/location-actions.js";
-import { handlePlannerAction } from "../api/lib/planner-actions.js";
-import { handleProviderHealthAction } from "../api/lib/provider-health-actions.js";
+import { providerConfig, providerStatus } from "../server/lib/env.js";
+import { googleDestinationResearch, googleLocationSearch, googleProviderHealthCheck, googleRouteEstimate, googleRouteMatrixSmokeCheck } from "../server/lib/google-provider.js";
+import { handleLocationAction } from "../server/lib/location-actions.js";
+import { handlePlannerAction } from "../server/lib/planner-actions.js";
+import { handleProviderHealthAction } from "../server/lib/provider-health-actions.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = captureEnv();

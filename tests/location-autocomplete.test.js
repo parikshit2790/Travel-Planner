@@ -15,7 +15,7 @@ import {
   rankLocations
 } from "../src/location-provider.js";
 import { initialState } from "../src/seed.js";
-import { mockLocationSearch } from "../api/lib/mock-provider.js";
+import { mockLocationSearch } from "../server/lib/mock-provider.js";
 
 const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");

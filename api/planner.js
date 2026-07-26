@@ -1,5 +1,5 @@
-import { createRequestId, parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "./lib/action-response.js";
-import { handlePlannerAction } from "./lib/planner-actions.js";
+import { createRequestId, parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "../server/lib/action-response.js";
+import { handlePlannerAction } from "../server/lib/planner-actions.js";
 
 export default async function handler(req, res) {
   const requestId = createRequestId("planner");
