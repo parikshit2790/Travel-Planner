@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { handlePlannerAction } from "../server/lib/planner-actions.js";
-import { providerStatus } from "../server/lib/env.js";
+import { openAiSmokeCheck } from "../server/lib/openai-destination-provider.js";
+import { providerConfig, providerStatus } from "../server/lib/env.js";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = captureEnv();
@@ -15,17 +16,23 @@ process.env.AI_PROVIDER = "openai";
 process.env.OPENAI_API_KEY = secret;
 process.env.AI_MODEL = "gpt-5-mini";
 
-globalThis.fetch = async (url, options = {}) => {
-  const parsed = new URL(String(url));
-  if (parsed.hostname === "api.openai.com") {
-    assert.equal(options.headers.Authorization, `Bearer ${secret}`);
-    const request = JSON.parse(options.body);
-    assert.equal(request.model, "gpt-5-mini");
-    assert.ok(JSON.stringify(request).includes("web_search_preview"));
-    return mockJson({ output_text: JSON.stringify(parisProfile()) });
-  }
-  return mockJson({ features: [locationFeature("Paris", "Ile-de-France", "France", 2.3522, 48.8566)] });
-};
+setHappyOpenAiFetch();
+
+function setHappyOpenAiFetch() {
+  globalThis.fetch = async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.hostname === "api.openai.com") {
+      assert.equal(options.headers.Authorization, `Bearer ${secret}`);
+      const request = JSON.parse(options.body);
+      assert.equal(request.model, "gpt-5-mini");
+      if (JSON.stringify(request).includes("web_search_preview")) {
+        return mockJson({ output_text: JSON.stringify(parisProfile()) });
+      }
+      return mockJson({ output_text: JSON.stringify({ ok: true, provider: "openai" }) });
+    }
+    return mockJson({ features: [locationFeature("Paris", "Ile-de-France", "France", 2.3522, 48.8566)] });
+  };
+}
 
 try {
   const status = providerStatus({
@@ -45,6 +52,29 @@ try {
   assert.equal(status.canGenerate, true);
   assert.equal(status.aiProvider.status, "available");
   assert.equal(JSON.stringify(status).includes(secret), false);
+  process.env.AI_PROVIDER = " OPENAI ";
+  assert.equal(providerConfig().aiProvider, "openai");
+  process.env.AI_PROVIDER = "openai";
+  assert.equal(providerStatus({ ...baseConfig(), aiApiKey: "" }).aiProvider.configured, false);
+  assert.equal(providerStatus({ ...baseConfig(), aiProvider: "not-openai" }).canGenerate, false);
+
+  const smoke = await openAiSmokeCheck(baseConfig());
+  assert.equal(smoke.ok, true);
+  assert.equal(smoke.model, "gpt-5-mini");
+  assert.equal(smoke.httpStatus, 200);
+
+  await assertOpenAiSmokeFailure(401, "invalid_api_key", "Incorrect API key provided.", "AI_AUTH_FAILED");
+  await assertOpenAiSmokeFailure(401, "invalid_api_key", "This API key has been revoked.", "AI_AUTH_FAILED");
+  await assertOpenAiSmokeFailure(403, "permission_denied", "You do not have access to this project.", "AI_PERMISSION_DENIED");
+  await assertOpenAiSmokeFailure(404, "model_not_found", "The model does not exist.", "AI_MODEL_UNAVAILABLE");
+  await assertOpenAiSmokeFailure(400, "invalid_request_error", "The model is unsupported.", "AI_MODEL_UNAVAILABLE");
+  await assertOpenAiSmokeFailure(400, "invalid_request_error", "Invalid schema for response_format.", "AI_INVALID_REQUEST");
+  await assertOpenAiSmokeFailure(429, "insufficient_quota", "You exceeded your current quota, please check your plan and billing details.", "AI_QUOTA_EXCEEDED");
+  await assertOpenAiSmokeFailure(429, "rate_limit_exceeded", "Rate limit reached.", "AI_RATE_LIMITED");
+  await assertOpenAiSmokeFailure(500, "server_error", "Server error.", "AI_PROVIDER_UNAVAILABLE");
+  await assertOpenAiMalformedResponse();
+  await assertOpenAiTimeout();
+  setHappyOpenAiFetch();
 
   const trip = {
     from: "Charlotte, North Carolina, United States",
@@ -92,6 +122,63 @@ try {
 }
 
 console.log("OpenAI destination provider tests passed");
+
+function baseConfig() {
+  return {
+    production: true,
+    development: false,
+    placeProvider: "google",
+    routeProvider: "google",
+    googleMapsApiKey: "google-secret",
+    openRouteServiceApiKey: "",
+    placeApiKey: "",
+    routeApiKey: "",
+    weatherProvider: "",
+    weatherApiKey: "",
+    aiProvider: "openai",
+    aiApiKey: secret,
+    aiModel: "gpt-5-mini",
+    timeoutMs: 10000
+  };
+}
+
+async function assertOpenAiSmokeFailure(status, code, message, expectedCode) {
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(new URL(String(url)).hostname, "api.openai.com");
+    assert.equal(String(url).includes(secret), false);
+    assert.equal(options.headers.Authorization, `Bearer ${secret}`);
+    return mockJson({ error: { code, type: code, message } }, status);
+  };
+  await assert.rejects(() => openAiSmokeCheck(baseConfig()), (error) => {
+    assert.equal(error.code, expectedCode);
+    assert.equal(error.status, status);
+    assert.equal(JSON.stringify(error).includes(secret), false);
+    return true;
+  });
+  setHappyOpenAiFetch();
+}
+
+async function assertOpenAiMalformedResponse() {
+  globalThis.fetch = async () => mockJson({ output_text: "{not-json" });
+  await assert.rejects(() => openAiSmokeCheck(baseConfig()), (error) => {
+    assert.equal(error.code, "AI_INVALID_RESPONSE");
+    assert.equal(error.status, 502);
+    return true;
+  });
+}
+
+async function assertOpenAiTimeout() {
+  globalThis.fetch = async () => {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    throw error;
+  };
+  await assert.rejects(() => openAiSmokeCheck(baseConfig()), (error) => {
+    assert.equal(error.code, "AI_TIMEOUT");
+    assert.equal(error.status, 408);
+    return true;
+  });
+}
 
 function parisProfile() {
   const regions = [

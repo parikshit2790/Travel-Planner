@@ -43,7 +43,7 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   if (config.routeProvider === "google" && !googleMapsKey) routeMissing.push("GOOGLE_MAPS_API_KEY");
   if (config.placeProvider === "opentripmap" && !config.placeApiKey) placeMissing.push("PLACE_API_KEY");
   if (config.weatherProvider && !config.weatherApiKey && !["open-meteo", "mock"].includes(config.weatherProvider)) weatherMissing.push("WEATHER_API_KEY");
-  if (config.aiProvider && !config.aiApiKey) aiMissing.push("AI_API_KEY");
+  if (config.aiProvider && !config.aiApiKey) aiMissing.push("OPENAI_API_KEY");
   const placeImplemented = ["mock", "openrouteservice", "google"].includes(config.placeProvider);
   const routeImplemented = ["mock", "approximate", "openrouteservice", "google"].includes(config.routeProvider);
   const weatherImplemented = !config.weatherProvider;

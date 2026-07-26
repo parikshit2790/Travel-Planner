@@ -1,19 +1,15 @@
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_SOURCE_URL = "https://openai.com";
+const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
+const DEFAULT_TIMEOUT_MS = 10000;
 
 export async function openAiDestinationResearch(destination, trip = {}, config = {}) {
   const apiKey = config.aiApiKey || "";
   if (!apiKey) throw aiProviderError("OPENAI_API_KEY_REQUIRED", "AI destination research is not configured.", false, 500);
   const destinationName = String(trip?.destinationDisplay || trip?.destination || destination || "").trim();
   if (!destinationName) throw aiProviderError("DESTINATION_REQUIRED", "Destination is required.", false, 400);
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: config.aiModel || "gpt-5-mini",
+  const { response, json } = await postOpenAiResponse(config, {
+      model: openAiModel(config),
       tools: [{ type: "web_search_preview" }],
       input: [
         {
@@ -34,13 +30,9 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
         }
       },
       max_output_tokens: 7000
-    })
-  });
-  const json = await response.json().catch(() => ({}));
+    });
   if (!response.ok) {
-    if (response.status === 429) throw aiProviderError("AI_PROVIDER_RATE_LIMITED", "AI destination research is temporarily busy.", true, response.status);
-    if (response.status === 401 || response.status === 403) throw aiProviderError("AI_PROVIDER_AUTH_FAILED", "AI destination research authorization failed.", false, response.status);
-    throw aiProviderError("AI_DESTINATION_RESEARCH_FAILED", publicOpenAiMessage(json) || "AI destination research failed.", response.status >= 500, response.status);
+    throw openAiErrorFromResponse(response, json, "AI destination research failed.");
   }
   const parsed = parseStructuredOutput(json);
   const profile = normalizeAiDestinationProfile(parsed, destinationName);
@@ -51,15 +43,20 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
 export async function openAiSmokeCheck(config = {}) {
   const apiKey = config.aiApiKey || "";
   if (!apiKey) throw aiProviderError("OPENAI_API_KEY_REQUIRED", "AI destination research is not configured.", false, 500);
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: config.aiModel || "gpt-5-mini",
-      input: "Return JSON only: {\"ok\":true,\"provider\":\"openai\"}.",
+  const model = openAiModel(config);
+  const startedAt = Date.now();
+  const { response, json } = await postOpenAiResponse(config, {
+      model,
+      input: [
+        {
+          role: "system",
+          content: "Return only the requested structured JSON. No prose."
+        },
+        {
+          role: "user",
+          content: "Return ok=true and provider=openai."
+        }
+      ],
       text: {
         format: {
           type: "json_schema",
@@ -76,18 +73,73 @@ export async function openAiSmokeCheck(config = {}) {
           }
         }
       },
-      max_output_tokens: 80
-    })
-  });
-  const json = await response.json().catch(() => ({}));
+      max_output_tokens: 300
+    });
   if (!response.ok) {
-    if (response.status === 429) throw aiProviderError("RATE_LIMITED", "AI destination research is temporarily busy.", true, response.status);
-    if (response.status === 401 || response.status === 403) throw aiProviderError("PROVIDER_AUTH_FAILED", "AI destination research authorization failed.", false, response.status);
-    throw aiProviderError(response.status >= 500 ? "PROVIDER_UNAVAILABLE" : "PROVIDER_CONFIGURATION_REQUIRED", "AI destination research failed.", response.status >= 500, response.status);
+    throw openAiErrorFromResponse(response, json, "AI smoke check failed.");
   }
-  const parsed = parseStructuredOutput(json);
-  if (parsed?.ok !== true) throw aiProviderError("INVALID_PROVIDER_RESPONSE", "AI smoke check returned an invalid response.", true, 502);
-  return { ok: true, provider: "openai" };
+  let parsed;
+  try {
+    parsed = parseStructuredOutput(json);
+  } catch {
+    throw aiProviderError("AI_INVALID_RESPONSE", "AI smoke check returned malformed structured output.", true, 502);
+  }
+  if (parsed?.ok !== true || parsed?.provider !== "openai") {
+    throw aiProviderError("AI_INVALID_RESPONSE", "AI smoke check returned an invalid response.", true, 502);
+  }
+  return {
+    ok: true,
+    provider: "openai",
+    model,
+    httpStatus: response.status,
+    durationMs: Date.now() - startedAt
+  };
+}
+
+async function postOpenAiResponse(config, body) {
+  const apiKey = config.aiApiKey || "";
+  if (!apiKey) throw aiProviderError("OPENAI_API_KEY_REQUIRED", "AI destination research is not configured.", false, 500);
+  const timeoutMs = Number(config.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  try {
+    const response = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const json = await response.json().catch(() => ({}));
+    return { response, json };
+  } catch (error) {
+    if (error?.name === "AbortError") throw aiProviderError("AI_TIMEOUT", "AI destination research timed out.", true, 408);
+    throw aiProviderError("AI_PROVIDER_UNAVAILABLE", "AI destination research network request failed.", true, 503);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function openAiModel(config) {
+  return clean(config.aiModel) || DEFAULT_OPENAI_MODEL;
+}
+
+function openAiErrorFromResponse(response, json, fallbackMessage) {
+  const status = Number(response?.status || 0);
+  const message = publicOpenAiMessage(json);
+  const rawCode = String(json?.error?.code || json?.error?.type || "").toLowerCase();
+  const combined = `${rawCode} ${message}`.toLowerCase();
+  if (status === 401) return aiProviderError("AI_AUTH_FAILED", "AI authentication failed.", false, status);
+  if (status === 403) return aiProviderError("AI_PERMISSION_DENIED", "AI provider permission denied.", false, status);
+  if (status === 404 && /model|not found|does not exist/.test(combined)) return aiProviderError("AI_MODEL_UNAVAILABLE", "Configured AI model is unavailable.", false, status);
+  if (status === 429 && /quota|billing|insufficient|credit/.test(combined)) return aiProviderError("AI_QUOTA_EXCEEDED", "AI provider quota or billing is unavailable.", true, status);
+  if (status === 429) return aiProviderError("AI_RATE_LIMITED", "AI provider is rate limited.", true, status);
+  if (status === 400 && /model|unsupported/.test(combined)) return aiProviderError("AI_MODEL_UNAVAILABLE", "Configured AI model is unavailable.", false, status);
+  if (status === 400) return aiProviderError("AI_INVALID_REQUEST", message || fallbackMessage, false, status);
+  if (status >= 500) return aiProviderError("AI_PROVIDER_UNAVAILABLE", "AI provider is temporarily unavailable.", true, status);
+  return aiProviderError("AI_PROVIDER_UNAVAILABLE", message || fallbackMessage, status >= 500, status || 503);
 }
 
 function destinationPrompt(destinationName, trip) {

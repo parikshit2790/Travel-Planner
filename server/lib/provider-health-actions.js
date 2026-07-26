@@ -50,14 +50,30 @@ async function runLiveChecks(config, requestId) {
 
 async function smokeOperation(requestId, provider, operation, callback) {
   const startedAt = Date.now();
-  console.info("[RouteMosaic provider-health]", JSON.stringify({ requestId, provider, operation, adapterInitialized: true, requestStarted: true }));
+  const config = providerConfig();
+  const base = provider === "openai"
+    ? { requestId, provider, operation, adapterInitialized: true, requestStarted: true, model: config.aiModel, keyPresent: Boolean(config.aiApiKey) }
+    : { requestId, provider, operation, adapterInitialized: true, requestStarted: true };
+  console.info("[RouteMosaic provider-health]", JSON.stringify(base));
   try {
-    await callback();
-    const safe = { success: true, httpStatus: 200, errorCode: "", durationMs: Date.now() - startedAt };
+    const result = await callback();
+    const safe = {
+      success: true,
+      httpStatus: result?.httpStatus || 200,
+      errorCode: "",
+      durationMs: result?.durationMs ?? Date.now() - startedAt,
+      ...(provider === "openai" ? { model: result?.model || config.aiModel, keyPresent: Boolean(config.aiApiKey) } : {})
+    };
     console.info("[RouteMosaic provider-health]", JSON.stringify({ requestId, provider, operation, ...safe }));
     return safe;
   } catch (error) {
-    const safe = { success: false, httpStatus: error?.status || 0, errorCode: sanitizeErrorCode(error?.code), durationMs: Date.now() - startedAt };
+    const safe = {
+      success: false,
+      httpStatus: error?.status || 0,
+      errorCode: sanitizeErrorCode(error?.code),
+      durationMs: Date.now() - startedAt,
+      ...(provider === "openai" ? { model: config.aiModel, keyPresent: Boolean(config.aiApiKey) } : {})
+    };
     console.info("[RouteMosaic provider-health]", JSON.stringify({ requestId, provider, operation, ...safe }));
     return safe;
   }

@@ -43,7 +43,7 @@ Supported provider adapters in this build:
 - `ROUTE_PROVIDER=openrouteservice` for live driving and walking route duration and distance estimates.
 - `ROUTE_PROVIDER=google` for Google Routes API route duration, distance, and route matrix smoke checks.
 - Empty `WEATHER_PROVIDER` returns seasonal guidance only.
-- `AI_PROVIDER=openai` enables AI-assisted destination intelligence for high-quality worldwide trip profiles. `AI_API_KEY` or `OPENAI_API_KEY` must be set server-side only. In production, RouteMosaic treats live place/route providers without destination intelligence as not ready for full trip generation.
+- `AI_PROVIDER=openai` enables AI-assisted destination intelligence for high-quality worldwide trip profiles. `OPENAI_API_KEY` must be set server-side only. `AI_API_KEY` is accepted as a legacy alias, but production should use `OPENAI_API_KEY`. In production, RouteMosaic treats live place/route providers without destination intelligence as not ready for full trip generation.
 
 Mock providers are for local development and deterministic tests. Public production worldwide planning should use Google Places/Routes plus OpenAI destination intelligence. Do not put secret keys in public frontend variables.
 
@@ -174,7 +174,9 @@ pnpm run verify:vercel-functions
 
 `test:providers` checks the mock contract, openrouteservice adapter contract, and Google/OpenAI provider contract with mocked network responses. Google coverage includes Raleigh, Austin, Houston, Charlotte, Dallas, Detroit, one route, one route matrix, and provider-health aggregation. Do not run live-provider smoke tests in CI without secrets.
 
-`verify:vercel-functions` reads `.vercel/output/functions` when Vercel output exists. Otherwise it counts deployable source route files under `api/`, `pages/api/`, `src/api/`, `app/api/`, and `functions/`, excluding shared `lib` folders. The limit is 10 functions.
+`pnpm test:openai` performs one server-side OpenAI Responses API smoke check with the configured `OPENAI_API_KEY` and `AI_MODEL`. It prints only safe status, model, HTTP status, structured-output validity, duration, and sanitized error code.
+
+`verify:vercel-functions` reads `.vercel/output/functions` when Vercel output exists. Otherwise it counts deployable source route files under `api/`, `pages/api/`, `src/api/`, `app/api/`, and `functions/`. Keep shared server helpers outside `api/` so Vercel does not count them as functions. The RouteMosaic limit is 11 functions, keeping deployment safely under the Hobby-plan cap of 12.
 
 ## Known Limitations
 
