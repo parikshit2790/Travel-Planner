@@ -271,6 +271,17 @@ export function buildDays(profile, input, constraints, scored) {
 }
 
 function destinationDayThemes(profile, input) {
+  if (profile.id === "charlotte") {
+    return rotate([
+      ["uptown", "south-end"],
+      ["freedom-park", "south-end", "plaza-midwood"],
+      ["noda", "camp-north-end", "plaza-midwood"],
+      ["whitewater-center"],
+      ["lake-norman"],
+      ["carowinds"],
+      ["concord", "uptown"]
+    ], input.variationSeed).slice(0, input.numberOfDays);
+  }
   if (profile.id === "detroit") {
     return rotate([
       ["downtown", "santa-monica"],

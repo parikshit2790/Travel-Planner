@@ -18,8 +18,12 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
     openRouteServicePoiCandidates(center, POI_CATEGORY_GROUP_IDS, config, destinationName, "places"),
     openRouteServicePoiCandidates(center, FOOD_CATEGORY_GROUP_IDS, config, destinationName, "food")
   ]);
-  const poiFeatures = dedupePoiFeatures(placesResponse).filter(hasPoiName);
-  const foodFeatures = dedupePoiFeatures(foodResponse).filter(hasPoiName);
+  const poiFeatures = dedupePoiFeatures(placesResponse)
+    .filter(isTravelWorthyPoi)
+    .sort((a, b) => poiTravelScore(b, destinationName) - poiTravelScore(a, destinationName));
+  const foodFeatures = dedupePoiFeatures(foodResponse)
+    .filter(isFoodWorthyPoi)
+    .sort((a, b) => poiTravelScore(b, destinationName) - poiTravelScore(a, destinationName));
   if (poiFeatures.length < 8) {
     throw providerError("DESTINATION_RESEARCH_INSUFFICIENT", "Not enough destination candidates were returned.", false);
   }
@@ -367,6 +371,45 @@ function dedupePoiFeatures(features) {
 
 function hasPoiName(feature) {
   return Boolean(poiName(feature));
+}
+
+function isTravelWorthyPoi(feature) {
+  if (!hasPoiName(feature) || !feature?.geometry?.coordinates) return false;
+  const name = poiName(feature).toLowerCase();
+  const props = feature.properties || {};
+  const layer = String(props.layer || "").toLowerCase();
+  const text = poiSearchText(feature);
+  if (["locality", "localadmin", "county", "region", "country", "address", "street"].includes(layer)) return false;
+  if (/\b(town of|city of|county of|municipality|township|borough|village of)\b/.test(name)) return false;
+  if (/\b(hotel|motel|inn|suites|lodging|apartment|apartments|condo|realty|realtor|insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto|tires|gas station|fuel|parking|garage|warehouse|storage|school|academy|elementary|middle school|high school|church|cemetery|funeral|police|fire station|post office|courthouse)\b/.test(name)) return false;
+  if (/\b(accommodation|hotel|motel|office|finance|insurance|healthcare|medical|education|school|residential|parking|fuel|automotive|government|administrative|religion|cemetery)\b/.test(text)) return false;
+  return poiTravelScore(feature) >= 35;
+}
+
+function isFoodWorthyPoi(feature) {
+  if (!hasPoiName(feature) || !feature?.geometry?.coordinates) return false;
+  const name = poiName(feature).toLowerCase();
+  const text = poiSearchText(feature);
+  if (/\b(hotel|motel|inn|school|insurance|bank|office|pharmacy|gas station|parking)\b/.test(name)) return false;
+  return /\b(restaurant|cafe|coffee|bakery|bar|brewery|food|market|dining|sustenance)\b/.test(text) || poiCategory(feature) === "food";
+}
+
+function poiTravelScore(feature, destinationName = "") {
+  const name = poiName(feature).toLowerCase();
+  const text = poiSearchText(feature);
+  let score = 0;
+  if (/\b(museum|gallery|science center|hall of fame|aquarium|botanical|garden|park|greenway|trail|theater|theatre|performing arts|historic|monument|memorial|landmark|viewpoint|overlook|waterfront|riverwalk|market|food hall|arts district|visitor center|zoo|amusement|theme park|stadium|arena)\b/.test(text)) score += 60;
+  if (/\b(national|state park|nature preserve|conservatory|arboretum|heritage|cultural|public art|scenic)\b/.test(text)) score += 20;
+  if (/\b(restaurant|cafe|bakery|brewery|market|food hall)\b/.test(text)) score += 12;
+  if (destinationName && name.includes(String(destinationName).toLowerCase().split(",")[0].trim())) score += 6;
+  if (name.length >= 4) score += 8;
+  if (/\b(church|cemetery|parking|school|office|hotel|insurance|bank|pharmacy|gas)\b/.test(text)) score -= 50;
+  return score;
+}
+
+function poiSearchText(feature) {
+  const props = feature?.properties || {};
+  return `${props.name || ""} ${props.label || ""} ${props.category_group || ""} ${props.category || ""} ${props.layer || ""} ${JSON.stringify(props.osm_tags || {})}`.toLowerCase();
 }
 
 function poiName(feature) {

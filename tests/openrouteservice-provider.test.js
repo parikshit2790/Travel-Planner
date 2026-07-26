@@ -160,6 +160,26 @@ try {
   assert.equal(generated.body.status, "ready");
   assert.ok(JSON.stringify(generated.body.plan).includes("Charlotte"));
   assert.equal(JSON.stringify(generated.body.plan).includes("Santa Monica Pier"), false);
+  assert.equal(JSON.stringify(generated.body.plan).includes("Gatewood Insurance"), false);
+  assert.equal(JSON.stringify(generated.body.plan).includes("Hampton Inn"), false);
+
+  globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options, { noisyPois: true });
+  const filteredProfile = await openRouteServiceDestinationResearch("Test City", {
+    destinationLocation: {
+      canonicalName: "Test City, North Carolina, United States",
+      latitude: 35.2271,
+      longitude: -80.8431,
+      country: "United States",
+      stateOrProvince: "North Carolina"
+    }
+  }, providerConfigFixture());
+  const filteredPlanText = JSON.stringify(filteredProfile);
+  assert.equal(filteredPlanText.includes("Gatewood Insurance"), false);
+  assert.equal(filteredPlanText.includes("Hampton Inn"), false);
+  assert.equal(filteredPlanText.includes("Town of Indian Trail"), false);
+  assert.equal(filteredPlanText.includes("India Hook School"), false);
+  assert.ok(filteredPlanText.includes("Discovery Museum"));
+  globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options);
 
   const driving = await openRouteServiceRouteEstimate(
     { latitude: 35.2271, longitude: -80.8431 },
@@ -217,7 +237,7 @@ function providerConfigFixture() {
   };
 }
 
-function mockOpenRouteServiceFetch(url, options = {}) {
+function mockOpenRouteServiceFetch(url, options = {}, fixtures = {}) {
   assert.ok(!String(url).includes("undefined"));
   const parsed = new URL(String(url));
   if (options.method === "GET" || !options.method) assert.equal(parsed.searchParams.get("api_key"), secret);
@@ -228,6 +248,7 @@ function mockOpenRouteServiceFetch(url, options = {}) {
   if (parsed.pathname === "/pois") {
     const request = JSON.parse(options.body || "{}");
     const isFood = request.filters?.category_group_ids?.length === 1 && request.filters.category_group_ids[0] === 560;
+    if (fixtures.noisyPois) return mockJson({ features: isFood ? foodPoiFeatures() : noisyPoiFeatures() });
     return mockJson({ features: isFood ? foodPoiFeatures() : poiFeatures() });
   }
   if (parsed.pathname.includes("/v2/directions/")) {
@@ -268,7 +289,17 @@ function foodPoiFeatures() {
   return Array.from({ length: 5 }, (_, index) => poiFeature(`Local Dining ${index + 1}`, "restaurant", index));
 }
 
-function poiFeature(name, category, index) {
+function noisyPoiFeatures() {
+  return [
+    poiFeature("Gatewood Insurance", "office", 100),
+    poiFeature("Hampton Inn Charlotte-Uptown", "hotel", 101),
+    poiFeature("Town of Indian Trail", "administrative", 102, "localadmin"),
+    poiFeature("India Hook School", "school", 103),
+    ...Array.from({ length: 10 }, (_, index) => poiFeature(`Discovery Museum ${index + 1}`, index % 2 ? "museum" : "park", index))
+  ];
+}
+
+function poiFeature(name, category, index, layer = "venue") {
   return {
     type: "Feature",
     id: `poi-${index}-${category}`,
@@ -278,6 +309,7 @@ function poiFeature(name, category, index) {
       name,
       category_group: category,
       category,
+      layer,
       osm_tags: { name }
     }
   };

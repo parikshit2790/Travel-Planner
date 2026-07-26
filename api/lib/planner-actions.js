@@ -1,4 +1,4 @@
-import { registerGeneratedDestinationProfile } from "../../src/destination-data.js";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "../../src/destination-data.js";
 import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
@@ -149,6 +149,18 @@ function handleWeatherSummary({ destination = "", startDate = "", endDate = "" }
 }
 
 async function researchDestination(destination, trip, config) {
+  const curatedProfile = resolveDestinationProfile(destination);
+  if (curatedProfile && !String(curatedProfile.id || "").startsWith("generic-")) {
+    return {
+      ...curatedProfile,
+      sourceMetadata: {
+        ...(curatedProfile.sourceMetadata || {}),
+        provider: "curated",
+        retrievedAt: new Date().toISOString(),
+        freshness: "curated-local-profile"
+      }
+    };
+  }
   if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
   if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
   throw new Error("Place provider is not implemented in this build.");

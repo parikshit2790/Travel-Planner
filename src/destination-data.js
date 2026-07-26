@@ -103,6 +103,82 @@ export const destinationProfiles = [
     ]
   },
   {
+    id: "charlotte",
+    canonicalName: "Charlotte, North Carolina, USA",
+    aliases: ["charlotte", "charlotte nc", "charlotte north carolina", "charlotte north carolina united states", "queen city"],
+    country: "United States",
+    state: "North Carolina",
+    timezone: "America/New_York",
+    currency: "USD",
+    summary: "A compact but varied city best planned by district: Uptown museums and sports, South End food and the Rail Trail, NoDa arts, Plaza Midwood evenings, Freedom Park, plus nearby outdoor and day-trip anchors.",
+    seasonalNotes: [
+      "August is hot and humid; protect outdoor blocks with indoor backups, hydration, and lighter midday pacing.",
+      "Storms can move through quickly in summer, so keep museum, food hall, and indoor culture backups ready.",
+      "Major events, sports, concerts, and NASCAR race weekends can change lodging, traffic, and parking conditions."
+    ],
+    generalAdvisories: [
+      "Confirm attraction hours, timed tickets, parking rules, accessibility, and reservation needs directly before travel.",
+      "Nearby outings such as the Whitewater Center, Carowinds, Lake Norman, and Concord should be treated as half-day or full-day anchors.",
+      "Use rideshare or light rail for dense evening districts when parking or drinks are part of the plan."
+    ],
+    planningRules: {
+      defaultHotelRegion: "uptown",
+      maxRegionChangesRelaxed: 1,
+      maxRegionChangesBalanced: 2,
+      maxRegionChangesPacked: 3
+    },
+    regions: [
+      region("uptown", "Uptown Charlotte", "Museums, parks, sports venues, skyline views, restaurants, and the strongest first-time orientation base.", 35.2271, -80.8431, ["downtown", "museums", "sports", "walkable"], ["south-end", "freedom-park", "plaza-midwood"]),
+      region("south-end", "South End and Rail Trail", "Light rail, breweries, casual food, murals, shopping, and an easy evening corridor.", 35.211, -80.8607, ["food", "rail-trail", "evening", "local-neighborhood"], ["uptown", "freedom-park"]),
+      region("noda", "NoDa", "Arts district with murals, live music, independent food, breweries, and a lively but compact neighborhood feel.", 35.2479, -80.8041, ["art", "music", "food", "nightlife"], ["plaza-midwood", "camp-north-end", "uptown"]),
+      region("plaza-midwood", "Plaza Midwood", "Relaxed local restaurants, bars, coffee, boutiques, and evening energy east of Uptown.", 35.2217, -80.8126, ["food", "evening", "local-neighborhood"], ["noda", "uptown", "freedom-park"]),
+      region("freedom-park", "Freedom Park and Dilworth", "Green space, neighborhood streets, Little Sugar Creek Greenway, cafes, and easier outdoor time.", 35.1904, -80.8458, ["park", "greenway", "easy-walk"], ["uptown", "south-end"]),
+      region("camp-north-end", "Camp North End", "Adaptive reuse campus with art, food, markets, events, and a creative Charlotte feel.", 35.2473, -80.8344, ["art", "food", "events", "local-culture"], ["uptown", "noda"]),
+      region("whitewater-center", "U.S. National Whitewater Center area", "Outdoor adventure anchor with trails, rafting-style activities, zip lines, food, and riverfront-style relaxation.", 35.2726, -81.0062, ["outdoor", "adventure", "full-day"], ["uptown", "lake-norman"]),
+      region("lake-norman", "Lake Norman and Davidson", "Nearby lake towns, waterfront dining, Davidson main street, Cornelius, and a slower scenic half-day.", 35.4993, -80.8487, ["lake", "day-trip", "scenic", "food"], ["uptown", "whitewater-center"]),
+      region("concord", "Concord and motorsports", "Charlotte Motor Speedway, Concord Mills area, race-weekend energy, and northern suburbs.", 35.3525, -80.6866, ["motorsports", "shopping", "day-trip"], ["uptown", "noda"]),
+      region("carowinds", "Carowinds and south Charlotte", "Theme-park anchor and south-side family outing, best planned as a dedicated block.", 35.1047, -80.9431, ["theme-park", "family", "full-day"], ["uptown", "south-end"])
+    ],
+    places: [
+      place("nascar-hall-of-fame", "NASCAR Hall of Fame", "uptown", "Signature Charlotte museum for racing history, interactive exhibits, and a strong first-time Uptown anchor.", ["museum", "motorsports", "indoor"], ["Museums", "Sports", "Family activities"], 140, 25, 40, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 96),
+      place("romare-bearden-park", "Romare Bearden Park", "uptown", "Skyline-facing park near ballpark, restaurants, and short Uptown photo walks.", ["park", "skyline", "easy-walk"], ["Photography", "Easy outdoor walks", "Relaxation"], 50, 0, 0, "outdoor", "medium", "good", ["solo", "couple", "family", "senior"], "afternoon", 82),
+      place("mint-museum-uptown", "Mint Museum Uptown", "uptown", "Indoor art anchor in Uptown, easy to pair with Bechtler, Levine Center for the Arts, or a skyline meal.", ["museum", "art", "indoor"], ["Art", "Museums", "Architecture"], 120, 10, 25, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 88),
+      place("bechtler-museum", "Bechtler Museum of Modern Art area", "uptown", "Compact modern art and architecture stop near the Levine Center for the Arts.", ["museum", "art", "architecture"], ["Art", "Museums", "Architecture"], 80, 10, 25, "indoor", "low", "good", ["solo", "couple", "senior"], "afternoon", 78),
+      place("discovery-place-science", "Discovery Place Science", "uptown", "Hands-on science museum and reliable indoor backup for families, heat, or rain.", ["museum", "science", "family"], ["Museums", "Family activities", "Indoor backup"], 130, 20, 35, "indoor", "low", "good", ["solo", "couple", "family"], "morning", 84),
+      place("fourth-ward-walk", "Fourth Ward historic walk", "uptown", "Historic neighborhood loop with Victorian homes, pocket parks, and lower-cost city context.", ["history", "architecture", "walk"], ["History", "Architecture", "Photography"], 60, 0, 0, "outdoor", "medium", "moderate", ["solo", "couple", "family", "senior"], "morning", 76),
+      place("south-end-rail-trail", "South End Rail Trail", "south-end", "Walkable corridor for murals, shops, breweries, casual restaurants, and light-rail-friendly exploring.", ["walk", "food", "murals"], ["Evening walks", "Local culture", "Casual dining"], 100, 0, 35, "mixed", "medium", "good", ["solo", "couple", "family"], "afternoon", 86),
+      place("optimist-hall", "Optimist Hall", "uptown", "Food hall-style stop with flexible casual dining and group-friendly options near NoDa/Uptown transitions.", ["food", "market", "casual"], ["Food experiences", "Casual dining", "Cafes"], 75, 15, 35, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "lunch", 86),
+      place("noda-arts-district", "NoDa arts district", "noda", "Murals, live music, breweries, coffee, and independent restaurants in Charlotte's arts neighborhood.", ["art", "music", "food"], ["Art", "Live music", "Local culture"], 110, 0, 45, "mixed", "low", "moderate", ["solo", "couple", "family"], "evening", 88),
+      place("plaza-midwood-evening", "Plaza Midwood evening area", "plaza-midwood", "Local dinner, dessert, bars, and neighborhood streets for a more Charlotte-specific night.", ["evening", "food", "local-neighborhood"], ["Dessert or cafe evenings", "Bars", "Local culture"], 100, 15, 50, "mixed", "low", "moderate", ["solo", "couple"], "evening", 78),
+      place("freedom-park", "Freedom Park", "freedom-park", "Large park and lake area for easy walking, downtime, and a calm outdoor break close to Dilworth.", ["park", "nature", "easy-walk"], ["Nature", "Easy outdoor walks", "Relaxation"], 80, 0, 0, "outdoor", "high", "good", ["solo", "couple", "family", "senior"], "morning", 84),
+      place("little-sugar-creek-greenway", "Little Sugar Creek Greenway", "freedom-park", "Paved greenway segment for low-pressure walking, biking-style scenery, and neighborhood connections.", ["greenway", "walk", "nature"], ["Evening walks", "Nature", "Photography"], 70, 0, 0, "outdoor", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 80),
+      place("camp-north-end", "Camp North End", "camp-north-end", "Creative campus with murals, food vendors, events, markets, and a strong local Charlotte feel.", ["art", "food", "events"], ["Art", "Street food", "Local culture"], 110, 0, 45, "mixed", "low", "moderate", ["solo", "couple", "family"], "afternoon", 90),
+      place("whitewater-center", "U.S. National Whitewater Center", "whitewater-center", "Major nearby outdoor anchor for trails, rafting-style activities, zip lines, music events, and casual food.", ["outdoor", "adventure", "full-day"], ["Outdoor Activities", "Water Experiences", "Live music"], 240, 10, 90, "outdoor", "high", "moderate", ["solo", "couple", "family"], "morning", 94),
+      place("lake-norman-davidson", "Lake Norman and Davidson half-day", "lake-norman", "Waterfront towns, Davidson's main street, lake views, and slower dining north of Charlotte.", ["lake", "day-trip", "scenic"], ["Scenic drives", "Local cuisine", "Relaxation"], 180, 0, 45, "mixed", "medium", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 86),
+      place("carowinds", "Carowinds", "carowinds", "Theme park and water-park-style seasonal anchor south of Charlotte; keep it as a dedicated block.", ["theme-park", "family", "full-day"], ["Theme parks", "Family activities", "Entertainment"], 360, 45, 100, "mixed", "high", "moderate", ["solo", "couple", "family"], "full-day", 82),
+      place("charlotte-motor-speedway", "Charlotte Motor Speedway area", "concord", "Motorsports and race-event area northeast of Charlotte, strongest when tours or events match dates.", ["motorsports", "event", "day-trip"], ["Sports", "Entertainment", "Famous landmarks"], 150, 15, 80, "mixed", "medium", "moderate", ["solo", "couple", "family"], "afternoon", 76),
+      place("sullenberger-aviation-museum", "Sullenberger Aviation Museum", "uptown", "Aviation-focused indoor option near the airport side of Charlotte, useful for arrival/departure day or rainy backup.", ["museum", "aviation", "indoor"], ["Museums", "History", "Family activities"], 110, 15, 30, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 72),
+      place("daniel-stowe-botanical-garden", "Daniel Stowe Botanical Garden", "lake-norman", "Garden-focused nearby outing west of Charlotte for a slower scenic break when time allows.", ["garden", "day-trip", "nature"], ["Gardens", "Photography", "Relaxation"], 150, 15, 30, "mixed", "medium", "good", ["solo", "couple", "family", "senior"], "morning", 74),
+      place("indoor-uptown-backup", "Uptown indoor museum backup", "uptown", "Use Mint Museum, Bechtler, Discovery Place, or NASCAR Hall of Fame as weather-flexible swaps.", ["museum", "backup", "indoor"], ["Museums", "Indoor backup", "Family activities"], 120, 10, 40, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "afternoon", 70)
+    ],
+    foodAreas: [
+      foodArea("uptown-food", "Uptown restaurants and food halls", "uptown", ["American", "Italian", "Local cuisine", "Cafes", "Casual dining"], ["breakfast", "lunch", "dinner"], ["budget", "moderate", "premium"], ["Vegetarian", "Gluten-free", "Avoid pork"], ["quiet", "lively"]),
+      foodArea("south-end-food", "South End dining and breweries", "south-end", ["American", "Mexican", "Italian", "Cafes", "Casual dining"], ["lunch", "dinner"], ["moderate"], ["Vegetarian", "Vegan", "Gluten-free"], ["nightlife", "live-music"]),
+      foodArea("noda-food", "NoDa cafes, breweries, and casual food", "noda", ["American", "Mexican", "Cafes", "Bakeries", "Vegetarian-friendly"], ["breakfast", "lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Vegan"], ["live-music", "lively"]),
+      foodArea("plaza-midwood-food", "Plaza Midwood neighborhood dining", "plaza-midwood", ["American", "Mediterranean", "Mexican", "Desserts", "Bars"], ["dinner"], ["moderate"], ["Vegetarian", "Gluten-free"], ["nightlife", "quiet"]),
+      foodArea("camp-north-end-food", "Camp North End food and events", "camp-north-end", ["Street food", "American", "Cafes", "Desserts"], ["lunch", "dinner"], ["budget", "moderate"], ["Vegetarian"], ["lively"]),
+      foodArea("lake-norman-food", "Lake Norman waterfront dining", "lake-norman", ["American", "Seafood", "Cafes", "Desserts"], ["lunch", "dinner"], ["moderate", "premium"], ["Vegetarian", "Limited seafood"], ["sunset", "quiet"])
+    ],
+    scenicRoutes: [
+      route("uptown-south-end", "Uptown to South End Rail Trail corridor", "uptown", "south-end", 12, 3, ["walkable", "food", "murals"], "afternoon", "Use light rail or rideshare when parking is inconvenient."),
+      route("uptown-noda-camp", "Uptown, NoDa, and Camp North End loop", "uptown", "camp-north-end", 18, 6, ["art", "food", "local-culture"], "afternoon", "Good creative-neighborhood pairing with flexible meals."),
+      route("uptown-freedom-park", "Uptown to Freedom Park and Dilworth", "uptown", "freedom-park", 15, 4, ["park", "greenway", "easy-walk"], "morning", "Use this for a calmer outdoor block close to the city."),
+      route("charlotte-whitewater", "Charlotte to U.S. National Whitewater Center", "uptown", "whitewater-center", 25, 14, ["outdoor", "adventure", "nearby"], "morning", "Treat as a half-day or full-day anchor, not a quick stop."),
+      route("charlotte-lake-norman", "Charlotte to Lake Norman and Davidson", "uptown", "lake-norman", 35, 24, ["lake", "day-trip", "scenic"], "afternoon", "Best when the plan needs a slower nearby escape."),
+      route("charlotte-carowinds", "Charlotte to Carowinds", "uptown", "carowinds", 25, 15, ["theme-park", "family", "nearby"], "morning", "Use as a dedicated ticketed outing.")
+    ]
+  },
+  {
     id: "detroit",
     canonicalName: "Detroit, Michigan, USA",
     aliases: ["detroit", "detroit mi", "detroit michigan", "detroit michigan united states", "motor city"],
