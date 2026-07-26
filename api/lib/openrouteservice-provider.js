@@ -15,11 +15,11 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
   const center = [destinationLocation.longitude, destinationLocation.latitude];
   const destinationName = destinationLocation.canonicalName || String(destination || "").trim();
   const [placesResponse, foodResponse] = await Promise.all([
-    openRouteServicePoiSearch(center, POI_CATEGORY_GROUP_IDS, config),
-    openRouteServicePoiSearch(center, FOOD_CATEGORY_GROUP_IDS, config)
+    openRouteServicePoiCandidates(center, POI_CATEGORY_GROUP_IDS, config, destinationName, "places"),
+    openRouteServicePoiCandidates(center, FOOD_CATEGORY_GROUP_IDS, config, destinationName, "food")
   ]);
-  const poiFeatures = dedupePoiFeatures(geojsonFeatures(placesResponse)).filter(hasPoiName);
-  const foodFeatures = dedupePoiFeatures(geojsonFeatures(foodResponse)).filter(hasPoiName);
+  const poiFeatures = dedupePoiFeatures(placesResponse).filter(hasPoiName);
+  const foodFeatures = dedupePoiFeatures(foodResponse).filter(hasPoiName);
   if (poiFeatures.length < 8) {
     throw providerError("DESTINATION_RESEARCH_INSUFFICIENT", "Not enough destination candidates were returned.", false);
   }
@@ -99,7 +99,7 @@ async function resolveDestination(destination, config) {
 }
 
 async function openRouteServicePoiSearch(center, categoryGroupIds, config) {
-  return orsRequest("/pois", {
+  const response = await orsRequest("/pois", {
     config,
     method: "POST",
     body: {
@@ -113,6 +113,49 @@ async function openRouteServicePoiSearch(center, categoryGroupIds, config) {
       sortby: "distance"
     }
   });
+  return geojsonFeatures(response);
+}
+
+async function openRouteServicePoiCandidates(center, categoryGroupIds, config, destinationName, type) {
+  try {
+    const features = await openRouteServicePoiSearch(center, categoryGroupIds, config);
+    if (features.length) return features;
+  } catch (error) {
+    if (error?.code === "OPENROUTESERVICE_RATE_LIMITED" || error?.code === "OPENROUTESERVICE_AUTH_FAILED") throw error;
+  }
+  return geocodePoiFallback(center, config, destinationName, type);
+}
+
+async function geocodePoiFallback(center, config, destinationName, type) {
+  const queries = type === "food"
+    ? ["restaurants", "cafes", "breakfast", "dinner", "local food"]
+    : ["museums", "parks", "landmarks", "historic sites", "viewpoints", "galleries", "attractions", "gardens", "markets", "theaters"];
+  const responses = await Promise.all(queries.map(async (query) => {
+    const params = new URLSearchParams({
+      text: `${query} in ${destinationName}`,
+      size: "6",
+      "focus.point.lon": String(center[0]),
+      "focus.point.lat": String(center[1]),
+      "boundary.circle.lon": String(center[0]),
+      "boundary.circle.lat": String(center[1]),
+      "boundary.circle.radius": "35"
+    });
+    const json = await orsRequest(`/geocode/search?${params}`, { config });
+    return geocodeFeatures(json).map((feature) => tagGeocodePoiFeature(feature, query));
+  }));
+  return responses.flat();
+}
+
+function tagGeocodePoiFeature(feature, query) {
+  return {
+    ...feature,
+    properties: {
+      ...(feature.properties || {}),
+      category_group: query,
+      category: query,
+      name: feature.properties?.name || feature.properties?.label || query
+    }
+  };
 }
 
 async function orsRequest(path, { config, method = "GET", body = null } = {}) {
