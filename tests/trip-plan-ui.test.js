@@ -58,8 +58,8 @@ assert.ok(app.includes("toggleMustDo:"));
 assert.ok(app.includes("removeItem:"));
 assert.ok(app.includes("state.planStale = true"));
 assert.ok(app.includes("No same-region backup is available") || app.includes("Backup options"));
-assert.ok(apiClient.includes("NON_JSON_RESPONSE"));
-assert.ok(apiClient.includes("Trip service returned an unexpected response."));
+assert.ok(apiClient.includes("INVALID_RESPONSE"));
+assert.ok(apiClient.includes("The trip service returned an invalid response."));
 assert.ok(!apiClient.includes("Request failed. Please retry."));
 
 assert.ok(css.includes(".plan-hero"));

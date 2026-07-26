@@ -5,22 +5,34 @@ async function postAction(endpoint, action, payload = {}) {
     body: JSON.stringify({ action, payload })
   });
   const contentType = response.headers.get("content-type") || "";
-  const data = contentType.includes("application/json") ? await response.json().catch(() => ({})) : null;
-  if (!data) {
-    const error = new Error("Trip service returned an unexpected response. Please try again later.");
-    error.code = "NON_JSON_RESPONSE";
+  const rawBody = await response.text().catch(() => "");
+  const data = contentType.includes("application/json") ? parseJsonOrNull(rawBody) : null;
+  if (!data || typeof data !== "object") {
+    const error = new Error(response.ok ? "The trip service returned an invalid response." : publicFallbackMessage(response.status));
+    error.code = "INVALID_RESPONSE";
     error.retryable = response.status >= 500;
     error.status = response.status;
+    error.responseCategory = responseCategory(contentType, rawBody);
     throw error;
   }
   if (!response.ok || data.success === false) {
-    const error = new Error(data.error?.message || data.error || publicFallbackMessage(response.status));
+    const error = new Error(data.error?.message || messageForCode(data.error?.code) || data.error || publicFallbackMessage(response.status));
     error.code = data.error?.code || data.code || "REQUEST_FAILED";
     error.retryable = Boolean(data.error?.retryable);
     error.status = response.status;
+    error.requestId = data.error?.requestId || data.requestId || "";
     throw error;
   }
-  return data;
+  if (data.success !== true) {
+    const error = new Error("The trip service returned an invalid response.");
+    error.code = "INVALID_RESPONSE";
+    error.retryable = false;
+    error.status = response.status;
+    error.requestId = data.requestId || "";
+    error.responseCategory = "unexpected-json-schema";
+    throw error;
+  }
+  return { ...data, ...(data.data && typeof data.data === "object" ? data.data : {}) };
 }
 
 function publicFallbackMessage(status) {
@@ -29,6 +41,30 @@ function publicFallbackMessage(status) {
   if (status === 422) return "Trip generation needs more complete trip details.";
   if (status >= 500) return "Trip service is temporarily unavailable. Please try again later.";
   return "Trip request could not be completed.";
+}
+
+function parseJsonOrNull(value) {
+  try {
+    return JSON.parse(value || "{}");
+  } catch {
+    return null;
+  }
+}
+
+function responseCategory(contentType, rawBody) {
+  if (contentType.includes("text/html") || /^\s*</.test(rawBody)) return "html";
+  if (!rawBody) return "empty";
+  if (contentType.includes("application/json")) return "invalid-json";
+  return "non-json";
+}
+
+function messageForCode(code) {
+  if (code === "INSUFFICIENT_DESTINATION_DATA") return "We could not find enough reliable destination information for this trip.";
+  if (code === "ROUTE_ESTIMATE_FAILED") return "We found destination ideas, but could not calculate reliable travel times.";
+  if (code === "PROVIDER_UNAVAILABLE" || code === "PROVIDER_RATE_LIMITED") return "Trip planning services are temporarily unavailable.";
+  if (code === "REQUEST_TIMEOUT") return "Trip generation took too long. Please retry.";
+  if (code === "INVALID_RESPONSE") return "The trip service returned an invalid response.";
+  return "";
 }
 
 export const routeMosaicApi = {

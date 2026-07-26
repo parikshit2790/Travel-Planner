@@ -122,6 +122,45 @@ try {
   assert.equal(research.status, 200);
   assert.equal(research.body.profile.sourceMetadata.provider, "openrouteservice");
 
+  const austinToCharlotteTrip = {
+    from: "Austin, Texas, United States",
+    fromDisplay: "Austin, Texas, United States",
+    fromLocation: {
+      canonicalName: "Austin, Texas, United States",
+      latitude: 30.2672,
+      longitude: -97.7431
+    },
+    destination: "Charlotte, North Carolina, United States",
+    destinationDisplay: "Charlotte, North Carolina, United States",
+    destinationLocation: {
+      canonicalName: "Charlotte, North Carolina, United States",
+      latitude: 35.2271,
+      longitude: -80.8431,
+      country: "United States",
+      stateOrProvince: "North Carolina"
+    },
+    startDate: "2026-08-08",
+    endDate: "2026-08-10",
+    days: 3,
+    adults: 1,
+    children: 0,
+    seniors: 0,
+    groupType: "Solo trip",
+    transportation: "Fly and rent a car",
+    schedule: { pace: "Balanced", majorActivities: 2 },
+    food: { diet: [], restrictions: [], cuisineInterests: [], eveningPreferences: [] },
+    preferences: [],
+    travelers: []
+  };
+  const charlotteResearch = await handlePlannerAction("research-destination", { trip: austinToCharlotteTrip }, { requestId: "test-austin-charlotte-research" });
+  assert.equal(charlotteResearch.status, 200);
+  assert.ok(charlotteResearch.body.profile.places.length >= 8);
+  const generated = await handlePlannerAction("generate-trip", { trip: austinToCharlotteTrip, destinationProfile: charlotteResearch.body.profile }, { requestId: "test-austin-charlotte-generate" });
+  assert.equal(generated.status, 200);
+  assert.equal(generated.body.status, "ready");
+  assert.ok(JSON.stringify(generated.body.plan).includes("Charlotte"));
+  assert.equal(JSON.stringify(generated.body.plan).includes("Santa Monica Pier"), false);
+
   const driving = await openRouteServiceRouteEstimate(
     { latitude: 35.2271, longitude: -80.8431 },
     { latitude: 40.7128, longitude: -74.006 },

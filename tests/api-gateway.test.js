@@ -4,6 +4,7 @@ import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
 import { handleLocationAction } from "../api/lib/location-actions.js";
 import { handlePlannerAction } from "../api/lib/planner-actions.js";
 import { handleProviderHealthAction } from "../api/lib/provider-health-actions.js";
+import plannerHandler from "../api/planner.js";
 import providerHealthHandler from "../api/provider-health.js";
 
 const apiRouteFiles = fs.readdirSync("api").filter((entry) => /\.(js|ts)$/.test(entry)).sort();
@@ -17,6 +18,7 @@ assert.equal(/\.\.\/\.\.\/src\/[^"']+\?v=/.test(fs.readFileSync("api/lib/planner
 const unknownPlanner = await handlePlannerAction("not-real", {});
 assert.equal(unknownPlanner.status, 400);
 assert.equal(unknownPlanner.body.error.code, "UNKNOWN_ACTION");
+assert.ok(unknownPlanner.body.requestId);
 
 const invalidTrip = await handlePlannerAction("generate-trip", {});
 assert.equal(invalidTrip.status, 400);
@@ -166,6 +168,36 @@ assert.equal(badMethod.headers.Allow, "GET, POST");
 assert.equal(badMethod.body.success, false);
 assert.equal(badMethod.body.error.code, "METHOD_NOT_ALLOWED");
 
+const plannerUnknown = await invokePlanner("POST", { action: "not-real", payload: {} });
+assert.equal(plannerUnknown.statusCode, 400);
+assert.match(plannerUnknown.headers["Content-Type"], /application\/json/);
+assert.equal(plannerUnknown.body.success, false);
+assert.equal(plannerUnknown.body.error.code, "UNKNOWN_ACTION");
+assert.ok(plannerUnknown.body.requestId);
+assert.equal(plannerUnknown.body.error.requestId, plannerUnknown.body.requestId);
+
+const plannerSuccess = await invokePlanner("POST", {
+  action: "generate-trip",
+  payload: { trip, destinationProfile: research.body.profile }
+});
+assert.equal(plannerSuccess.statusCode, 200);
+assert.match(plannerSuccess.headers["Content-Type"], /application\/json/);
+assert.equal(plannerSuccess.body.success, true);
+assert.ok(plannerSuccess.body.requestId);
+assert.equal(plannerSuccess.body.data.status, "ready");
+assert.equal(plannerSuccess.body.status, "ready");
+assert.ok(JSON.stringify(plannerSuccess.body.plan).includes("Central Park"));
+
+const invalidPlannerJson = await invokePlanner("POST", "{not json");
+assert.equal(invalidPlannerJson.statusCode, 400);
+assert.equal(invalidPlannerJson.body.success, false);
+assert.equal(invalidPlannerJson.body.error.code, "INVALID_JSON_BODY");
+
+const plannerBadMethod = await invokePlanner("GET");
+assert.equal(plannerBadMethod.statusCode, 405);
+assert.match(plannerBadMethod.headers["Content-Type"], /application\/json/);
+assert.equal(plannerBadMethod.body.error.code, "METHOD_NOT_ALLOWED");
+
 restoreEnv(originalEnv);
 
 console.log("API gateway tests passed");
@@ -174,6 +206,13 @@ async function invokeProviderHealth(method, body = {}) {
   const req = { method, body };
   const res = createMockResponse();
   await providerHealthHandler(req, res);
+  return res.snapshot();
+}
+
+async function invokePlanner(method, body = {}) {
+  const req = { method, body };
+  const res = createMockResponse();
+  await plannerHandler(req, res);
   return res.snapshot();
 }
 
