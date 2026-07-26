@@ -1,4 +1,4 @@
-import { addOrUpdatePreference, calculateTripEndDate, createTripDraft, syncTravelersToCounts } from "./domain.js?v=49";
+import { addOrUpdatePreference, calculateTripEndDate, createTripDraft, syncTravelersToCounts } from "./domain.js?v=50";
 
 const trip = createTripDraft();
 

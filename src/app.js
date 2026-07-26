@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=49";
-import { routeMosaicApi } from "./api-client.js?v=49";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=50";
+import { routeMosaicApi } from "./api-client.js?v=50";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -34,8 +34,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=49";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=49";
+} from "./domain.js?v=50";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=50";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -49,8 +49,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=49";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=49";
+} from "./planner.js?v=50";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=50";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -359,7 +359,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=49" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=50" alt="" /></span>`;
 }
 
 function Brand() {
