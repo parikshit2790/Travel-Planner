@@ -52,6 +52,10 @@ import {
 } from "./planner.js";
 import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 
+const TRIP_DESCRIPTION_PLACEHOLDER = "Example: Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic highlights, great vegetarian-friendly food, relaxed evenings, and an optional nearby city such as San Diego or Santa Barbara if it improves the trip without too much driving or changing hotels too often.";
+const TRIP_DESCRIPTION_SAMPLE = "Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic views, famous attractions, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes.";
+const TRIP_DESCRIPTION_HELPER = "Mention must-do places, nearby cities you are considering, pace, food needs, walking limits, hotel-change preferences, and anything you want to avoid.";
+
 let state = load();
 const locationProvider = createLocationSearchProvider();
 const locationTimers = {};
@@ -1053,13 +1057,25 @@ function basicsStep() {
     ${destinationRegionsField(trip)}
     ${routeSummary(trip)}
     ${Number(trip.days) ? `<p class="derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
-    <div class="field-shell full"><label for="trip-description">Trip Description</label>${textarea("trip.description", trip.description, "Trip Description").replace("<textarea", `<textarea id="trip-description"`)}<small class="field-helper">Describe must-do places, pace, and important constraints.</small></div>
+    ${tripDescriptionField(trip)}
     <div class="button-row"><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
     ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
     ${tripAdvisoryPanel(issues)}
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
   </section>
   ${quickInterpretTable()}`;
+}
+
+function tripDescriptionField(trip) {
+  const sampleAdded = String(trip.description || "") === TRIP_DESCRIPTION_SAMPLE;
+  return `<div class="field-shell full trip-description-field">
+    <label for="trip-description">Trip Description</label>
+    <textarea id="trip-description" data-field="trip.description" aria-describedby="trip-description-helper" placeholder="${esc(TRIP_DESCRIPTION_PLACEHOLDER)}">${esc(trip.description || "")}</textarea>
+    <div class="trip-description-help-row">
+      <small id="trip-description-helper" class="field-helper">${esc(TRIP_DESCRIPTION_HELPER)}</small>
+      <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use sample description"}</button>
+    </div>
+  </div>`;
 }
 
 function sampleTripPanel(trip) {
@@ -2727,6 +2743,14 @@ function action(name) {
     state.plan = null;
     state.planStatus = "";
     ui.toast = "Sample cleared.";
+  }
+  if (name === "useSampleDescription") {
+    const existing = String(state.trip.description || "").trim();
+    if (existing && existing !== TRIP_DESCRIPTION_SAMPLE && !confirm("Replace the existing trip description with the sample?")) return;
+    state.trip.description = TRIP_DESCRIPTION_SAMPLE;
+    state.trip.originalText = TRIP_DESCRIPTION_SAMPLE;
+    ui.interpretationError = "";
+    ui.toast = "Sample description added.";
   }
   if (name === "toggleSavedTrips") state.savedTripsOpen = !state.savedTripsOpen;
   if (name.startsWith("openSavedTrip:")) {
