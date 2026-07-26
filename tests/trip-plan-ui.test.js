@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const app = fs.readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+const apiClient = fs.readFileSync(new URL("../src/api-client.js", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 assert.ok(app.includes("function renderTripPlan()"));
@@ -10,9 +11,9 @@ assert.ok(app.includes("function recoverUnsupportedPlan()"));
 assert.ok(app.includes("Starter trip plan generated for this destination."));
 assert.ok(app.includes("registration.update()"));
 assert.ok(app.includes("function ensureDestinationIntelligence()"));
-assert.ok(app.includes("/api/destination-profile"));
+assert.ok(app.includes("routeMosaicApi.researchDestination"));
 assert.ok(app.includes("async function refreshProviderStatus"));
-assert.ok(app.includes("/api/providers/status"));
+assert.ok(app.includes("routeMosaicApi.checkProviderHealth"));
 assert.ok(app.includes("providerDiagnosticsPanel"));
 assert.ok(app.includes("provider.configuration"));
 assert.ok(app.includes("Retry Configuration Check"));
@@ -21,9 +22,17 @@ assert.ok(app.includes('wizardFooter("Back", "Save and Exit", "Build My Trip", b
 assert.ok(!app.includes("Destination planning providers are not configured yet"));
 assert.ok(!app.includes("Add place and route providers in Vercel"));
 assert.ok(!app.includes("Add an OpenAI API key in Vercel"));
+assert.ok(!app.includes("/api/destination-profile"));
+assert.ok(!app.includes("/api/providers/status"));
+assert.ok(!app.includes("/api/trips/"));
+assert.ok(apiClient.includes('postAction("/api/planner", "research-destination"'));
+assert.ok(apiClient.includes('postAction("/api/planner", "generate-trip"'));
+assert.ok(apiClient.includes('postAction("/api/planner", "regenerate-day"'));
+assert.ok(apiClient.includes('postAction("/api/locations", "search"'));
+assert.ok(apiClient.includes('postAction("/api/provider-health", "status"'));
 assert.ok(app.includes("registerGeneratedDestinationProfile"));
 assert.ok(app.includes("buildTripPlan"));
-assert.ok(app.includes("generateTripPlan(state.trip"));
+assert.ok(app.includes("routeMosaicApi.generateTrip"));
 assert.ok(app.includes("Regenerate Plan"));
 assert.ok(app.includes("Edit Preferences"));
 assert.ok(app.includes("Coming Later"));

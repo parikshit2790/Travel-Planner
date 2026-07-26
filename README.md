@@ -68,16 +68,9 @@ The public UI intentionally shows only a generic temporary-unavailable message w
 
 ## Server Routes
 
-- `POST /api/locations/search`
-- `POST /api/destinations/research`
-- `POST /api/destination-profile`
-- `POST /api/routes/estimate`
-- `POST /api/weather/summary`
-- `POST /api/providers/status`
-- `POST /api/trips/generate`
-- `POST /api/trips/regenerate-day`
-- `POST /api/trips/regenerate-meals`
-- `POST /api/activities/alternatives`
+- `POST /api/planner` with an `action` body for destination research, trip generation, regeneration, alternatives, route estimates, and weather summaries.
+- `POST /api/locations` with an `action` body for location search and future location-resolution actions.
+- `POST /api/provider-health` with an `action` body for public provider availability and development-only diagnostics.
 
 The SPA rewrite excludes `/api/*` so Vercel functions are not intercepted by `index.html`.
 
@@ -115,9 +108,12 @@ pnpm run test
 pnpm run lint
 pnpm run test:providers
 pnpm run build
+pnpm run verify:vercel-functions
 ```
 
 `test:providers` currently checks the provider contract with deterministic mock data. Expand it to live-provider smoke tests only after real adapters and credentials are available. Do not run live-provider tests in CI without secrets.
+
+`verify:vercel-functions` reads `.vercel/output/functions` when Vercel output exists. Otherwise it counts deployable source route files under `api/`, `pages/api/`, `src/api/`, `app/api/`, and `functions/`, excluding shared `lib` folders. The limit is 10 functions.
 
 ## Known Limitations
 

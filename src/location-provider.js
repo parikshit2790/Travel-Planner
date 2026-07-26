@@ -1,3 +1,5 @@
+import { routeMosaicApi } from "./api-client.js?v=49";
+
 export const LOCATION_MIN_QUERY_LENGTH = 2;
 export const LOCATION_SEARCH_DEBOUNCE_MS = 300;
 
@@ -7,30 +9,28 @@ export class LocationSearchProvider {
   }
 }
 
-export class NominatimLocationSearchProvider extends LocationSearchProvider {
-  constructor({ endpoint = "https://nominatim.openstreetmap.org/search" } = {}) {
-    super();
-    this.endpoint = endpoint;
-    this.provider = "OpenStreetMap Nominatim";
-  }
-
+export class ApiLocationSearchProvider extends LocationSearchProvider {
   async search(query) {
-    const url = new URL(this.endpoint);
-    url.searchParams.set("q", query);
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("addressdetails", "1");
-    url.searchParams.set("limit", "8");
-    url.searchParams.set("dedupe", "1");
-    const response = await fetch(url.toString(), { headers: { Accept: "application/json", "Accept-Language": "en-US,en;q=0.8" } });
-    if (!response.ok) throw new Error("Location provider unavailable");
-    const results = await response.json();
-    return rankLocations(dedupeLocations(results.map((result) => normalizeNominatimResult(result, this.provider))), query).slice(0, 8);
+    const data = await routeMosaicApi.searchLocations(query);
+    return rankLocations(dedupeLocations((data.results || []).map(normalizeApiLocationResult)), query).slice(0, 8);
   }
 }
 
 export function createLocationSearchProvider() {
   if (typeof fetch !== "function") return null;
-  return new NominatimLocationSearchProvider();
+  return new ApiLocationSearchProvider();
+}
+
+export function normalizeApiLocationResult(result) {
+  return {
+    ...result,
+    normalizedName: result.normalizedName || result.canonicalName || result.displayName || "",
+    displayName: result.displayName || result.canonicalName || result.normalizedName || "",
+    providerPlaceId: String(result.providerPlaceId || ""),
+    provider: result.provider || "RouteMosaic location provider",
+    verificationStatus: result.verificationStatus || "Verified",
+    verifiedAt: result.verifiedAt || new Date().toISOString()
+  };
 }
 
 export function dedupeLocations(results) {

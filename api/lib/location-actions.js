@@ -1,0 +1,42 @@
+import { providerConfig, validatePlanningProviders } from "./env.js";
+import { withTimeout } from "./http.js";
+import { mockLocationSearch } from "./mock-provider.js";
+
+export async function handleLocationAction(action, payload = {}) {
+  switch (action) {
+    case "search":
+    case "locations/search":
+      return handleLocationSearch(payload);
+    case "resolve":
+    case "clarify":
+    case "place-details":
+      return actionError(501, "LOCATION_ACTION_NOT_IMPLEMENTED", "This location action is not available yet.");
+    default:
+      return actionError(400, "UNKNOWN_ACTION", "Unknown location action.");
+  }
+}
+
+async function handleLocationSearch({ query } = {}) {
+  const config = providerConfig();
+  if (config.production && validatePlanningProviders(config).some((error) => error.startsWith("Place provider:"))) {
+    return actionError(503, "PROVIDER_CONFIGURATION_REQUIRED", "Location search is temporarily unavailable.", true);
+  }
+  const text = String(query || "").trim();
+  if (text.length < 2) return actionError(400, "QUERY_TOO_SHORT", "Enter at least 2 characters.");
+  try {
+    const results = await withTimeout(searchLocations(text, config), config.timeoutMs, "Location search");
+    const ambiguous = results.length > 1 && new Set(results.map((item) => item.canonicalName)).size > 1;
+    return { status: 200, body: { results, ambiguous, provider: config.placeProvider } };
+  } catch {
+    return actionError(502, "LOCATION_SEARCH_FAILED", "Location provider unavailable.", true);
+  }
+}
+
+async function searchLocations(query, config) {
+  if (config.placeProvider === "mock") return mockLocationSearch(query);
+  throw new Error("Place provider is not implemented in this build.");
+}
+
+function actionError(status, code, message, retryable = false) {
+  return { status, body: { success: false, error: { code, message, retryable } } };
+}

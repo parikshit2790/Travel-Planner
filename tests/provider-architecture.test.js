@@ -7,9 +7,18 @@ import { mockDestinationResearch } from "../api/lib/mock-provider.js";
 import { providerStatus, validatePlanningProviders } from "../api/lib/env.js";
 
 const apiFiles = [
+  "api/planner.js",
+  "api/locations.js",
+  "api/provider-health.js"
+];
+
+apiFiles.forEach((file) => assert.ok(fs.existsSync(file), `${file} should exist`));
+
+const removedApiFiles = [
   "api/providers/status.js",
   "api/locations/search.js",
   "api/destinations/research.js",
+  "api/destination-profile.js",
   "api/routes/estimate.js",
   "api/weather/summary.js",
   "api/trips/generate.js",
@@ -17,13 +26,18 @@ const apiFiles = [
   "api/trips/regenerate-meals.js",
   "api/activities/alternatives.js"
 ];
+removedApiFiles.forEach((file) => assert.equal(fs.existsSync(file), false, `${file} should be removed`));
 
-apiFiles.forEach((file) => assert.ok(fs.existsSync(file), `${file} should exist`));
-
-const destinationApi = fs.readFileSync("api/destination-profile.js", "utf8");
-assert.ok(!destinationApi.includes("https://api.openai.com/v1/responses"));
-assert.ok(destinationApi.includes("validatePlanningProviders"));
-assert.ok(destinationApi.includes("researchDestination"));
+const plannerActions = fs.readFileSync("api/lib/planner-actions.js", "utf8");
+assert.ok(!plannerActions.includes("https://api.openai.com/v1/responses"));
+assert.ok(plannerActions.includes("validatePlanningProviders"));
+assert.ok(plannerActions.includes("researchDestination"));
+assert.ok(plannerActions.includes("generate-trip"));
+assert.ok(plannerActions.includes("regenerate-day"));
+assert.ok(plannerActions.includes("regenerate-meals"));
+assert.ok(plannerActions.includes("get-alternatives"));
+assert.ok(plannerActions.includes("estimate-route"));
+assert.ok(plannerActions.includes("weather-summary"));
 
 const vercel = fs.readFileSync("vercel.json", "utf8");
 assert.ok(vercel.includes("api/.*"));
@@ -68,7 +82,7 @@ const devStatus = providerStatus({ production: false, development: true, placePr
 assert.ok(devStatus.diagnostics.placeProviderMissing.includes("PLACE_PROVIDER"));
 assert.ok(devStatus.diagnostics.routeProviderMissing.includes("ROUTE_PROVIDER"));
 
-const statusApi = fs.readFileSync("api/providers/status.js", "utf8");
+const statusApi = fs.readFileSync("api/lib/provider-health-actions.js", "utf8");
 assert.ok(statusApi.includes("includeDiagnostics"));
 assert.ok(statusApi.includes("config.development"));
 

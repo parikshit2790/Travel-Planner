@@ -30,9 +30,9 @@ assert.equal(initialState.trip.description, "");
 assert.equal(LOCATION_MIN_QUERY_LENGTH, 2);
 assert.ok(LOCATION_SEARCH_DEBOUNCE_MS >= 250);
 assert.ok(LOCATION_SEARCH_DEBOUNCE_MS <= 350);
-assert.ok(provider.includes('url.searchParams.set("q", query)'));
-assert.ok(provider.includes('url.searchParams.set("limit", "8")'));
-assert.ok(!provider.includes('url.searchParams.set("limit", "1")'));
+assert.ok(provider.includes("ApiLocationSearchProvider"));
+assert.ok(provider.includes("routeMosaicApi.searchLocations(query)"));
+assert.ok(!provider.includes("https://nominatim.openstreetmap.org"));
 assert.ok(!provider.includes("query.slice"));
 assert.ok(!provider.includes("query.substring"));
 

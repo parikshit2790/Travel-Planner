@@ -1,8 +1,9 @@
-import { providerConfig, providerStatus } from "../lib/env.js";
-import { requirePost, sendJson } from "../lib/http.js";
+import { providerConfig, providerStatus } from "./env.js";
 
-export default async function handler(req, res) {
-  if (!requirePost(req, res)) return;
+export function handleProviderHealthAction(action) {
+  if (!["status", "provider-status", "providers/status", ""].includes(action)) {
+    return { status: 400, body: { success: false, error: { code: "UNKNOWN_ACTION", message: "Unknown provider-health action.", retryable: false } } };
+  }
   const config = providerConfig();
   const includeDiagnostics = config.development;
   const status = providerStatus(config, { includeDiagnostics });
@@ -18,5 +19,5 @@ export default async function handler(req, res) {
     checkedAt: status.checkedAt
   };
   if (includeDiagnostics) publicStatus.diagnostics = status.diagnostics;
-  sendJson(res, 200, publicStatus);
+  return { status: 200, body: publicStatus };
 }

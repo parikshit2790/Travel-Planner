@@ -1,4 +1,5 @@
 import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=49";
+import { routeMosaicApi } from "./api-client.js?v=49";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -340,9 +341,7 @@ function render() {
 
 async function refreshProviderStatus({ rerender = true } = {}) {
   try {
-    const response = await fetch("/api/providers/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (!response.ok) throw new Error("Provider status unavailable");
-    state.providerStatus = await response.json();
+    state.providerStatus = await routeMosaicApi.checkProviderHealth();
   } catch {
     state.providerStatus = {
       available: false,
@@ -2582,8 +2581,8 @@ async function buildTripPlanAction(name) {
   try {
     if (name !== "regeneratePlan") await ensureDestinationIntelligence();
     const result = name === "regeneratePlan" && state.plan
-      ? { status: "ready", plan: regeneratePlanPreservingLocks(state.plan) }
-      : generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
+      ? await routeMosaicApi.regeneratePlan(state.plan)
+      : await routeMosaicApi.generateTrip(state.trip, null, state.plan?.generationMetadata?.variationSeed || 0);
     if (result.status === "ready") {
       state.plan = result.plan;
       state.planStatus = "ready";
@@ -2616,20 +2615,11 @@ async function ensureDestinationIntelligence() {
   const existing = resolveDestinationProfile(destination);
   if (existing && !existing.id.startsWith("generic-")) return existing;
   try {
-    const response = await fetch("/api/destination-profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trip: state.trip })
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      if (error.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session.");
-      throw new Error(error.error || "Destination research failed. Please retry.");
-    }
-    const data = await response.json();
+    const data = await routeMosaicApi.researchDestination(state.trip);
     return registerGeneratedDestinationProfile(data.profile) || existing;
   } catch (error) {
     if (existing && !existing.id.startsWith("generic-")) return existing;
+    if (error?.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session.");
     throw error instanceof Error ? error : new Error("Destination research is unavailable right now. Your trip details are preserved.");
   }
 }
