@@ -8,13 +8,11 @@ export function handleProviderHealthAction(action) {
   const includeDiagnostics = config.development;
   const status = providerStatus(config, { includeDiagnostics });
   const publicStatus = {
-    available: status.available,
-    status: status.status,
     canGenerate: status.canGenerate,
-    placeProvider: status.placeProvider,
-    routeProvider: status.routeProvider,
-    weatherProvider: status.weatherProvider,
-    aiProvider: status.aiProvider,
+    mode: status.mode,
+    placeProviderAvailable: status.placeProviderAvailable,
+    routeProviderAvailable: status.routeProviderAvailable,
+    weatherProviderAvailable: status.weatherProviderAvailable,
     publicMessage: status.publicMessage,
     checkedAt: status.checkedAt
   };

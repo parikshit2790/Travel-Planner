@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
-import { registerGeneratedDestinationProfile } from "../src/destination-data.js?v=51";
-import { generateTripPlan } from "../src/planner.js?v=51";
+import { registerGeneratedDestinationProfile } from "../src/destination-data.js?v=52";
+import { generateTripPlan } from "../src/planner.js?v=52";
 import { mockDestinationResearch } from "../api/lib/mock-provider.js";
 import { providerStatus, validatePlanningProviders } from "../api/lib/env.js";
 
@@ -51,18 +51,27 @@ assert.ok(providerErrors.some((error) => error.includes("ROUTE_PROVIDER")));
 
 const healthyStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", placeApiKey: "secret-place", routeApiKey: "secret-route", weatherProvider: "", aiProvider: "", weatherApiKey: "", aiApiKey: "" });
 assert.equal(healthyStatus.canGenerate, true);
+assert.equal(healthyStatus.mode, "mock");
 assert.equal(healthyStatus.placeProvider.configured, true);
 assert.equal(healthyStatus.routeProvider.configured, true);
+assert.equal(healthyStatus.placeProviderAvailable, true);
+assert.equal(healthyStatus.routeProviderAvailable, true);
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-place"));
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-route"));
 
 const placeMissingStatus = providerStatus({ production: true, development: false, placeProvider: "", routeProvider: "mock", placeApiKey: "", routeApiKey: "" });
 assert.equal(placeMissingStatus.canGenerate, false);
+assert.equal(placeMissingStatus.mode, "unavailable");
 assert.equal(placeMissingStatus.routeProvider.configured, true);
 
 const routeMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(routeMissingStatus.canGenerate, false);
+assert.equal(routeMissingStatus.mode, "unavailable");
 assert.equal(routeMissingStatus.placeProvider.configured, true);
+
+const liveStatus = providerStatus({ production: true, development: false, placeProvider: "live-provider", routeProvider: "live-route", placeApiKey: "", routeApiKey: "" });
+assert.equal(liveStatus.mode, "unavailable");
+assert.notEqual(liveStatus.mode, healthyStatus.mode);
 
 const optionalMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", weatherProvider: "tomorrow", weatherApiKey: "", aiProvider: "openai", aiApiKey: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(optionalMissingStatus.canGenerate, true);
@@ -72,6 +81,7 @@ assert.equal(optionalMissingStatus.aiProvider.status, "degraded");
 const publicStatus = providerStatus({ production: true, development: false, placeProvider: "", routeProvider: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(publicStatus.canGenerate, false);
 assert.equal(publicStatus.available, false);
+assert.equal(publicStatus.mode, "unavailable");
 assert.equal(publicStatus.placeProvider.missingVariables.length, 0);
 assert.equal(publicStatus.routeProvider.missingVariables.length, 0);
 assert.equal(publicStatus.diagnostics, undefined);

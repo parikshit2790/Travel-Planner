@@ -635,6 +635,8 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .plan-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; max-width: 520px; }
 .plan-hero-actions button[disabled] { opacity: 0.72; background: #fff; color: var(--muted); }
 .stale-plan-warning { margin-top: 16px; display: inline-flex; gap: 8px; padding: 10px 14px; border-radius: 12px; background: #fff7e8; border: 1px solid #ffd59d; color: #9a4d05; }
+.mock-plan-notice { margin-top: 16px; max-width: 760px; padding: 12px 14px; border-radius: 12px; background: #fff7e8; border: 1px solid #ffd59d; color: #9a4d05; font-weight: 700; }
+.mock-plan-notice strong { display: block; color: #7c2d12; }
 .plan-summary-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
 .plan-metric { display: flex; gap: 12px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgb(255 255 255 / 0.82); box-shadow: 0 10px 24px rgb(16 49 82 / 0.07); min-width: 0; }
 .plan-metric > span { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto; border-radius: 12px; background: #eaf7ff; color: var(--blue); }

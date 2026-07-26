@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=51";
-import { routeMosaicApi } from "./api-client.js?v=51";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=52";
+import { routeMosaicApi } from "./api-client.js?v=52";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -34,8 +34,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=51";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=51";
+} from "./domain.js?v=52";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=52";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -49,8 +49,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=51";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=51";
+} from "./planner.js?v=52";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=52";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -347,6 +347,10 @@ async function refreshProviderStatus({ rerender = true } = {}) {
       available: false,
       status: "temporarily unavailable",
       canGenerate: false,
+      mode: "unavailable",
+      placeProviderAvailable: false,
+      routeProviderAvailable: false,
+      weatherProviderAvailable: false,
       publicMessage: "Trip generation is temporarily unavailable. Please try again later.",
       checkedAt: new Date().toISOString()
     };
@@ -359,7 +363,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=51" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=52" alt="" /></span>`;
 }
 
 function Brand() {
@@ -496,6 +500,7 @@ function renderTripPlan() {
             <p class="eyebrow">Generated Trip Plan</p>
             <h1>${esc(plan.overview.title)}</h1>
             <p>${esc(plan.overview.subtitle)}</p>
+            ${mockPlanNotice()}
             ${state.planStale ? `<div class="stale-plan-warning" role="status"><strong>Preferences changed.</strong> This plan was generated from older preferences. Regenerate when you are ready.</div>` : ""}
           </div>
           <div class="plan-hero-actions">
@@ -526,6 +531,11 @@ function renderTripPlan() {
     ${savedTripsDrawer()}
     ${globalFooter()}`;
   bind();
+}
+
+function mockPlanNotice() {
+  if (state.providerStatus?.mode !== "mock") return "";
+  return `<div class="mock-plan-notice" role="status"><strong>Sample planning data.</strong> This itinerary was generated in demo mode from mock provider data. It is useful for testing the workflow, but it is not live destination research, current availability, live traffic, or verified worldwide coverage.</div>`;
 }
 
 function planningDiagnosticsPanel() {
@@ -591,7 +601,7 @@ function planOverviewSection() {
       <article class="plan-payoff-card wide">
         <h2>Trip Overview</h2>
         <p>${esc(plan.overview.destinationSummary)}</p>
-        <p><strong>Planning estimates—not live availability.</strong> Verify current hours, availability, accessibility, menus, prices, weather, and travel conditions before booking or traveling. <a href="/travel-disclaimer">Read the travel disclaimer.</a></p>
+        <p><strong>${state.providerStatus?.mode === "mock" ? "Sample planning data, not live availability." : "Planning estimates—not live availability."}</strong> Verify current hours, availability, accessibility, menus, prices, weather, and travel conditions before booking or traveling. <a href="/travel-disclaimer">Read the travel disclaimer.</a></p>
         <div class="highlight-list">${plan.overview.planningHighlights.map((item) => `<span>${esc(item)}</span>`).join("")}</div>
       </article>
       <article class="plan-payoff-card"><h3>Activities</h3><strong>${plan.overview.totalScheduledActivities}</strong><p>${esc(formatMinutes(plan.overview.totalEstimatedActivityMinutes))} scheduled activity time</p></article>
@@ -1895,13 +1905,13 @@ function providerDiagnosticsPanel() {
   const status = state.providerStatus;
   if (!status?.diagnostics) return "";
   const rows = [
-    ["Place", status.placeProvider?.provider, status.placeProvider?.status, status.diagnostics.placeProviderMissing?.join(", ") || "None"],
-    ["Route", status.routeProvider?.provider, status.routeProvider?.status, status.diagnostics.routeProviderMissing?.join(", ") || "None"],
-    ["Weather", status.weatherProvider?.provider, status.weatherProvider?.status, status.diagnostics.weatherProviderMissing?.join(", ") || "None"],
-    ["AI", status.aiProvider?.provider, status.aiProvider?.status, status.diagnostics.aiProviderMissing?.join(", ") || "None"]
+    ["Place", status.diagnostics.placeProvider, status.placeProviderAvailable ? "available" : "unavailable", status.diagnostics.placeProviderMissing?.join(", ") || "None"],
+    ["Route", status.diagnostics.routeProvider, status.routeProviderAvailable ? "available" : "unavailable", status.diagnostics.routeProviderMissing?.join(", ") || "None"],
+    ["Weather", status.diagnostics.weatherProvider, status.weatherProviderAvailable ? "available" : "degraded", status.diagnostics.weatherProviderMissing?.join(", ") || "None"],
+    ["AI", status.diagnostics.aiProvider, status.diagnostics.aiProviderMissing?.length ? "degraded" : "not required", status.diagnostics.aiProviderMissing?.join(", ") || "None"]
   ];
   return `<section class="panel provider-diagnostics">
-    <div class="panel-head"><div><p class="eyebrow">Development Only</p><h3>Provider Configuration</h3></div><button data-action="refreshProviderStatus">Retry Configuration Check</button></div>
+    <div class="panel-head"><div><p class="eyebrow">Development Only</p><h3>Provider Configuration · ${esc(status.diagnostics.mode)}</h3></div><button data-action="refreshProviderStatus">Retry Configuration Check</button></div>
     ${table(["Service", "Provider", "Status", "Missing"], rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell || "")}</td>`).join("")}</tr>`))}
   </section>`;
 }

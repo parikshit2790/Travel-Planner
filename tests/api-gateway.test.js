@@ -75,6 +75,12 @@ process.env.PLACE_API_KEY = "secret-place-value";
 process.env.ROUTE_API_KEY = "secret-route-value";
 const health = handleProviderHealthAction("status");
 assert.equal(health.status, 200);
+assert.ok(["mock", "live", "unavailable"].includes(health.body.mode));
+assert.equal(typeof health.body.placeProviderAvailable, "boolean");
+assert.equal(typeof health.body.routeProviderAvailable, "boolean");
+assert.equal(typeof health.body.weatherProviderAvailable, "boolean");
+assert.equal("placeProvider" in health.body, false);
+assert.equal("routeProvider" in health.body, false);
 assert.ok(!JSON.stringify(health.body).includes("secret-place-value"));
 assert.ok(!JSON.stringify(health.body).includes("secret-route-value"));
 

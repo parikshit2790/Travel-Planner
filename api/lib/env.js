@@ -42,10 +42,16 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   if (config.weatherProvider && !weatherImplemented) weatherMissing.push(`Adapter not implemented: ${config.weatherProvider}`);
   if (config.aiProvider && !aiImplemented) aiMissing.push(`Adapter not implemented: ${config.aiProvider}`);
   const canGenerate = placeMissing.length === 0 && routeMissing.length === 0;
+  const mockMode = canGenerate && (config.placeProvider === "mock" || config.routeProvider === "mock");
+  const mode = !canGenerate ? "unavailable" : mockMode ? "mock" : "live";
   const status = {
     available: canGenerate,
     status: canGenerate ? "available" : "temporarily unavailable",
     canGenerate,
+    mode,
+    placeProviderAvailable: placeMissing.length === 0,
+    routeProviderAvailable: routeMissing.length === 0,
+    weatherProviderAvailable: Boolean(config.weatherProvider) && weatherMissing.length === 0,
     placeProvider: safeProviderStatus(config.placeProvider, placeMissing, canGenerate),
     routeProvider: safeProviderStatus(config.routeProvider, routeMissing, canGenerate),
     weatherProvider: {
@@ -72,6 +78,11 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   if (includeDiagnostics) {
     status.diagnostics = {
       environment: config.production ? "production" : config.development ? "development" : "preview",
+      mode,
+      placeProvider: config.placeProvider || "not configured",
+      routeProvider: config.routeProvider || "not configured",
+      weatherProvider: config.weatherProvider || "none",
+      aiProvider: config.aiProvider || "none",
       placeProviderMissing: placeMissing,
       routeProviderMissing: routeMissing,
       weatherProviderMissing: weatherMissing,
