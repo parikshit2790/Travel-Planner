@@ -25,8 +25,8 @@ const requiredLocations = new Map([
 const originalEnv = captureEnv();
 const originalFetch = globalThis.fetch;
 
-process.env.NODE_ENV = "production";
-process.env.VERCEL_ENV = "production";
+process.env.NODE_ENV = "test";
+process.env.VERCEL_ENV = "";
 process.env.PLACE_PROVIDER = "openrouteservice";
 process.env.ROUTE_PROVIDER = "openrouteservice";
 process.env.OPENROUTESERVICE_API_KEY = secret;
@@ -50,10 +50,10 @@ try {
     aiProvider: "",
     aiApiKey: ""
   });
-  assert.equal(status.canGenerate, true);
-  assert.equal(status.mode, "live");
+  assert.equal(status.canGenerate, false);
+  assert.equal(status.mode, "unavailable");
   assert.equal(status.placeProviderAvailable, true);
-  assert.equal(status.destinationResearchAvailable, true);
+  assert.equal(status.destinationResearchAvailable, false);
   assert.equal(status.routeProviderAvailable, true);
   assert.ok(!JSON.stringify(status).includes(secret));
 
@@ -115,13 +115,13 @@ try {
   assert.equal(resolved.body.location.canonicalName, "Tokyo, Japan");
 
   globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options, { thinPois: true });
-  const thinDallasTrip = {
+  const thinProviderTrip = {
     from: "Austin, Texas, United States",
     fromDisplay: "Austin, Texas, United States",
-    destination: "Dallas, Texas, United States",
-    destinationDisplay: "Dallas, Texas, United States",
+    destination: "Low Data City, Texas, United States",
+    destinationDisplay: "Low Data City, Texas, United States",
     destinationLocation: {
-      canonicalName: "Dallas, Texas, United States",
+      canonicalName: "Low Data City, Texas, United States",
       latitude: 32.7767,
       longitude: -96.797,
       country: "United States",
@@ -140,15 +140,15 @@ try {
     preferences: [],
     travelers: [{ id: "traveler-1", name: "Traveler 1", ageGroup: "Adult (18-64)", restrictions: [], notes: "" }]
   };
-  const thinDallasResearch = await handlePlannerAction("research-destination", { trip: thinDallasTrip }, { requestId: "test-dallas-thin-research" });
-  assert.equal(thinDallasResearch.status, 200);
-  assert.equal(thinDallasResearch.body.profile.sourceMetadata.freshness, "live-provider-with-starter-fallback");
-  assert.ok(thinDallasResearch.body.profile.places.length >= 8);
-  assert.ok(JSON.stringify(thinDallasResearch.body.profile).includes("starter planning anchor"));
-  const thinDallasPlan = await handlePlannerAction("generate-trip", { trip: thinDallasTrip, destinationProfile: thinDallasResearch.body.profile }, { requestId: "test-dallas-thin-generate" });
-  assert.equal(thinDallasPlan.status, 200);
-  assert.equal(thinDallasPlan.body.status, "ready");
-  assert.ok(JSON.stringify(thinDallasPlan.body.plan).includes("Dallas"));
+  const thinProviderResearch = await handlePlannerAction("research-destination", { trip: thinProviderTrip }, { requestId: "test-thin-provider-research" });
+  assert.equal(thinProviderResearch.status, 200);
+  assert.equal(thinProviderResearch.body.profile.sourceMetadata.freshness, "live-provider-with-starter-fallback");
+  assert.ok(thinProviderResearch.body.profile.places.length >= 8);
+  assert.ok(JSON.stringify(thinProviderResearch.body.profile).includes("starter planning anchor"));
+  const thinProviderPlan = await handlePlannerAction("generate-trip", { trip: thinProviderTrip, destinationProfile: thinProviderResearch.body.profile }, { requestId: "test-thin-provider-generate" });
+  assert.equal(thinProviderPlan.status, 200);
+  assert.equal(thinProviderPlan.body.status, "ready");
+  assert.ok(JSON.stringify(thinProviderPlan.body.plan).includes("Low Data City"));
   globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options);
 
   const profile = await openRouteServiceDestinationResearch("Glacier National Park", {

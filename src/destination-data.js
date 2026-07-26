@@ -179,6 +179,83 @@ export const destinationProfiles = [
     ]
   },
   {
+    id: "dallas",
+    canonicalName: "Dallas, Texas, USA",
+    aliases: ["dallas", "dallas tx", "dallas texas", "dallas texas united states", "dfw", "dallas fort worth"],
+    country: "United States",
+    state: "Texas",
+    timezone: "America/Chicago",
+    currency: "USD",
+    summary: "A North Texas city best planned by districts: Dealey Plaza and downtown history, the Arts District, Deep Ellum, Bishop Arts, White Rock Lake, Fair Park, and nearby Fort Worth Stockyards.",
+    seasonalNotes: [
+      "August can be very hot; keep indoor museums, shaded meals, and shorter outdoor blocks in the middle of the day.",
+      "The State Fair of Texas changes Fair Park demand and traffic in fall; verify dates before anchoring a fair day.",
+      "Sports and concert events in Arlington can add traffic, parking pressure, and longer evenings."
+    ],
+    generalAdvisories: [
+      "Confirm museum hours, timed tickets, event schedules, parking, accessibility, and restaurant reservations before travel.",
+      "Fort Worth Stockyards is a real nearby excursion from Dallas, not a quick downtown stop; plan it as a half-day or full evening.",
+      "Use rideshare or transit for nightlife-heavy areas such as Deep Ellum when drinking or late return is likely."
+    ],
+    planningRules: {
+      defaultHotelRegion: "downtown-dealey",
+      maxRegionChangesRelaxed: 1,
+      maxRegionChangesBalanced: 2,
+      maxRegionChangesPacked: 3
+    },
+    regions: [
+      region("downtown-dealey", "Downtown and Dealey Plaza", "JFK history, Reunion Tower, West End, aquarium, skyline views, and compact first-time Dallas orientation.", 32.779, -96.808, ["history", "downtown", "landmark", "walkable"], ["arts-district", "deep-ellum", "bishop-arts"]),
+      region("arts-district", "Dallas Arts District", "Museums, sculpture, performing arts, Klyde Warren Park, architecture, and weather-flexible culture.", 32.7897, -96.7986, ["museums", "art", "architecture", "park"], ["downtown-dealey", "uptown"]),
+      region("deep-ellum", "Deep Ellum", "Murals, live music, bars, casual food, and a lively evening neighborhood east of downtown.", 32.784, -96.7837, ["music", "murals", "nightlife", "food"], ["downtown-dealey", "arts-district"]),
+      region("bishop-arts", "Bishop Arts District", "Oak Cliff boutiques, cafes, restaurants, galleries, and a walkable local-neighborhood evening.", 32.747, -96.8288, ["shopping", "food", "local-neighborhood", "art"], ["downtown-dealey"]),
+      region("uptown", "Uptown and Klyde Warren Park", "Green space, restaurants, walkable connections, and an easy link between downtown and the Arts District.", 32.7933, -96.8016, ["park", "food", "walkable"], ["arts-district", "downtown-dealey"]),
+      region("white-rock", "White Rock Lake and Arboretum", "Lake scenery, gardens, easier outdoor time, and a calmer break from downtown.", 32.8235, -96.7168, ["lake", "garden", "nature", "scenic"], ["smu-park-cities", "fair-park"]),
+      region("smu-park-cities", "SMU and Park Cities", "George W. Bush Presidential Center, Highland Park Village, polished cafes, and lower-intensity museum time.", 32.8407, -96.7845, ["museum", "shopping", "campus"], ["arts-district", "white-rock"]),
+      region("fair-park", "Fair Park and South Dallas", "Art Deco architecture, seasonal State Fair energy, gardens, museums, and sports/event context.", 32.7797, -96.7646, ["architecture", "event", "history"], ["deep-ellum", "white-rock"]),
+      region("arlington", "Arlington sports and entertainment", "AT&T Stadium, Globe Life Field, Six Flags, and event-heavy half-day or evening options.", 32.7473, -97.0945, ["sports", "theme-park", "event", "nearby"], ["downtown-dealey", "fort-worth-stockyards"]),
+      region("fort-worth-stockyards", "Fort Worth Stockyards", "Historic Western district with cattle drives, shopping, rodeo, restaurants, and live music west of Dallas.", 32.7881, -97.3486, ["nearby", "western", "history", "full-day"], ["arlington", "downtown-dealey"])
+    ],
+    places: [
+      place("sixth-floor-museum", "The Sixth Floor Museum at Dealey Plaza", "downtown-dealey", "Essential Dallas history stop inside the former Texas School Book Depository, focused on JFK and the events around Dealey Plaza.", ["museum", "history", "landmark"], ["History", "Museums", "Famous landmarks"], 120, 18, 30, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 98),
+      place("dealey-plaza", "Dealey Plaza and Grassy Knoll", "downtown-dealey", "Compact outdoor companion to the Sixth Floor Museum for historic context and downtown orientation.", ["history", "landmark", "walk"], ["History", "Photography", "Famous landmarks"], 45, 0, 0, "outdoor", "medium", "moderate", ["solo", "couple", "family", "senior"], "morning", 86),
+      place("reunion-tower", "Reunion Tower GeO-Deck", "downtown-dealey", "Skyline viewpoint that works well near sunset or as a first-day Dallas orientation.", ["viewpoint", "landmark", "skyline"], ["Photography", "Sunset", "Famous landmarks"], 75, 20, 45, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "evening", 84),
+      place("dallas-world-aquarium", "The Dallas World Aquarium", "downtown-dealey", "Indoor aquarium and rainforest-style attraction near West End, useful for families or hot/rainy days.", ["aquarium", "family", "indoor"], ["Family activities", "Museums", "Indoor backup"], 120, 25, 40, "indoor", "low", "good", ["solo", "couple", "family"], "afternoon", 82),
+      place("dallas-farmers-market", "Dallas Farmers Market", "downtown-dealey", "Food hall, local vendors, casual lunch, and an easy downtown break.", ["food", "market", "casual"], ["Local markets", "Street food", "Casual dining"], 75, 10, 35, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "lunch", 78),
+      place("dallas-museum-of-art", "Dallas Museum of Art", "arts-district", "Major Arts District anchor with broad collections and a strong indoor culture block.", ["museum", "art", "indoor"], ["Art", "Museums", "Architecture"], 140, 0, 25, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 92),
+      place("nasher-sculpture-center", "Nasher Sculpture Center", "arts-district", "Modern sculpture museum and garden that pairs naturally with the Dallas Museum of Art.", ["museum", "art", "garden"], ["Art", "Museums", "Gardens"], 90, 10, 25, "mixed", "medium", "good", ["solo", "couple", "senior"], "afternoon", 84),
+      place("perot-museum", "Perot Museum of Nature and Science", "arts-district", "Hands-on science museum with architecture, family appeal, and excellent heat/rain backup value.", ["museum", "science", "family"], ["Museums", "Family activities", "Architecture"], 140, 20, 35, "indoor", "low", "good", ["solo", "couple", "family"], "afternoon", 88),
+      place("klyde-warren-park", "Klyde Warren Park", "uptown", "Urban deck park connecting Uptown and the Arts District, with food trucks, shade breaks, and casual programming.", ["park", "food", "easy-walk"], ["Easy outdoor walks", "Casual dining", "Relaxation"], 60, 0, 20, "outdoor", "medium", "good", ["solo", "couple", "family", "senior"], "afternoon", 82),
+      place("deep-ellum", "Deep Ellum murals and live music area", "deep-ellum", "Dallas evening district for murals, barbecue, music venues, bars, and casual food.", ["music", "murals", "evening"], ["Live music", "Nightlife", "Local culture"], 120, 10, 70, "mixed", "low", "moderate", ["solo", "couple"], "evening", 86),
+      place("bishop-arts", "Bishop Arts District", "bishop-arts", "Walkable Oak Cliff neighborhood for boutiques, galleries, coffee, dinner, dessert, and a local Dallas feel.", ["shopping", "food", "local-neighborhood"], ["Shopping", "Cafes", "Local culture"], 110, 0, 55, "mixed", "low", "good", ["solo", "couple", "family"], "afternoon", 88),
+      place("dallas-arboretum", "Dallas Arboretum and Botanical Garden", "white-rock", "Garden and White Rock Lake-side outing for flowers, lake views, photography, and slower outdoor time.", ["garden", "lake", "nature"], ["Gardens", "Photography", "Relaxation"], 150, 15, 30, "outdoor", "high", "good", ["solo", "couple", "family", "senior"], "morning", 90),
+      place("white-rock-lake", "White Rock Lake", "white-rock", "Scenic lake loop and picnic-style outdoor break; best early or late during hot months.", ["lake", "nature", "easy-walk"], ["Nature", "Evening walks", "Photography"], 90, 0, 0, "outdoor", "high", "moderate", ["solo", "couple", "family", "senior"], "evening", 78),
+      place("bush-center", "George W. Bush Presidential Center", "smu-park-cities", "Presidential library and museum on the SMU campus, useful for history and indoor planning.", ["museum", "history", "indoor"], ["Museums", "History", "Architecture"], 120, 20, 35, "indoor", "low", "good", ["solo", "couple", "family", "senior"], "morning", 80),
+      place("highland-park-village", "Highland Park Village", "smu-park-cities", "Historic upscale shopping village with architecture, cafes, and a polished low-intensity break.", ["shopping", "architecture", "cafes"], ["Shopping", "Architecture", "Cafes"], 75, 0, 50, "mixed", "low", "good", ["solo", "couple", "senior"], "afternoon", 66),
+      place("fair-park", "Fair Park Art Deco and State Fair grounds", "fair-park", "Large Art Deco fairgrounds and seasonal State Fair hub; confirm events and museum openings.", ["architecture", "event", "history"], ["Architecture", "History", "Seasonal Experiences"], 130, 0, 50, "mixed", "high", "moderate", ["solo", "couple", "family"], "afternoon", 76),
+      place("dallas-zoo", "Dallas Zoo", "bishop-arts", "Family-friendly zoo south of downtown; best as a dedicated morning block in cooler hours.", ["zoo", "family", "outdoor"], ["Family activities", "Nature", "Outdoor Activities"], 180, 20, 40, "outdoor", "high", "moderate", ["solo", "couple", "family"], "morning", 72),
+      place("att-stadium", "AT&T Stadium or Arlington sports event", "arlington", "Nearby event anchor for Cowboys games, stadium tours, concerts, or Arlington sports nights.", ["sports", "event", "nearby"], ["Sports", "Entertainment", "Famous landmarks"], 180, 25, 120, "mixed", "low", "good", ["solo", "couple", "family"], "afternoon", 74),
+      place("six-flags-over-texas", "Six Flags Over Texas", "arlington", "Full-day theme park option between Dallas and Fort Worth, strongest for families or thrill-focused trips.", ["theme-park", "family", "full-day"], ["Theme parks", "Family activities", "Entertainment"], 420, 45, 110, "mixed", "high", "moderate", ["solo", "couple", "family"], "full-day", 70),
+      place("fort-worth-stockyards", "Fort Worth Stockyards", "fort-worth-stockyards", "Western heritage day or evening with cattle drives, shops, restaurants, rodeo options, and live music.", ["history", "western", "nearby"], ["History", "Local culture", "Live music"], 240, 0, 90, "mixed", "medium", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 96),
+      place("stockyards-cattle-drive", "Fort Worth Herd cattle drive", "fort-worth-stockyards", "Time-sensitive Stockyards highlight; build the day around the cattle-drive schedule when conditions permit.", ["western", "event", "history"], ["Famous landmarks", "Seasonal Experiences", "Family activities"], 60, 0, 0, "outdoor", "medium", "moderate", ["solo", "couple", "family", "senior"], "afternoon", 88),
+      place("fort-worth-cultural-district", "Fort Worth Cultural District", "fort-worth-stockyards", "Nearby museum district option with major art museums, gardens, and a calmer culture pairing before Stockyards evening.", ["museum", "art", "nearby"], ["Art", "Museums", "Architecture"], 180, 10, 35, "mixed", "low", "good", ["solo", "couple", "family", "senior"], "morning", 76)
+    ],
+    foodAreas: [
+      foodArea("downtown-dallas-food", "Downtown and West End dining", "downtown-dealey", ["Tex-Mex", "American", "Steakhouses", "Casual dining"], ["lunch", "dinner"], ["budget", "moderate", "premium"], ["Vegetarian", "Avoid pork", "Gluten-free"], ["quiet", "lively"]),
+      foodArea("bishop-arts-food", "Bishop Arts restaurants and cafes", "bishop-arts", ["Tex-Mex", "Italian", "American", "Cafes", "Desserts"], ["breakfast", "lunch", "dinner"], ["budget", "moderate"], ["Vegetarian", "Vegan", "Gluten-free"], ["quiet"]),
+      foodArea("deep-ellum-food", "Deep Ellum barbecue, tacos, and nightlife food", "deep-ellum", ["Barbecue", "Tex-Mex", "American", "Bars", "Desserts"], ["dinner"], ["budget", "moderate"], ["Vegetarian", "Limited beef"], ["nightlife", "live-music"]),
+      foodArea("arts-district-food", "Arts District and Klyde Warren food", "arts-district", ["Food trucks", "American", "Cafes", "Fine dining"], ["lunch", "dinner"], ["budget", "moderate", "premium"], ["Vegetarian", "Gluten-free"], ["quiet", "lively"]),
+      foodArea("white-rock-food", "White Rock Lake and East Dallas dining", "white-rock", ["American", "Cafes", "Casual dining", "Desserts"], ["breakfast", "lunch"], ["budget", "moderate"], ["Vegetarian", "Dairy-free"], ["quiet"]),
+      foodArea("stockyards-food", "Fort Worth Stockyards dining", "fort-worth-stockyards", ["Texas barbecue", "Steakhouses", "Tex-Mex", "Bars"], ["lunch", "dinner"], ["moderate", "premium"], ["Vegetarian", "Avoid beef"], ["live-music", "nightlife"])
+    ],
+    scenicRoutes: [
+      route("downtown-arts-uptown", "Downtown, Arts District, and Klyde Warren link", "downtown-dealey", "arts-district", 12, 3, ["culture", "walkable", "museum"], "morning", "Best grouped to avoid unnecessary driving and parking changes."),
+      route("downtown-bishop", "Downtown to Bishop Arts", "downtown-dealey", "bishop-arts", 15, 5, ["food", "local-neighborhood"], "afternoon", "Good lunch or dinner pairing after downtown history."),
+      route("arts-white-rock", "Arts District to White Rock Lake and Arboretum", "arts-district", "white-rock", 20, 8, ["garden", "lake", "scenic"], "morning", "Use earlier in summer heat."),
+      route("dallas-arlington", "Dallas to Arlington sports and theme-park corridor", "downtown-dealey", "arlington", 35, 20, ["sports", "theme-park", "nearby"], "afternoon", "Traffic varies heavily around games and concerts."),
+      route("dallas-stockyards", "Dallas to Fort Worth Stockyards", "downtown-dealey", "fort-worth-stockyards", 55, 35, ["nearby", "western", "day-trip"], "afternoon", "Plan as a half-day or evening excursion; verify cattle drive and rodeo schedules.")
+    ]
+  },
+  {
     id: "detroit",
     canonicalName: "Detroit, Michigan, USA",
     aliases: ["detroit", "detroit mi", "detroit michigan", "detroit michigan united states", "motor city"],

@@ -282,6 +282,17 @@ function destinationDayThemes(profile, input) {
       ["concord", "uptown"]
     ], input.variationSeed).slice(0, input.numberOfDays);
   }
+  if (profile.id === "dallas") {
+    return rotate([
+      ["downtown-dealey", "arts-district", "uptown"],
+      ["white-rock", "smu-park-cities"],
+      ["bishop-arts", "deep-ellum"],
+      ["fort-worth-stockyards"],
+      ["fair-park", "deep-ellum"],
+      ["arlington"],
+      ["arts-district", "downtown-dealey"]
+    ], input.variationSeed).slice(0, input.numberOfDays);
+  }
   if (profile.id === "detroit") {
     return rotate([
       ["downtown", "santa-monica"],

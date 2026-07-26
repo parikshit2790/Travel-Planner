@@ -72,12 +72,19 @@ assert.equal(routeMissingStatus.canGenerate, false);
 assert.equal(routeMissingStatus.mode, "unavailable");
 assert.equal(routeMissingStatus.placeProvider.configured, true);
 
-const liveStatus = providerStatus({ production: true, development: false, placeProvider: "openrouteservice", routeProvider: "openrouteservice", openRouteServiceApiKey: "secret-ors", placeApiKey: "", routeApiKey: "" });
+const liveStatus = providerStatus({ production: true, development: false, placeProvider: "openrouteservice", routeProvider: "openrouteservice", openRouteServiceApiKey: "secret-ors", placeApiKey: "", routeApiKey: "", aiProvider: "openai", aiApiKey: "secret-ai" });
 assert.equal(liveStatus.mode, "live");
 assert.equal(liveStatus.canGenerate, true);
 assert.equal(liveStatus.destinationResearchAvailable, true);
 assert.notEqual(liveStatus.mode, healthyStatus.mode);
 assert.ok(!JSON.stringify(liveStatus).includes("secret-ors"));
+assert.ok(!JSON.stringify(liveStatus).includes("secret-ai"));
+
+const routesOnlyStatus = providerStatus({ production: true, development: false, placeProvider: "openrouteservice", routeProvider: "openrouteservice", openRouteServiceApiKey: "secret-ors", placeApiKey: "", routeApiKey: "", aiProvider: "", aiApiKey: "" });
+assert.equal(routesOnlyStatus.canGenerate, false);
+assert.equal(routesOnlyStatus.placeProviderAvailable, true);
+assert.equal(routesOnlyStatus.routeProviderAvailable, true);
+assert.equal(routesOnlyStatus.destinationResearchAvailable, false);
 
 const optionalMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", weatherProvider: "tomorrow", weatherApiKey: "", aiProvider: "openai", aiApiKey: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(optionalMissingStatus.canGenerate, true);

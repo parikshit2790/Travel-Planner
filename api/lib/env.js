@@ -13,14 +13,14 @@ export function providerConfig() {
     weatherApiKey: process.env.WEATHER_API_KEY || "",
     aiProvider: process.env.AI_PROVIDER || "",
     aiApiKey: process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "",
-    aiModel: process.env.AI_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    aiModel: process.env.AI_MODEL || process.env.OPENAI_MODEL || "gpt-5-mini",
     timeoutMs: Number(process.env.PROVIDER_TIMEOUT_MS || 10000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
   };
 }
 
 export function validatePlanningProviders(config = providerConfig()) {
-  return providerStatus(config).errors;
+  return providerStatus(config).blockingErrors;
 }
 
 export function providerStatus(config = providerConfig(), { includeDiagnostics = false } = {}) {
@@ -40,12 +40,17 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   const placeImplemented = ["mock", "openrouteservice"].includes(config.placeProvider);
   const routeImplemented = ["mock", "approximate", "openrouteservice"].includes(config.routeProvider);
   const weatherImplemented = !config.weatherProvider;
-  const aiImplemented = !config.aiProvider;
+  const aiImplemented = !config.aiProvider || ["openai"].includes(config.aiProvider);
   if (config.placeProvider && !placeImplemented) placeMissing.push(`Adapter not implemented: ${config.placeProvider}`);
   if (config.routeProvider && !routeImplemented) routeMissing.push(`Adapter not implemented: ${config.routeProvider}`);
   if (config.weatherProvider && !weatherImplemented) weatherMissing.push(`Adapter not implemented: ${config.weatherProvider}`);
   if (config.aiProvider && !aiImplemented) aiMissing.push(`Adapter not implemented: ${config.aiProvider}`);
-  const canGenerate = placeMissing.length === 0 && routeMissing.length === 0;
+  const hasPlaceAndRoute = placeMissing.length === 0 && routeMissing.length === 0;
+  const needsLiveDestinationResearch = config.production && config.placeProvider !== "mock";
+  const destinationResearchMissing = needsLiveDestinationResearch && !(config.aiProvider === "openai" && aiMissing.length === 0)
+    ? ["AI destination intelligence is required for production trip generation."]
+    : [];
+  const canGenerate = hasPlaceAndRoute && destinationResearchMissing.length === 0;
   const mockMode = canGenerate && (config.placeProvider === "mock" || config.routeProvider === "mock");
   const mode = !canGenerate ? "unavailable" : mockMode ? "mock" : "live";
   const status = {
@@ -54,7 +59,7 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
     canGenerate,
     mode,
     placeProviderAvailable: placeMissing.length === 0,
-    destinationResearchAvailable: placeMissing.length === 0,
+    destinationResearchAvailable: placeMissing.length === 0 && destinationResearchMissing.length === 0,
     routeProviderAvailable: routeMissing.length === 0,
     weatherProviderAvailable: Boolean(config.weatherProvider) && weatherMissing.length === 0,
     placeProvider: safeProviderStatus(config.placeProvider, placeMissing, canGenerate),
@@ -77,8 +82,14 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   const errors = [
     ...placeMissing.map((item) => `Place provider: ${item}`),
     ...routeMissing.map((item) => `Route provider: ${item}`),
+    ...destinationResearchMissing.map((item) => `Destination research: ${item}`),
     ...weatherMissing.map((item) => `Weather provider: ${item}`),
     ...aiMissing.map((item) => `AI provider: ${item}`)
+  ];
+  const blockingErrors = [
+    ...placeMissing.map((item) => `Place provider: ${item}`),
+    ...routeMissing.map((item) => `Route provider: ${item}`),
+    ...destinationResearchMissing.map((item) => `Destination research: ${item}`)
   ];
   if (includeDiagnostics) {
     status.diagnostics = {
@@ -90,12 +101,13 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
       aiProvider: config.aiProvider || "none",
       placeProviderMissing: placeMissing,
       routeProviderMissing: routeMissing,
+      destinationResearchMissing,
       weatherProviderMissing: weatherMissing,
       aiProviderMissing: aiMissing,
       errors
     };
   }
-  return { ...status, errors };
+  return { ...status, errors, blockingErrors };
 }
 
 function safeProviderStatus(provider, missing, canGenerate) {

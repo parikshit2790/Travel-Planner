@@ -27,8 +27,8 @@ WEATHER_PROVIDER=
 WEATHER_API_KEY=
 AI_PROVIDER=
 AI_API_KEY=
-AI_MODEL=gpt-4.1-mini
-PROVIDER_TIMEOUT_MS=10000
+AI_MODEL=gpt-5-mini
+PROVIDER_TIMEOUT_MS=20000
 CACHE_TTL_SECONDS=86400
 ```
 
@@ -40,13 +40,13 @@ Supported provider adapters in this build:
 - `ROUTE_PROVIDER=approximate` for clearly labeled coordinate-style estimates.
 - `ROUTE_PROVIDER=openrouteservice` for live driving and walking route duration and distance estimates.
 - Empty `WEATHER_PROVIDER` returns seasonal guidance only.
-- `AI_PROVIDER` and `AI_API_KEY`/`OPENAI_API_KEY` are reserved for future enrichment and are not required for current deterministic generation.
+- `AI_PROVIDER=openai` enables AI-assisted destination intelligence for high-quality worldwide trip profiles. `AI_API_KEY` or `OPENAI_API_KEY` must be set server-side only. In production, RouteMosaic treats live place/route providers without destination intelligence as not ready for full trip generation.
 
 Mock providers are for local development and deterministic tests. Public production worldwide planning should use `openrouteservice` or another real provider adapter for both place and route data. Do not put secret keys in public frontend variables.
 
 ### openrouteservice Setup
 
-Use these Vercel Environment Variables for live provider mode:
+Use these Vercel Environment Variables for live autocomplete, geocoding, and routing:
 
 ```bash
 PLACE_PROVIDER=openrouteservice
@@ -58,6 +58,19 @@ PROVIDER_TIMEOUT_MS=10000
 `OPENROUTESERVICE_API_KEY` is the preferred key variable. `PLACE_API_KEY` and `ROUTE_API_KEY` remain accepted as backward-compatible generic key slots, but a single `OPENROUTESERVICE_API_KEY` is recommended so the same secret powers autocomplete, geocoding, POI research, and routing.
 
 Get the API key from the official openrouteservice dashboard at `https://openrouteservice.org/dev/`. Enable access for geocoding/autocomplete, POIs, and directions according to your openrouteservice account limits. After changing Vercel variables, redeploy the Production deployment.
+
+### AI Destination Intelligence Setup
+
+Use OpenAI for production destination research so RouteMosaic can generate strong trip profiles for arbitrary places such as Paris, Tokyo, Dallas, national parks, and smaller towns:
+
+```bash
+AI_PROVIDER=openai
+OPENAI_API_KEY=<secret key>
+AI_MODEL=gpt-5-mini
+PROVIDER_TIMEOUT_MS=20000
+```
+
+With `AI_PROVIDER=openai`, RouteMosaic asks the server-side destination intelligence adapter to produce structured regions, must-do places, neighborhoods, food areas, and nearby excursions. openrouteservice still powers location autocomplete and route estimates. If AI research fails, the app falls back to provider/map data and clearly lower-confidence starter planning anchors.
 
 ### Admin Setup
 
