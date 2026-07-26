@@ -15,6 +15,7 @@ import {
   rankLocations
 } from "../src/location-provider.js";
 import { initialState } from "../src/seed.js";
+import { mockLocationSearch } from "../api/lib/mock-provider.js";
 
 const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");
@@ -73,6 +74,19 @@ const chaco = normalizeNominatimResult({
 }, "OpenStreetMap Nominatim");
 assert.equal(rankLocations([chaco, charlotte], "Charlotte")[0].normalizedName, "Charlotte, North Carolina, United States");
 
+const sanSuggestions = mockLocationSearch("san");
+assert.ok(sanSuggestions.length >= 5);
+assert.equal(sanSuggestions[0].displayName, "San Jose, California, United States");
+assert.ok(sanSuggestions.some((item) => item.displayName === "San Francisco, California, United States"));
+assert.ok(sanSuggestions.some((item) => item.displayName === "San Diego, California, United States"));
+assert.ok(sanSuggestions.some((item) => item.displayName === "San Antonio, Texas, United States"));
+assert.ok(sanSuggestions.some((item) => item.displayName === "San Juan, Puerto Rico, United States"));
+assert.equal(sanSuggestions.some((item) => item.displayName.toLowerCase() === "san"), false);
+
+const charlotteSuggestions = mockLocationSearch("charlotte");
+assert.equal(charlotteSuggestions[0].displayName, "Charlotte, North Carolina, United States");
+assert.equal(charlotteSuggestions[0].locationType, "City");
+
 const trip = createTripDraft();
 trip.from = "Charlotte";
 trip.fromLocation = charlotte;
@@ -115,6 +129,11 @@ assert.ok(app.includes("TravelHeaderIllustration"));
 assert.ok(app.includes("SidebarScenicIllustration"));
 assert.ok(app.includes("visibleTripBasicsIssues"));
 assert.ok(app.includes("visibleReviewIssues"));
+assert.ok(app.includes("reviewLocationReadinessIssues"));
+assert.ok(app.includes("mockDestinationDataAvailable"));
+assert.ok(app.includes("Traveling From must be selected from location suggestions before building."));
+assert.ok(app.includes("Destination must be selected from location suggestions before building."));
+assert.ok(app.includes("This destination is not available in the current demo data."));
 assert.ok(app.includes("Route time will be calculated during itinerary planning."));
 assert.ok(app.includes("Destination Refinement"));
 assert.ok(app.includes("Ready with advisory"));
@@ -128,6 +147,7 @@ assert.ok(!/finally\s*{\s*ui\.locationLoading\[field\]\s*=\s*false;\s*render\(\)
 assert.ok(/finally\s*{\s*if \(ui\.locationRequestId\[field\] !== requestId\) return;\s*ui\.locationLoading\[field\]\s*=\s*false;\s*refreshLocationPanel\(\);/s.test(app));
 assert.ok(/locationProvider\.search\(String\(value \|\| ""\)\.trim\(\)\)/.test(app));
 assert.ok(!/selectLocationSuggestion\(field,\s*0\)/.test(app));
+assert.ok(!/Math\.max\(0,\s*ui\.locationHighlight\[field\]\)/.test(app));
 assert.ok(!/blur[\s\S]{0,160}selectLocation/.test(app));
 
 assert.ok(css.includes(".field-shell"));

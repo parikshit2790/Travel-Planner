@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
-import { registerGeneratedDestinationProfile } from "../src/destination-data.js?v=52";
-import { generateTripPlan } from "../src/planner.js?v=52";
+import { registerGeneratedDestinationProfile } from "../src/destination-data.js?v=53";
+import { generateTripPlan } from "../src/planner.js?v=53";
 import { mockDestinationResearch } from "../api/lib/mock-provider.js";
 import { providerStatus, validatePlanningProviders } from "../api/lib/env.js";
 
@@ -32,6 +32,8 @@ const plannerActions = fs.readFileSync("api/lib/planner-actions.js", "utf8");
 assert.ok(!plannerActions.includes("https://api.openai.com/v1/responses"));
 assert.ok(plannerActions.includes("validatePlanningProviders"));
 assert.ok(plannerActions.includes("researchDestination"));
+assert.ok(plannerActions.includes("hasMockDestinationData"));
+assert.ok(plannerActions.includes("MOCK_DESTINATION_UNAVAILABLE"));
 assert.ok(plannerActions.includes("generate-trip"));
 assert.ok(plannerActions.includes("regenerate-day"));
 assert.ok(plannerActions.includes("regenerate-meals"));

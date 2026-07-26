@@ -33,6 +33,8 @@ assert.ok(apiClient.includes('postAction("/api/provider-health", "status"'));
 assert.ok(app.includes("registerGeneratedDestinationProfile"));
 assert.ok(app.includes("buildTripPlan"));
 assert.ok(app.includes("routeMosaicApi.generateTrip"));
+assert.ok(app.includes("routeMosaicApi.generateTrip(state.trip, destinationProfile"));
+assert.ok(app.includes("MOCK_DESTINATION_UNAVAILABLE") || app.includes("current demo data"));
 assert.ok(app.includes("mockPlanNotice"));
 assert.ok(app.includes("Sample planning data."));
 assert.ok(app.includes("not live destination research, current availability, live traffic, or verified worldwide coverage"));
@@ -56,6 +58,9 @@ assert.ok(app.includes("toggleMustDo:"));
 assert.ok(app.includes("removeItem:"));
 assert.ok(app.includes("state.planStale = true"));
 assert.ok(app.includes("No same-region backup is available") || app.includes("Backup options"));
+assert.ok(apiClient.includes("NON_JSON_RESPONSE"));
+assert.ok(apiClient.includes("Trip service returned an unexpected response."));
+assert.ok(!apiClient.includes("Request failed. Please retry."));
 
 assert.ok(css.includes(".plan-hero"));
 assert.ok(css.includes(".plan-tabs"));

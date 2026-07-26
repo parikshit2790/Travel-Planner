@@ -4,15 +4,31 @@ async function postAction(endpoint, action, payload = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, payload })
   });
-  const data = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json") ? await response.json().catch(() => ({})) : null;
+  if (!data) {
+    const error = new Error("Trip service returned an unexpected response. Please try again later.");
+    error.code = "NON_JSON_RESPONSE";
+    error.retryable = response.status >= 500;
+    error.status = response.status;
+    throw error;
+  }
   if (!response.ok || data.success === false) {
-    const error = new Error(data.error?.message || data.error || "Request failed. Please retry.");
+    const error = new Error(data.error?.message || data.error || publicFallbackMessage(response.status));
     error.code = data.error?.code || data.code || "REQUEST_FAILED";
     error.retryable = Boolean(data.error?.retryable);
     error.status = response.status;
     throw error;
   }
   return data;
+}
+
+function publicFallbackMessage(status) {
+  if (status === 400) return "The request was incomplete. Please review your trip details.";
+  if (status === 404) return "Trip service is unavailable right now. Please try again later.";
+  if (status === 422) return "Trip generation needs more complete trip details.";
+  if (status >= 500) return "Trip service is temporarily unavailable. Please try again later.";
+  return "Trip request could not be completed.";
 }
 
 export const routeMosaicApi = {

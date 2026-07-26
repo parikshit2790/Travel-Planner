@@ -1,4 +1,4 @@
-import { routeMosaicApi } from "./api-client.js?v=52";
+import { routeMosaicApi } from "./api-client.js?v=53";
 
 export const LOCATION_MIN_QUERY_LENGTH = 2;
 export const LOCATION_SEARCH_DEBOUNCE_MS = 300;
@@ -52,12 +52,15 @@ function locationScore(location, normalizedQuery) {
   const name = normalizeComparable(location.normalizedName || location.displayName);
   const display = normalizeComparable(location.displayName);
   const city = normalizeComparable(location.city);
-  const state = normalizeComparable(location.stateOrProvince);
+  const state = normalizeComparable(location.stateOrProvince || location.stateOrRegion);
+  const aliases = (location.aliases || []).map(normalizeComparable);
   const countryCode = String(location.countryCode || "").toUpperCase();
   const type = String(location.locationType || "");
   let score = 0;
   if (name === normalizedQuery || city === normalizedQuery) score += 1000;
   if (name.startsWith(normalizedQuery) || city.startsWith(normalizedQuery)) score += 760;
+  if (aliases.some((alias) => alias === normalizedQuery)) score += 720;
+  if (aliases.some((alias) => alias.startsWith(normalizedQuery))) score += 620;
   if (city) score += 220;
   if (type === "Airport") score += 180;
   if (["State", "Province", "Region"].includes(type)) score += 80;

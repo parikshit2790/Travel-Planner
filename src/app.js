@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=52";
-import { routeMosaicApi } from "./api-client.js?v=52";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=53";
+import { routeMosaicApi } from "./api-client.js?v=53";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -34,8 +34,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=52";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=52";
+} from "./domain.js?v=53";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=53";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -49,8 +49,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=52";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=52";
+} from "./planner.js?v=53";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=53";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -125,6 +125,8 @@ const stepHeadings = [
   ["Set your comfort level and budget.", "Help us fine-tune your trip to match your style, comfort, and budget."],
   ["Review your plan before we build the trip.", "Check your selections and confirm that everything looks good."]
 ];
+
+const mockDestinationDataNames = ["new york", "seattle", "glacier", "maui", "paris", "tokyo", "iceland", "amalfi", "detroit", "charlotte", "los angeles"];
 
 function load() {
   clearTransientWizardStorage();
@@ -363,7 +365,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=52" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=53" alt="" /></span>`;
 }
 
 function Brand() {
@@ -1987,7 +1989,50 @@ function reviewIssues() {
       action: "Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session."
     });
   }
+  if (state.activeStep === 6) {
+    issues.unshift(...reviewLocationReadinessIssues(state.trip));
+    if (state.providerStatus?.mode === "mock" && !mockDestinationDataAvailable(state.trip.destinationDisplay || state.trip.destination)) {
+      issues.unshift({
+        severity: "Critical",
+        blocking: true,
+        field: "trip.destination",
+        owningStep: 1,
+        issue: "This destination is not available in the current demo data.",
+        action: "Edit Trip Basics or try the Los Angeles sample."
+      });
+    }
+  }
   return issues;
+}
+
+function reviewLocationReadinessIssues(trip) {
+  const issues = [];
+  if (String(trip.from || "").trim() && trip.fromLocation?.verificationStatus !== "Verified") {
+    issues.push({
+      severity: "Critical",
+      blocking: true,
+      field: "trip.from",
+      owningStep: 1,
+      issue: "Traveling From must be selected from location suggestions before building.",
+      action: "Edit Trip Basics and select a real origin suggestion."
+    });
+  }
+  if (String(trip.destination || "").trim() && trip.destinationLocation?.verificationStatus !== "Verified") {
+    issues.push({
+      severity: "Critical",
+      blocking: true,
+      field: "trip.destination",
+      owningStep: 1,
+      issue: "Destination must be selected from location suggestions before building.",
+      action: "Edit Trip Basics and select a real destination suggestion."
+    });
+  }
+  return issues;
+}
+
+function mockDestinationDataAvailable(destination) {
+  const normalized = String(destination || "").toLowerCase();
+  return mockDestinationDataNames.some((name) => normalized.includes(name));
 }
 
 function crossStepIssues() {
@@ -2302,7 +2347,8 @@ function handleLocationKeydown(event, field) {
   if (event.key === "ArrowDown") ui.locationHighlight[field] = (ui.locationHighlight[field] + 1 + suggestions.length) % suggestions.length;
   if (event.key === "ArrowUp") ui.locationHighlight[field] = (ui.locationHighlight[field] - 1 + suggestions.length) % suggestions.length;
   if (event.key === "Enter") {
-    selectLocationSuggestion(field, Math.max(0, ui.locationHighlight[field]));
+    if (ui.locationHighlight[field] < 0) return;
+    selectLocationSuggestion(field, ui.locationHighlight[field]);
     persist("Updated");
     return;
   }
@@ -2596,10 +2642,10 @@ async function buildTripPlanAction(name) {
   ui.toast = "Building your trip plan...";
   render();
   try {
-    if (name !== "regeneratePlan") await ensureDestinationIntelligence();
+    const destinationProfile = name !== "regeneratePlan" ? await ensureDestinationIntelligence() : null;
     const result = name === "regeneratePlan" && state.plan
       ? await routeMosaicApi.regeneratePlan(state.plan)
-      : await routeMosaicApi.generateTrip(state.trip, null, state.plan?.generationMetadata?.variationSeed || 0);
+      : await routeMosaicApi.generateTrip(state.trip, destinationProfile, state.plan?.generationMetadata?.variationSeed || 0);
     if (result.status === "ready") {
       state.plan = result.plan;
       state.planStatus = "ready";
@@ -2619,7 +2665,7 @@ async function buildTripPlanAction(name) {
     }
   } catch (error) {
     state.planStatus = "";
-    state.planError = null;
+    state.planError = error?.code ? { status: "error", code: error.code, message: error.message, retryable: error.retryable } : null;
     ui.showWarnings = true;
     ui.toast = error?.message || "Trip plan could not be generated yet.";
   }

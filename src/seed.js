@@ -1,4 +1,4 @@
-import { addOrUpdatePreference, calculateTripEndDate, createTripDraft, syncTravelersToCounts } from "./domain.js?v=52";
+import { addOrUpdatePreference, calculateTripEndDate, createTripDraft, syncTravelersToCounts } from "./domain.js?v=53";
 
 const trip = createTripDraft();
 
@@ -19,8 +19,18 @@ export function createSampleLosAngelesTrip(today = new Date()) {
   const startDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
   sample.from = "Charlotte, North Carolina";
   sample.fromDisplay = "Charlotte, North Carolina";
+  sample.fromVerificationStatus = "Verified";
+  sample.fromPlaceId = "mock-charlotte-nc-us";
+  sample.fromLat = 35.2271;
+  sample.fromLng = -80.8431;
+  sample.fromLocation = verifiedLocation("mock-charlotte-nc-us", "Charlotte", "North Carolina", "United States", "US", 35.2271, -80.8431);
   sample.destination = "Los Angeles, California";
   sample.destinationDisplay = "Los Angeles, California";
+  sample.destinationVerificationStatus = "Verified";
+  sample.destinationPlaceId = "mock-los-angeles-ca-us";
+  sample.destinationLat = 34.0522;
+  sample.destinationLng = -118.2437;
+  sample.destinationLocation = verifiedLocation("mock-los-angeles-ca-us", "Los Angeles", "California", "United States", "US", 34.0522, -118.2437);
   sample.days = 5;
   sample.startDate = startDate;
   sample.endDate = calculateTripEndDate(startDate, 5);
@@ -63,4 +73,27 @@ export function createSampleLosAngelesTrip(today = new Date()) {
   sample.travelers[1].restrictions = ["Mobility limitation"];
   sample.sampleTrip = true;
   return sample;
+}
+
+function verifiedLocation(id, city, stateOrProvince, country, countryCode, latitude, longitude) {
+  const normalizedName = [city, stateOrProvince, country].filter(Boolean).join(", ");
+  return {
+    id,
+    canonicalName: normalizedName,
+    normalizedName,
+    displayName: normalizedName,
+    city,
+    stateOrProvince,
+    stateOrRegion: stateOrProvince,
+    country,
+    countryCode,
+    latitude,
+    longitude,
+    coordinates: { lat: latitude, lng: longitude },
+    locationType: "City",
+    providerPlaceId: id,
+    verificationStatus: "Verified",
+    provider: "mock",
+    verifiedAt: new Date().toISOString()
+  };
 }

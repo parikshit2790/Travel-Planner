@@ -1,3 +1,22 @@
+const mockLocationFixtures = [
+  locationFixture("mock-san-jose-ca-us", "San Jose", "California", "United States", "US", 37.3382, -121.8863, ["sjc", "san jose ca", "san jose california", "silicon valley"]),
+  locationFixture("mock-san-francisco-ca-us", "San Francisco", "California", "United States", "US", 37.7749, -122.4194, ["sf", "sfo", "san francisco ca", "bay area"]),
+  locationFixture("mock-san-diego-ca-us", "San Diego", "California", "United States", "US", 32.7157, -117.1611, ["san diego ca"]),
+  locationFixture("mock-san-antonio-tx-us", "San Antonio", "Texas", "United States", "US", 29.4252, -98.4946, ["san antonio tx"]),
+  locationFixture("mock-san-juan-pr-us", "San Juan", "Puerto Rico", "United States", "US", 18.4655, -66.1057, ["san juan puerto rico", "san juan pr"]),
+  locationFixture("mock-charlotte-nc-us", "Charlotte", "North Carolina", "United States", "US", 35.2271, -80.8431, ["charlotte nc", "clt", "queen city"]),
+  locationFixture("mock-los-angeles-ca-us", "Los Angeles", "California", "United States", "US", 34.0522, -118.2437, ["la", "l.a.", "los angeles ca", "los angeles california"]),
+  locationFixture("mock-new-york-ny-us", "New York", "New York", "United States", "US", 40.7128, -74.006, ["nyc", "new york city", "new york ny", "manhattan"]),
+  locationFixture("mock-detroit-mi-us", "Detroit", "Michigan", "United States", "US", 42.3314, -83.0458, ["detroit mi", "motor city"]),
+  locationFixture("mock-seattle-wa-us", "Seattle", "Washington", "United States", "US", 47.6062, -122.3321, ["seattle wa"]),
+  locationFixture("mock-miami-fl-us", "Miami", "Florida", "United States", "US", 25.7617, -80.1918, ["miami fl"]),
+  locationFixture("mock-chicago-il-us", "Chicago", "Illinois", "United States", "US", 41.8781, -87.6298, ["chicago il"]),
+  locationFixture("mock-boston-ma-us", "Boston", "Massachusetts", "United States", "US", 42.3601, -71.0589, ["boston ma"]),
+  locationFixture("mock-washington-dc-us", "Washington", "District of Columbia", "United States", "US", 38.9072, -77.0369, ["washington dc", "dc", "washington d.c."]),
+  locationFixture("mock-paris-fr", "Paris", "Ile-de-France", "France", "FR", 48.8566, 2.3522, ["paris france"]),
+  locationFixture("mock-tokyo-jp", "Tokyo", "Tokyo", "Japan", "JP", 35.6762, 139.6503, ["tokyo japan"])
+];
+
 const destinationSeeds = {
   "new york": ["Central Park", "The Metropolitan Museum of Art", "High Line", "Brooklyn Bridge", "Tenement Museum", "Chelsea Market", "DUMBO waterfront", "Times Square theatre district", "Statue of Liberty ferry area", "Greenwich Village"],
   "seattle": ["Pike Place Market", "Seattle Center and Space Needle", "Chihuly Garden and Glass", "Museum of Pop Culture", "Kerry Park", "Ballard Locks", "Discovery Park", "Capitol Hill", "Seattle waterfront", "Fremont"],
@@ -8,6 +27,7 @@ const destinationSeeds = {
   "iceland": ["Reykjavik", "Golden Circle", "Thingvellir National Park", "Geysir geothermal area", "Gullfoss", "South Coast waterfalls", "Reynisfjara", "Blue Lagoon area", "Snaefellsnes Peninsula", "Harpa Concert Hall"],
   "amalfi": ["Amalfi town", "Positano", "Ravello", "Path of the Gods", "Atrani", "Minori", "Maiori", "Vietri sul Mare", "Furore fjord", "Sorrento base"],
   "detroit": ["Detroit RiverWalk", "Detroit Institute of Arts", "Motown Museum", "Eastern Market", "The Henry Ford", "Belle Isle", "Corktown", "Guardian Building", "Dequindre Cut", "Dearborn food corridor"],
+  "charlotte": ["Uptown Charlotte orientation walk", "Romare Bearden Park", "NASCAR Hall of Fame", "Mint Museum Uptown", "Levine Museum area", "NoDa arts district", "South End Rail Trail", "Freedom Park", "Billy Graham Library", "Lake Norman day-trip area"],
   "los angeles": ["Santa Monica Pier", "Getty Center", "Griffith Observatory", "Venice Canals", "The Broad", "Grand Central Market", "LACMA area", "Malibu coast", "Little Tokyo", "Hollywood Bowl overlook"]
 };
 
@@ -16,19 +36,25 @@ const regionNames = ["Central district", "Museum and culture area", "Waterfront 
 export function mockLocationSearch(query) {
   const text = String(query || "").trim();
   if (!text) return [];
-  if (/^(georgia|washington|portland|springfield|congo|california|europe)$/i.test(text)) {
-    return [
-      mockLocation(`${text}, United States`, "Region", "US", text),
-      mockLocation(`${text}, international result`, "Region", "", text)
-    ];
-  }
-  return [mockLocation(text, inferLocationType(text), "", text)];
+  const normalized = normalizeSearchText(text);
+  return mockLocationFixtures
+    .map((fixture, index) => ({ fixture, index, score: locationFixtureScore(fixture, normalized) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 8)
+    .map(({ fixture }) => ({ ...fixture, originalInput: text }));
 }
 
 export function mockDestinationResearch(destination, trip = {}) {
   const canonicalName = canonicalDestination(destination);
-  const key = Object.keys(destinationSeeds).find((item) => canonicalName.toLowerCase().includes(item));
-  const seedPlaces = destinationSeeds[key] || genericPlacesFor(canonicalName);
+  const key = mockDestinationKey(canonicalName);
+  if (!key) {
+    const error = new Error("This destination is not available in the current demo data.");
+    error.code = "MOCK_DESTINATION_UNAVAILABLE";
+    error.retryable = false;
+    throw error;
+  }
+  const seedPlaces = destinationSeeds[key];
   const regions = regionNames.map((name, index) => ({
     id: slug(name),
     name,
@@ -85,6 +111,14 @@ export function mockDestinationResearch(destination, trip = {}) {
   };
 }
 
+export function hasMockDestinationData(destination) {
+  return Boolean(mockDestinationKey(destination));
+}
+
+export function supportedMockDestinationNames() {
+  return Object.keys(destinationSeeds);
+}
+
 export function mockRouteEstimate(origin, destination, mode = "driving") {
   const minutes = 18 + Math.abs(String(origin?.name || origin || "").length - String(destination?.name || destination || "").length) * 2;
   return {
@@ -137,21 +171,6 @@ function placeFromSeed(name, region, canonicalName, index) {
   };
 }
 
-function genericPlacesFor(destination) {
-  return [
-    `${destination} central orientation walk`,
-    `${destination} main museum or cultural center`,
-    `${destination} scenic viewpoint`,
-    `${destination} local market district`,
-    `${destination} historic neighborhood`,
-    `${destination} waterfront or park area`,
-    `${destination} food street`,
-    `${destination} evening district`,
-    `${destination} indoor backup museum`,
-    `${destination} day-trip area`
-  ];
-}
-
 function categoryFor(name, index) {
   const text = name.toLowerCase();
   if (/museum|gallery|dia|louvre|national museum|henry ford/.test(text)) return "museum";
@@ -161,33 +180,62 @@ function categoryFor(name, index) {
   return "culture";
 }
 
-function mockLocation(name, type, countryCode, input) {
+function locationFixture(id, city, stateOrRegion, country, countryCode, latitude, longitude, aliases = []) {
+  const canonicalName = [city, stateOrRegion, country].filter(Boolean).join(", ");
   return {
-    originalInput: input,
-    canonicalName: name,
-    displayName: name,
-    providerPlaceId: `mock-${slug(name)}`,
-    locationType: type,
-    country: countryCode === "US" ? "United States" : "",
-    stateOrProvince: "",
+    id,
+    canonicalName,
+    displayName: canonicalName,
+    normalizedName: canonicalName,
+    city,
+    stateOrRegion,
+    stateOrProvince: stateOrRegion,
+    country,
     countryCode,
-    coordinates: { lat: 0, lng: 0 },
+    latitude,
+    longitude,
+    coordinates: { lat: latitude, lng: longitude },
+    locationType: "City",
+    aliases,
+    providerPlaceId: id,
     boundingRegion: null,
     timezone: "",
     provider: "mock",
-    confidence: "mock"
+    confidence: "mock",
+    verificationStatus: "Verified",
+    verifiedAt: new Date().toISOString()
   };
 }
 
-function inferLocationType(value) {
-  if (/national park/i.test(value)) return "National Park";
-  if (/coast|rockies|keys|peninsula|region/i.test(value)) return "Region";
-  if (/iceland|france|japan|italy/i.test(value)) return "Country or International Region";
-  return "City";
+function locationFixtureScore(location, normalizedQuery) {
+  const values = [
+    location.canonicalName,
+    location.displayName,
+    location.city,
+    location.stateOrRegion,
+    location.country,
+    location.countryCode,
+    ...(location.aliases || [])
+  ].map(normalizeSearchText).filter(Boolean);
+  if (values.some((value) => value === normalizedQuery)) return 1000 + (normalizeSearchText(location.city) === normalizedQuery ? 200 : 0);
+  if (normalizeSearchText(location.city).startsWith(normalizedQuery)) return 900;
+  if ((location.aliases || []).map(normalizeSearchText).some((alias) => alias.startsWith(normalizedQuery))) return 820;
+  if (normalizeSearchText(location.canonicalName).startsWith(normalizedQuery)) return 760;
+  if (values.some((value) => value.includes(normalizedQuery))) return 400;
+  return 0;
 }
 
 function canonicalDestination(destination) {
   return String(destination || "Destination").replace(/\s+/g, " ").trim();
+}
+
+function mockDestinationKey(destination) {
+  const text = normalizeSearchText(destination);
+  return Object.keys(destinationSeeds).find((item) => text.includes(item));
+}
+
+function normalizeSearchText(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function slug(value) {

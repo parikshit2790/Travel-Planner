@@ -24,9 +24,9 @@ async function handleLocationSearch({ query } = {}) {
   const text = String(query || "").trim();
   if (text.length < 2) return actionError(400, "QUERY_TOO_SHORT", "Enter at least 2 characters.");
   try {
-    const results = await withTimeout(searchLocations(text, config), config.timeoutMs, "Location search");
+    const results = (await withTimeout(searchLocations(text, config), config.timeoutMs, "Location search")).map(publicLocationResult);
     const ambiguous = results.length > 1 && new Set(results.map((item) => item.canonicalName)).size > 1;
-    return { status: 200, body: { results, ambiguous, provider: config.placeProvider } };
+    return { status: 200, body: { results, ambiguous } };
   } catch (error) {
     const timedOut = String(error?.message || "").toLowerCase().includes("timed out");
     return actionError(timedOut ? 504 : 502, timedOut ? "LOCATION_SEARCH_TIMEOUT" : "LOCATION_SEARCH_FAILED", timedOut ? "Location search timed out." : "Location provider unavailable.", true);
@@ -36,6 +36,11 @@ async function handleLocationSearch({ query } = {}) {
 async function searchLocations(query, config) {
   if (config.placeProvider === "mock") return mockLocationSearch(query);
   throw new Error("Place provider is not implemented in this build.");
+}
+
+function publicLocationResult(result) {
+  const { provider, confidence, ...safeResult } = result;
+  return safeResult;
 }
 
 function actionError(status, code, message, retryable = false) {

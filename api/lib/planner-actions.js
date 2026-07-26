@@ -1,7 +1,7 @@
-import { registerGeneratedDestinationProfile } from "../../src/destination-data.js?v=52";
-import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js?v=52";
+import { registerGeneratedDestinationProfile } from "../../src/destination-data.js?v=53";
+import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js?v=53";
 import { providerConfig, validatePlanningProviders } from "./env.js";
-import { mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
+import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
 import { withTimeout } from "./http.js";
 
 export async function handlePlannerAction(action, payload = {}) {
@@ -31,6 +31,8 @@ export async function handlePlannerAction(action, payload = {}) {
 }
 
 async function handleDestinationResearch({ trip } = {}) {
+  const requestId = requestIdFor("research");
+  const startedAt = Date.now();
   const config = providerConfig();
   const errors = validatePlanningProviders(config);
   if (config.production && errors.length) {
@@ -38,28 +40,41 @@ async function handleDestinationResearch({ trip } = {}) {
   }
   const destination = String(trip?.destinationDisplay || trip?.destination || "").trim();
   if (!destination) return actionError(400, "DESTINATION_REQUIRED", "Destination is required.");
+  if (config.placeProvider === "mock" && !hasMockDestinationData(destination)) {
+    logPlannerEvent({ requestId, action: "research-destination", mode: "mock", stage: "blocked", destination, errorCode: "MOCK_DESTINATION_UNAVAILABLE", durationMs: Date.now() - startedAt });
+    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.", false);
+  }
   try {
+    logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "start", destination });
     const profile = await withTimeout(researchDestination(destination, trip, config), config.timeoutMs, "Destination research");
+    logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "complete", destination, durationMs: Date.now() - startedAt });
     return {
       status: 200,
       body: {
         profile,
-        diagnostics: {
+        ...(config.development ? { diagnostics: {
           provider: config.placeProvider,
           routeProvider: config.routeProvider,
           generatedAt: new Date().toISOString(),
           candidateCount: profile.places.length,
           cache: "miss"
-        }
+        } } : {})
       }
     };
-  } catch {
-    return actionError(502, "DESTINATION_RESEARCH_FAILED", "Destination research failed. Please retry.", true);
+  } catch (error) {
+    const code = error?.code === "MOCK_DESTINATION_UNAVAILABLE" ? "MOCK_DESTINATION_UNAVAILABLE" : "DESTINATION_RESEARCH_FAILED";
+    logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "error", destination, errorCode: code, durationMs: Date.now() - startedAt });
+    return actionError(code === "MOCK_DESTINATION_UNAVAILABLE" ? 422 : 502, code, code === "MOCK_DESTINATION_UNAVAILABLE" ? "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers." : "Destination research failed. Please try again later.", code !== "MOCK_DESTINATION_UNAVAILABLE");
   }
 }
 
 function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = {}) {
   if (!trip) return actionError(400, "TRIP_REQUIRED", "Trip is required.");
+  const config = providerConfig();
+  const destination = String(trip.destinationDisplay || trip.destination || "").trim();
+  if (config.placeProvider === "mock" && !destinationProfile && !hasMockDestinationData(destination)) {
+    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.", false);
+  }
   if (destinationProfile) registerGeneratedDestinationProfile(destinationProfile);
   const result = generateTripPlan(trip, { variationSeed });
   return { status: result.status === "ready" ? 200 : 422, body: result };
@@ -140,4 +155,26 @@ async function estimateRoute(origin, destination, mode, config) {
 
 function actionError(status, code, message, retryable = false) {
   return { status, body: { success: false, error: { code, message, retryable } } };
+}
+
+function requestIdFor(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logPlannerEvent(event) {
+  const safe = {
+    requestId: event.requestId,
+    action: event.action,
+    mode: event.mode,
+    stage: event.stage,
+    origin: canonicalLogName(event.origin),
+    destination: canonicalLogName(event.destination),
+    errorCode: event.errorCode,
+    durationMs: event.durationMs
+  };
+  console.info("[RouteMosaic planner]", JSON.stringify(Object.fromEntries(Object.entries(safe).filter(([, value]) => value !== undefined && value !== ""))));
+}
+
+function canonicalLogName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
 }
