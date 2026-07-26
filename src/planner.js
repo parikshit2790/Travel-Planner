@@ -77,6 +77,8 @@ export function normalizePlanningInput(trip, variationSeed = 0) {
     travelersDetail: structuredClone(trip.travelers || []),
     mustHavePlaces: splitList(trip.mustHavePlaces),
     avoidPlaces: splitList(trip.avoidPlaces),
+    routePreferences: structuredClone(trip.routePreferences || {}),
+    approvedTripShape: structuredClone(trip.approvedTripShape || null),
     variationSeed,
     unknownPreferences: collectUnknownPreferences(trip)
   };
@@ -127,6 +129,8 @@ export function generateTripPlan(trip, options = {}) {
       destinationProfileId: destinationProfile.id,
       destinationProfileSnapshot: destinationProfile,
       usesGenericDestinationProfile: destinationProfile.id.startsWith("generic-"),
+      approvedTripShape: normalized.approvedTripShape,
+      routeApprovalRequired: Boolean(normalized.routePreferences?.tripStructure && normalized.routePreferences.tripStructure !== "one-city"),
       hotelBase,
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,

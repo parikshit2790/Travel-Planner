@@ -187,6 +187,33 @@ export function createTripDraft() {
     destinationAirportCode: "",
     destinationRegions: "",
     description: "",
+    routePreferences: {
+      tripStructure: "recommend",
+      placesInMind: "",
+      mustDoPlaces: "",
+      placesToAvoid: "",
+      openToNearbyCities: "Yes",
+      maxHotelChanges: "1",
+      maxTransferDriveTime: "3 hours",
+      maxDayTripDriveTime: "2 hours",
+      arrivalDateTime: "",
+      departureDateTime: "",
+      arrivalPoint: "",
+      departurePoint: "",
+      rentalCar: "Unknown",
+      knownHotelOrNeighborhood: "",
+      existingReservations: "",
+      recoveryAfterArrival: "Yes",
+      nightDrivingComfort: "Prefer to avoid",
+      earlyStarts: "Open if worth it",
+      sunriseInterest: "Optional",
+      sunsetInterest: "Interested",
+      photographyImportance: "Medium",
+      remoteAreaComfort: "Moderate",
+      offlineMaps: "Yes"
+    },
+    routeOptions: [],
+    approvedTripShape: null,
     days: "",
     startDate: "",
     endDate: "",
@@ -318,6 +345,32 @@ export function migrateTripState(trip) {
   trip.destinationAirportCode ||= "";
   trip.destinationRegions ||= "";
   trip.originalText ||= trip.description || "";
+  trip.routePreferences ||= {};
+  trip.routePreferences.tripStructure ||= "recommend";
+  trip.routePreferences.placesInMind ||= "";
+  trip.routePreferences.mustDoPlaces ||= "";
+  trip.routePreferences.placesToAvoid ||= "";
+  trip.routePreferences.openToNearbyCities ||= "Yes";
+  trip.routePreferences.maxHotelChanges ||= "1";
+  trip.routePreferences.maxTransferDriveTime ||= "3 hours";
+  trip.routePreferences.maxDayTripDriveTime ||= "2 hours";
+  trip.routePreferences.arrivalDateTime ||= "";
+  trip.routePreferences.departureDateTime ||= "";
+  trip.routePreferences.arrivalPoint ||= "";
+  trip.routePreferences.departurePoint ||= "";
+  trip.routePreferences.rentalCar ||= "Unknown";
+  trip.routePreferences.knownHotelOrNeighborhood ||= "";
+  trip.routePreferences.existingReservations ||= "";
+  trip.routePreferences.recoveryAfterArrival ||= "Yes";
+  trip.routePreferences.nightDrivingComfort ||= "Prefer to avoid";
+  trip.routePreferences.earlyStarts ||= "Open if worth it";
+  trip.routePreferences.sunriseInterest ||= "Optional";
+  trip.routePreferences.sunsetInterest ||= "Interested";
+  trip.routePreferences.photographyImportance ||= "Medium";
+  trip.routePreferences.remoteAreaComfort ||= "Moderate";
+  trip.routePreferences.offlineMaps ||= "Yes";
+  trip.routeOptions ||= [];
+  trip.approvedTripShape ||= null;
   trip.interpretedSuggestions ||= [];
   trip.style ||= {};
   trip.style.balance ||= inferStyleBalance(trip.preferences || []);

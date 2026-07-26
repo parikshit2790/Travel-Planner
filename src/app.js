@@ -51,6 +51,15 @@ import {
   toggleItemMustDo
 } from "./planner.js";
 import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
+import {
+  approvedRouteStillValid,
+  approveRouteOption,
+  ensureRouteArchitecture,
+  generateRouteArchitectureOptions,
+  resetRouteApproval,
+  routeRecommendationRequired,
+  tripStructureOptions
+} from "./route-architecture.js";
 
 const TRIP_DESCRIPTION_PLACEHOLDER = "Example: Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic highlights, great vegetarian-friendly food, relaxed evenings, and an optional nearby city such as San Diego or Santa Barbara if it improves the trip without too much driving or changing hotels too often.";
 const TRIP_DESCRIPTION_SAMPLE = "Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic views, famous attractions, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes.";
@@ -1002,6 +1011,18 @@ function blockingValidationIssues() {
   return reviewIssues().filter((issue) => issue.blocking).map((issue) => issue.issue);
 }
 
+function routeRelevantField(path) {
+  return [
+    "trip.from",
+    "trip.destination",
+    "trip.destinationRegions",
+    "trip.days",
+    "trip.startDate",
+    "trip.endDate",
+    "trip.transportation"
+  ].includes(path) || path.startsWith("trip.routePreferences.");
+}
+
 function stepNavButton(step, stepNumber) {
   const complete = stepNumber < state.activeStep || (stepNumber === 1 && !tripBasicsIssues(state.trip).some((issue) => issue.blocking));
   const futureDisabled = stepNumber > 1 && tripBasicsIssues(state.trip).some((issue) => issue.blocking);
@@ -1031,6 +1052,7 @@ function heroDescription(trip) {
 
 function stepView() {
   if (state.activeStep === 1) return basicsStep();
+  if (state.activeStep === 2 && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) return routeRecommendationStep();
   if (state.activeStep === 2) return travelersStep();
   if (state.activeStep === 3) return styleStep();
   if (state.activeStep === 4) return foodStep();
@@ -1055,6 +1077,7 @@ function basicsStep() {
       ${fieldShell("End Date", input("trip.endDate", trip.endDate, "End Date", "date"), "Calculated from start date and trip length.")}
     </div>
     ${destinationRegionsField(trip)}
+    ${tripStructureSection(trip)}
     ${routeSummary(trip)}
     ${Number(trip.days) ? `<p class="derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
     ${tripDescriptionField(trip)}
@@ -1064,6 +1087,55 @@ function basicsStep() {
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
   </section>
   ${quickInterpretTable()}`;
+}
+
+function tripStructureSection(trip) {
+  ensureRouteArchitecture(trip);
+  const prefs = trip.routePreferences;
+  const showDayTripLimits = ["one-base-day-trips", "recommend"].includes(prefs.tripStructure);
+  const showMultiCityLimits = ["multi-city", "recommend"].includes(prefs.tripStructure);
+  const showArrivalLogistics = /fly|train|bus/i.test(trip.transportation || "");
+  return `<section class="trip-structure-section full">
+    <div class="section-kicker"><span>Trip Structure</span><strong>Choose the route shape before daily scheduling.</strong></div>
+    <div class="trip-structure-options">
+      ${tripStructureOptions.map((option) => `<label class="trip-structure-card ${prefs.tripStructure === option.value ? "selected" : ""}">
+        <input type="radio" name="trip-structure" data-field="trip.routePreferences.tripStructure" value="${esc(option.value)}" ${prefs.tripStructure === option.value ? "checked" : ""}>
+        <span><strong>${esc(option.label)}</strong><small>${esc(option.helper)}</small></span>
+      </label>`).join("")}
+    </div>
+    <details class="progressive-fields" ${prefs.placesInMind || prefs.mustDoPlaces || showMultiCityLimits ? "open" : ""}>
+      <summary>Route-shaping details</summary>
+      <div class="form-grid route-detail-grid">
+        ${fieldShell("Places Already in Mind", input("trip.routePreferences.placesInMind", prefs.placesInMind, "Places Already in Mind"), "Cities, neighborhoods, parks, or nearby areas you are already considering.")}
+        ${fieldShell("Must-do Places", input("trip.routePreferences.mustDoPlaces", prefs.mustDoPlaces, "Must-do Places"), "RouteMosaic should protect these before lower-priority ideas.")}
+        ${fieldShell("Places to Avoid", input("trip.routePreferences.placesToAvoid", prefs.placesToAvoid, "Places to Avoid"), "Cities, neighborhoods, or activity types you do not want included.")}
+        ${fieldShell("Open to Nearby Cities", select("trip.routePreferences.openToNearbyCities", prefs.openToNearbyCities, ["Yes", "No", "Only if clearly better"], "Open to Nearby Cities"), "Nearby cities are suggested only when the value justifies the burden.")}
+        ${showMultiCityLimits ? fieldShell("Maximum Hotel Changes", select("trip.routePreferences.maxHotelChanges", prefs.maxHotelChanges, ["0", "1", "2", "3"], "Maximum Hotel Changes"), "Multi-city options cannot exceed this.") : ""}
+        ${showMultiCityLimits ? fieldShell("Maximum Transfer Driving Time", select("trip.routePreferences.maxTransferDriveTime", prefs.maxTransferDriveTime, ["1 hour", "2 hours", "3 hours", "4 hours", "5 hours"], "Maximum Transfer Driving Time"), "Applies to base-to-base transfer days.") : ""}
+        ${showDayTripLimits ? fieldShell("Maximum Day-trip Driving Time", select("trip.routePreferences.maxDayTripDriveTime", prefs.maxDayTripDriveTime, ["1 hour", "2 hours", "3 hours", "4 hours"], "Maximum Day-trip Driving Time"), "Applies to round-trip side trips from one base.") : ""}
+        ${showArrivalLogistics ? fieldShell("Arrival Airport or Station", input("trip.routePreferences.arrivalPoint", prefs.arrivalPoint, "Arrival Airport or Station"), "Used for first-day feasibility and hotel check-in timing.") : ""}
+        ${showArrivalLogistics ? fieldShell("Departure Airport or Station", input("trip.routePreferences.departurePoint", prefs.departurePoint, "Departure Airport or Station"), "Used to protect the final-day buffer.") : ""}
+        ${showArrivalLogistics ? fieldShell("Arrival Date and Time", input("trip.routePreferences.arrivalDateTime", prefs.arrivalDateTime, "Arrival Date and Time", "datetime-local"), "Late arrivals create lighter first days.") : ""}
+        ${showArrivalLogistics ? fieldShell("Departure Date and Time", input("trip.routePreferences.departureDateTime", prefs.departureDateTime, "Departure Date and Time", "datetime-local"), "Early departures protect airport or station buffers.") : ""}
+        ${/rent|drive/i.test(trip.transportation || "") ? fieldShell("Rental Car", select("trip.routePreferences.rentalCar", prefs.rentalCar, ["Yes", "No", "Unknown"], "Rental Car"), "Used for route and parking assumptions.") : ""}
+        ${fieldShell("Known Hotel or Preferred Neighborhood", input("trip.routePreferences.knownHotelOrNeighborhood", prefs.knownHotelOrNeighborhood, "Known Hotel or Preferred Neighborhood"), "Optional, but it helps route clustering.")}
+        ${fieldShell("Existing Reservations", textarea("trip.routePreferences.existingReservations", prefs.existingReservations, "Existing Reservations"), "Booked meals, tours, hotels, shows, ferries, or tickets.")}
+      </div>
+    </details>
+    <details class="progressive-fields">
+      <summary>Comfort and preparation preferences</summary>
+      <div class="form-grid route-detail-grid">
+        ${fieldShell("Need Recovery Time After Arrival", select("trip.routePreferences.recoveryAfterArrival", prefs.recoveryAfterArrival, ["Yes", "No", "Maybe"], "Need Recovery Time After Arrival"), "Keeps arrival day realistic.")}
+        ${fieldShell("Night-driving Comfort", select("trip.routePreferences.nightDrivingComfort", prefs.nightDrivingComfort, ["Comfortable", "Prefer to avoid", "Avoid"], "Night-driving Comfort"), "Used for transfer and evening return planning.")}
+        ${fieldShell("Open to Early Starts", select("trip.routePreferences.earlyStarts", prefs.earlyStarts, ["Yes", "Open if worth it", "Prefer not"], "Open to Early Starts"), "Useful for parks, ferries, and long transfers.")}
+        ${fieldShell("Sunrise Interest", select("trip.routePreferences.sunriseInterest", prefs.sunriseInterest, ["High", "Optional", "No"], "Sunrise Interest"), "Only used when it fits the route.")}
+        ${fieldShell("Sunset Interest", select("trip.routePreferences.sunsetInterest", prefs.sunsetInterest, ["High", "Interested", "No"], "Sunset Interest"), "Helps place scenic evenings.")}
+        ${fieldShell("Photography Importance", select("trip.routePreferences.photographyImportance", prefs.photographyImportance, ["High", "Medium", "Low"], "Photography Importance"), "Raises scenic viewpoints and timing quality.")}
+        ${fieldShell("Remote-area Comfort", select("trip.routePreferences.remoteAreaComfort", prefs.remoteAreaComfort, ["High", "Moderate", "Low"], "Remote-area Comfort"), "Important for parks and rural road trips.")}
+        ${fieldShell("Offline-map Preference", select("trip.routePreferences.offlineMaps", prefs.offlineMaps, ["Yes", "No", "Only remote areas"], "Offline-map Preference"), "Adds prep reminders for route days.")}
+      </div>
+    </details>
+  </section>`;
 }
 
 function tripDescriptionField(trip) {
@@ -1076,6 +1148,71 @@ function tripDescriptionField(trip) {
       <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use sample description"}</button>
     </div>
   </div>`;
+}
+
+function routeRecommendationStep() {
+  ensureRouteArchitecture(state.trip);
+  if (!state.trip.routeOptions?.length) state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+  const options = state.trip.routeOptions;
+  const selectedId = state.trip.pendingRouteOptionId || options.find((option) => option.recommended)?.id || options[0]?.id || "";
+  const selected = options.find((option) => option.id === selectedId) || options[0];
+  return `<section class="panel route-recommendation-panel">
+    <div class="panel-head">
+      <div><p class="eyebrow">Route Recommendation</p><h2>Approve your trip shape before daily planning.</h2></div>
+      ${badge("Route approval required")}
+    </div>
+    <p class="route-intro">RouteMosaic first decides whether this should be one city, one base with day trips, or a multi-city route. The detailed itinerary will only use the approved destinations.</p>
+    <div class="route-option-grid">
+      ${options.map((option) => routeOptionCard(option, selectedId)).join("")}
+    </div>
+    ${selected ? approvedRoutePreview(selected) : ""}
+    <div class="route-action-strip" aria-label="Route refinement actions">
+      <button data-action="routeFewerHotels">Fewer Hotel Changes</button>
+      <button data-action="routeLessDriving">Reduce Driving</button>
+      <button data-action="routeMoreVariety">More Variety</button>
+      <button data-action="routeKeepOneBase">Keep One Base</button>
+      <button data-action="regenerateRouteOptions">Regenerate Route Options</button>
+    </div>
+    <div class="wizard-footer">${button("Back", "prev")}${button("Save and Exit", "saveExit")}<button class="primary" data-action="approveRoute:${esc(selectedId)}">Approve Route</button></div>
+  </section>`;
+}
+
+function routeOptionCard(option, selectedId) {
+  const selected = option.id === selectedId;
+  return `<article class="route-option-card ${selected ? "selected" : ""}">
+    <div class="route-option-head">
+      <div><p class="eyebrow">Option ${esc(String.fromCharCode(64 + (option.rank || 1)))}</p><h3>${esc(option.title)}</h3></div>
+      ${option.recommended ? badge("Recommended") : badge(option.tripShapeType.replaceAll("-", " "))}
+    </div>
+    <dl class="route-metrics">
+      <div><dt>Sequence</dt><dd>${esc(option.sequence.join(" → "))}</dd></div>
+      <div><dt>Nights</dt><dd>${esc(option.nightsPerBase.map((item) => `${item.base}: ${item.nights}`).join(" · "))}</dd></div>
+      <div><dt>Transfer</dt><dd>${esc(option.approximateTransferTime)}</dd></div>
+      <div><dt>Hotel changes</dt><dd>${esc(option.hotelChanges)}</dd></div>
+      <div><dt>Confidence</dt><dd>${esc(option.confidence)}%</dd></div>
+    </dl>
+    <p>${esc(option.whyMatches)}</p>
+    <div class="route-columns">
+      <div><strong>Benefits</strong><ul>${option.benefits.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
+      <div><strong>Tradeoffs</strong><ul>${option.tradeoffs.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
+    </div>
+    <button class="${selected ? "primary" : ""}" data-action="selectRouteOption:${esc(option.id)}">${selected ? "Selected" : "Select Option"}</button>
+  </article>`;
+}
+
+function approvedRoutePreview(option) {
+  return `<section class="approved-route-preview">
+    <div><p class="eyebrow">Your Proposed Route</p><h3>${esc(option.sequence.join(" → "))}</h3></div>
+    ${table(["Planning Item", "Route Decision"], [
+      ["Arrival point", option.hotelBases[0]?.canonicalName || option.primaryDestination],
+      ["Hotel bases", option.nightsPerBase.map((item) => `${item.base} (${item.nights} night${item.nights === 1 ? "" : "s"})`).join(" · ")],
+      ["Transfer days", option.transferDays.length ? option.transferDays.join(" · ") : "None"],
+      ["Optional day trips", option.dayTripCandidates.length ? option.dayTripCandidates.join(" · ") : "None approved yet"],
+      ["Total hotel changes", option.hotelChanges],
+      ["Total estimated major driving", option.totalMajorDriving],
+      ["Arrival/departure assumptions", option.assumptions.join(" ")]
+    ].map(([item, value]) => `<tr><td>${esc(item)}</td><td>${esc(value)}</td></tr>`))}
+  </section>`;
 }
 
 function sampleTripPanel(trip) {
@@ -1906,7 +2043,7 @@ function reviewStep() {
     <div class="panel-head"><div><p class="eyebrow">Step 6 of 6</p><h2>Review Your Trip</h2></div><div class="review-head-actions">${badge(status)}<button class="small">Expand All</button></div></div>
     <section class="review-overview"><strong>${esc(heroDestination(trip))}</strong><span>${esc(tripDateSummary(trip))}</span><span>${travelerTotal(trip)} travelers</span><span>${esc(trip.schedule.pace)} pace</span></section>
     <div class="review-grid">
-      ${reviewCard("Trip Basics", 1, "basics", [["Origin", trip.fromDisplay || trip.from], ["Destination", heroDestination(trip)], ["Dates", formatDateRange(trip.startDate, trip.endDate)], ["Trip Length", `${trip.days} days / ${calculateTripNights(Number(trip.days || 0))} nights`], ["Transportation", trip.transportation]])}
+      ${reviewCard("Trip Basics", 1, "basics", [["Origin", trip.fromDisplay || trip.from], ["Destination", heroDestination(trip)], ["Dates", formatDateRange(trip.startDate, trip.endDate)], ["Trip Length", `${trip.days} days / ${calculateTripNights(Number(trip.days || 0))} nights`], ["Transportation", trip.transportation], ["Approved Route", approvedRouteSummary(trip)]])}
       ${reviewCard("Travelers", 2, "travelers", [["Trip Type", trip.groupType], ["Adults", trip.adults], ["Children", trip.children], ["Seniors (65+)", trip.seniors]])}
       ${reviewCard("Trip Style", 3, "style", [["Nature Focus", trip.style.balance], ["Atmosphere", trip.style.atmosphere], ["Location Feel", trip.style.locationFeel], ["Top Experiences", topExperienceSummary()]])}
       ${reviewCard("Food and Evenings", 4, "food", [["Diet", chipSummary(trip.food.diet)], ["Avoid", chipSummary(trip.food.restrictions)], ["Limits", chipSummary(trip.food.restrictions)], ["Evenings", chipSummary(trip.alcohol.preferences)]])}
@@ -2011,6 +2148,16 @@ function preferenceSummaryByImportance(...importanceValues) {
 
 function reviewIssues() {
   const issues = [...getTripIssues(state.trip)];
+  if (routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
+    issues.unshift({
+      severity: "Critical",
+      blocking: true,
+      field: "trip.routePreferences.tripStructure",
+      owningStep: 2,
+      issue: "Approve a trip route before building the detailed itinerary.",
+      action: "Review route options and approve one route shape."
+    });
+  }
   if (state.activeStep === 6 && (!state.providerStatus || state.providerStatus.canGenerate === false)) {
     issues.unshift({
       severity: "Critical",
@@ -2035,6 +2182,12 @@ function reviewIssues() {
     }
   }
   return issues;
+}
+
+function approvedRouteSummary(trip) {
+  if (!routeRecommendationRequired(trip)) return "Single-city route";
+  if (!approvedRouteStillValid(trip)) return "Needs route approval";
+  return `${trip.approvedTripShape.sequence.join(" → ")} · ${trip.approvedTripShape.hotelChanges} hotel change${trip.approvedTripShape.hotelChanges === 1 ? "" : "s"}`;
 }
 
 function reviewLocationReadinessIssues(trip) {
@@ -2545,6 +2698,7 @@ function updateField(path, value) {
     if (["trip.days", "trip.startDate", "trip.endDate"].includes(path)) reconcileTripDates(state.trip, path);
     if (["trip.groupType", "trip.adults", "trip.children", "trip.seniors"].includes(path)) syncTravelersToCounts(state.trip);
     if (path === "trip.description") state.trip.originalText = value;
+    if (routeRelevantField(path)) resetRouteApproval(state.trip);
   }
   persist();
 }
@@ -2583,6 +2737,7 @@ function updateFieldDraft(path, value) {
   }
   if (["trip.days", "trip.startDate", "trip.endDate"].includes(path)) reconcileTripDates(state.trip, path);
   if (path === "trip.description") state.trip.originalText = value;
+  if (routeRelevantField(path)) resetRouteApproval(state.trip);
 }
 
 function canChangeTravelerCount(path, value) {
@@ -2664,6 +2819,14 @@ function setPath(root, path, value) {
 
 async function buildTripPlanAction(name) {
   if (ui.generatingPlan) return;
+  if (name !== "regeneratePlan" && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
+    state.activeStep = 2;
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
+    ui.toast = "Approve a route shape before building the detailed itinerary.";
+    persist("Updated");
+    return;
+  }
   if (blockingValidationIssues().length) {
     ui.showWarnings = true;
     ui.toast = "Resolve blocking issues before building your trip.";
@@ -2908,9 +3071,67 @@ function action(name) {
       ui.showWarnings = true;
       ui.toast = "Resolve Step 1 issues before continuing.";
     } else {
+      ensureRouteArchitecture(state.trip);
+      if (routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
+        state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+        state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
+        state.activeStep = 2;
+        ui.toast = "Choose and approve a route shape before traveler details.";
+        persist("Updated");
+        return;
+      }
       state.activeStep = 2;
       ui.toast = "";
     }
+  }
+  if (name.startsWith("selectRouteOption:")) {
+    state.trip.pendingRouteOptionId = name.split(":")[1];
+    ui.toast = "Route option selected. Approve it to lock the trip shape.";
+  }
+  if (name.startsWith("approveRoute:")) {
+    const id = name.split(":")[1] || state.trip.pendingRouteOptionId;
+    approveRouteOption(state.trip, id);
+    state.activeStep = 2;
+    ui.toast = "Route approved. Detailed itinerary generation will use only this trip shape.";
+  }
+  if (name === "regenerateRouteOptions") {
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
+    state.trip.approvedTripShape = null;
+    ui.toast = "Route options regenerated.";
+  }
+  if (name === "routeFewerHotels") {
+    state.trip.routePreferences.maxHotelChanges = "0";
+    state.trip.routePreferences.tripStructure = "one-base-day-trips";
+    resetRouteApproval(state.trip);
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions[0]?.id || "";
+    ui.toast = "Route options now prioritize one hotel base.";
+  }
+  if (name === "routeLessDriving") {
+    state.trip.routePreferences.maxTransferDriveTime = "2 hours";
+    state.trip.routePreferences.maxDayTripDriveTime = "1 hour";
+    resetRouteApproval(state.trip);
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions[0]?.id || "";
+    ui.toast = "Route options now reduce transfer and day-trip driving.";
+  }
+  if (name === "routeMoreVariety") {
+    state.trip.routePreferences.tripStructure = "recommend";
+    state.trip.routePreferences.openToNearbyCities = "Yes";
+    if (state.trip.routePreferences.maxHotelChanges === "0") state.trip.routePreferences.maxHotelChanges = "1";
+    resetRouteApproval(state.trip);
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions[0]?.id || "";
+    ui.toast = "Route options now compare broader variety.";
+  }
+  if (name === "routeKeepOneBase") {
+    state.trip.routePreferences.tripStructure = "one-base-day-trips";
+    state.trip.routePreferences.maxHotelChanges = "0";
+    resetRouteApproval(state.trip);
+    state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
+    state.trip.pendingRouteOptionId = state.trip.routeOptions[0]?.id || "";
+    ui.toast = "Route options now keep one hotel base.";
   }
   if (name === "interpretText") {
     const basicsErrors = validateBasics(state.trip);
