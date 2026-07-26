@@ -90,7 +90,7 @@ assert.equal(destinationNeedsClarification(trip), false);
 
 assert.equal(locationVerificationLabel(charlotte), "Verified");
 assert.equal(locationVerificationLabel(null, "NeedsReview"), "Select a suggestion to verify this location.");
-assert.equal(locationVerificationLabel(null, "ProviderUnavailable"), "Suggestions are unavailable. You can keep typing.");
+assert.equal(locationVerificationLabel(null, "ProviderUnavailable"), "Location search is temporarily unavailable. Typed text remains unverified until you select a suggestion.");
 
 assert.ok(app.includes("createLocationSearchProvider"));
 assert.ok(app.includes("role=\"combobox\""));
@@ -108,6 +108,9 @@ assert.ok(app.includes("ui.locationRequestId[field] !== requestId"));
 assert.ok(app.includes("LOCATION_SEARCH_DEBOUNCE_MS"));
 assert.ok(app.includes("selectLocationSuggestion"));
 assert.ok(app.includes("ProviderUnavailable"));
+assert.ok(app.includes("Location search is temporarily unavailable. You may retry, or continue with the typed location."));
+assert.ok(app.includes("Location search timed out. You may retry, or continue with the typed location."));
+assert.ok(app.includes("No matching locations found. You may continue with the typed location, but it will remain unverified until a suggestion is selected."));
 assert.ok(app.includes("TravelHeaderIllustration"));
 assert.ok(app.includes("SidebarScenicIllustration"));
 assert.ok(app.includes("visibleTripBasicsIssues"));

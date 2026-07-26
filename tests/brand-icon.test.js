@@ -18,7 +18,7 @@ const requiredIcons = [
 ];
 
 assert.ok(app.includes("function BrandIcon()"));
-assert.ok(app.includes("/public/favicon.svg?v=50"));
+assert.ok(app.includes("/public/favicon.svg?v=51"));
 assert.ok(!app.includes("<i></i><i></i><i></i><i></i>"));
 assert.ok(css.includes(".brand-icon"));
 assert.ok(!css.includes(".brand-mark i:nth-child"));

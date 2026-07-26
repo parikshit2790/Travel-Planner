@@ -27,8 +27,9 @@ async function handleLocationSearch({ query } = {}) {
     const results = await withTimeout(searchLocations(text, config), config.timeoutMs, "Location search");
     const ambiguous = results.length > 1 && new Set(results.map((item) => item.canonicalName)).size > 1;
     return { status: 200, body: { results, ambiguous, provider: config.placeProvider } };
-  } catch {
-    return actionError(502, "LOCATION_SEARCH_FAILED", "Location provider unavailable.", true);
+  } catch (error) {
+    const timedOut = String(error?.message || "").toLowerCase().includes("timed out");
+    return actionError(timedOut ? 504 : 502, timedOut ? "LOCATION_SEARCH_TIMEOUT" : "LOCATION_SEARCH_FAILED", timedOut ? "Location search timed out." : "Location provider unavailable.", true);
   }
 }
 

@@ -539,7 +539,7 @@ export function isBroadLocation(location) {
 
 export function locationVerificationLabel(location, fallbackStatus = "Location Not Verified") {
   if (location?.verificationStatus === "Verified") return "Verified";
-  if (fallbackStatus === "ProviderUnavailable") return "Suggestions are unavailable. You can keep typing.";
+  if (fallbackStatus === "ProviderUnavailable") return "Location search is temporarily unavailable. Typed text remains unverified until you select a suggestion.";
   if (fallbackStatus === "NeedsReview") return "Select a suggestion to verify this location.";
   return fallbackStatus === "Location Not Verified" ? "Select a suggestion to verify this location." : fallbackStatus || "Select a suggestion to verify this location.";
 }

@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=50";
-import { routeMosaicApi } from "./api-client.js?v=50";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=51";
+import { routeMosaicApi } from "./api-client.js?v=51";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -34,8 +34,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=50";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=50";
+} from "./domain.js?v=51";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=51";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -49,8 +49,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=50";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=50";
+} from "./planner.js?v=51";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=51";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -359,7 +359,7 @@ function isStaticInfoRoute() {
 }
 
 function BrandIcon() {
-  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=50" alt="" /></span>`;
+  return `<span class="brand-mark" aria-hidden="true"><img class="brand-icon" src="/public/favicon.svg?v=51" alt="" /></span>`;
 }
 
 function Brand() {
@@ -1221,7 +1221,7 @@ function locationAutocompleteOverlay() {
       ${loading ? `<p class="location-message" role="status">Loading location suggestions...</p>` : ""}
       ${error ? `<p class="location-message provider-error">${esc(error)} <button class="small" data-action="retryLocationSearch:${esc(field)}">Try Again</button></p>` : ""}
       ${!loading && !error && locationProvider && String(inputValue || "").trim().length < LOCATION_MIN_QUERY_LENGTH ? `<p class="location-message">Type at least ${LOCATION_MIN_QUERY_LENGTH} characters to search verified places.</p>` : ""}
-      ${!loading && !error && locationProvider && String(inputValue || "").trim().length >= LOCATION_MIN_QUERY_LENGTH && !suggestions.length ? `<p class="location-message" role="status">No verified suggestions yet. You can continue with typed text.</p>` : ""}
+      ${!loading && !error && locationProvider && String(inputValue || "").trim().length >= LOCATION_MIN_QUERY_LENGTH && !suggestions.length ? `<p class="location-message" role="status">No matching locations found. You may continue with the typed location, but it will remain unverified until a suggestion is selected.</p>` : ""}
       ${suggestions.map((suggestion, index) => locationSuggestionRow(field, suggestion, index)).join("")}
     </div>
   </div>`;
@@ -2258,10 +2258,10 @@ function queueLocationSearch(field, value) {
       if (ui.locationRequestId[field] !== requestId) return;
       ui.locationSuggestions[field] = suggestions.map((suggestion) => ({ ...suggestion, originalInput: value })).slice(0, 8);
       ui.locationError[field] = "";
-    } catch {
+    } catch (error) {
       if (ui.locationRequestId[field] !== requestId) return;
       ui.locationSuggestions[field] = [];
-      ui.locationError[field] = "We could not load location suggestions. You can continue with this location or try again.";
+      ui.locationError[field] = locationSearchErrorMessage(error);
       if (field === "from") state.trip.fromVerificationStatus = "ProviderUnavailable";
       if (field === "destination") state.trip.destinationVerificationStatus = "ProviderUnavailable";
     } finally {
@@ -2270,6 +2270,13 @@ function queueLocationSearch(field, value) {
       refreshLocationPanel();
     }
   }, LOCATION_SEARCH_DEBOUNCE_MS);
+}
+
+function locationSearchErrorMessage(error) {
+  if (error?.code === "LOCATION_SEARCH_TIMEOUT" || error?.status === 504) return "Location search timed out. You may retry, or continue with the typed location.";
+  if (error?.code === "PROVIDER_CONFIGURATION_REQUIRED" || error?.status === 503) return "Location search is temporarily unavailable. You may retry, or continue with the typed location.";
+  if (error?.code === "LOCATION_SEARCH_FAILED" || error?.status === 502) return "Location search is temporarily unavailable. You may retry, or continue with the typed location.";
+  return "Network problem while loading location suggestions. You may retry, or continue with the typed location.";
 }
 
 function handleLocationKeydown(event, field) {
