@@ -18,15 +18,16 @@ Destination-specific places must come from retrieved provider data, curated data
 Copy `.env.example` locally, then configure the same variables in Vercel for Preview and Production.
 
 ```bash
-PLACE_PROVIDER=openrouteservice
+PLACE_PROVIDER=google
 PLACE_API_KEY=
+GOOGLE_MAPS_API_KEY=
 OPENROUTESERVICE_API_KEY=
-ROUTE_PROVIDER=openrouteservice
+ROUTE_PROVIDER=google
 ROUTE_API_KEY=
 WEATHER_PROVIDER=
 WEATHER_API_KEY=
-AI_PROVIDER=
-AI_API_KEY=
+AI_PROVIDER=openai
+OPENAI_API_KEY=
 AI_MODEL=gpt-5-mini
 PROVIDER_TIMEOUT_MS=20000
 CACHE_TTL_SECONDS=86400
@@ -36,13 +37,41 @@ Supported provider adapters in this build:
 
 - `PLACE_PROVIDER=mock` for local deterministic destination/place data.
 - `PLACE_PROVIDER=openrouteservice` for live location autocomplete, geocoding, destination resolution, and destination point-of-interest discovery.
+- `PLACE_PROVIDER=google` for Google Places API (New) autocomplete, place details, text search, nearby search, and destination discovery.
 - `ROUTE_PROVIDER=mock` for local deterministic route estimates.
 - `ROUTE_PROVIDER=approximate` for clearly labeled coordinate-style estimates.
 - `ROUTE_PROVIDER=openrouteservice` for live driving and walking route duration and distance estimates.
+- `ROUTE_PROVIDER=google` for Google Routes API route duration, distance, and route matrix smoke checks.
 - Empty `WEATHER_PROVIDER` returns seasonal guidance only.
 - `AI_PROVIDER=openai` enables AI-assisted destination intelligence for high-quality worldwide trip profiles. `AI_API_KEY` or `OPENAI_API_KEY` must be set server-side only. In production, RouteMosaic treats live place/route providers without destination intelligence as not ready for full trip generation.
 
-Mock providers are for local development and deterministic tests. Public production worldwide planning should use `openrouteservice` or another real provider adapter for both place and route data. Do not put secret keys in public frontend variables.
+Mock providers are for local development and deterministic tests. Public production worldwide planning should use Google Places/Routes plus OpenAI destination intelligence. Do not put secret keys in public frontend variables.
+
+### Google Maps Platform Setup
+
+Recommended Production variables:
+
+```bash
+PLACE_PROVIDER=google
+ROUTE_PROVIDER=google
+GOOGLE_MAPS_API_KEY=<secret key>
+AI_PROVIDER=openai
+OPENAI_API_KEY=<secret key>
+AI_MODEL=gpt-5-mini
+PROVIDER_TIMEOUT_MS=20000
+```
+
+Enable these Google APIs in the same Google Cloud project as the key:
+
+- Places API (New)
+- Routes API
+
+Temporary key restrictions for initial Vercel server-side verification:
+
+- Application restrictions: None
+- API restrictions: Restrict key to Places API (New) and Routes API
+
+Do not use HTTP referrer restrictions for this server-side key. Vercel serverless functions call Google REST APIs from the server, not from the user's browser, so browser referrer restrictions can block valid production requests.
 
 ### openrouteservice Setup
 
@@ -70,7 +99,7 @@ AI_MODEL=gpt-5-mini
 PROVIDER_TIMEOUT_MS=20000
 ```
 
-With `AI_PROVIDER=openai`, RouteMosaic asks the server-side destination intelligence adapter to produce structured regions, must-do places, neighborhoods, food areas, and nearby excursions. openrouteservice still powers location autocomplete and route estimates. If AI research fails, the app falls back to provider/map data and clearly lower-confidence starter planning anchors.
+With `AI_PROVIDER=openai`, RouteMosaic asks the server-side destination intelligence adapter to produce structured regions, must-do places, neighborhoods, food areas, and nearby excursions. Google Places/Routes power location autocomplete, place lookup, POI discovery, and route estimates. If AI research fails, the app falls back to provider/map data and clearly lower-confidence starter planning anchors.
 
 ### Admin Setup
 
@@ -81,8 +110,8 @@ With `AI_PROVIDER=openai`, RouteMosaic asks the server-side destination intellig
 5. Set values separately for Production and Preview.
 6. Redeploy after changing environment variables; already-built deployments do not pick up new values.
 7. Keep API keys secret. No real keys belong in `.env.example`, README, frontend code, or committed files.
-8. When real place/route adapters are added, enable required provider billing, restrict keys to approved APIs/domains where supported, and use HTTPS endpoints with timeouts below the Vercel runtime limit.
-9. For RouteMosaic production, verify `/api/provider-health` after redeploying. It should return `success: true`, `data.mode: "live"`, `data.canGenerate: true`, `data.placeProviderAvailable: true`, `data.destinationResearchAvailable: true`, and `data.routeProviderAvailable: true`.
+8. Enable required provider billing, restrict keys to approved APIs where supported, and use HTTPS endpoints with timeouts below the Vercel runtime limit.
+9. For RouteMosaic production, verify `/api/provider-health` after redeploying. It should return `success: true`, `data.mode: "live"`, `data.canGenerate: true`, `data.aiProviderAvailable: true`, `data.placeProviderAvailable: true`, `data.destinationResearchAvailable: true`, and `data.routeProviderAvailable: true`.
 
 Expected development provider status:
 
@@ -143,13 +172,13 @@ pnpm run build
 pnpm run verify:vercel-functions
 ```
 
-`test:providers` checks the mock contract and the openrouteservice adapter contract with mocked network responses for Raleigh, Austin, Houston, Charlotte, San Jose, New York, Paris, Tokyo, and Glacier National Park. Do not run live-provider smoke tests in CI without secrets.
+`test:providers` checks the mock contract, openrouteservice adapter contract, and Google/OpenAI provider contract with mocked network responses. Google coverage includes Raleigh, Austin, Houston, Charlotte, Dallas, Detroit, one route, one route matrix, and provider-health aggregation. Do not run live-provider smoke tests in CI without secrets.
 
 `verify:vercel-functions` reads `.vercel/output/functions` when Vercel output exists. Otherwise it counts deployable source route files under `api/`, `pages/api/`, `src/api/`, `app/api/`, and `functions/`, excluding shared `lib` folders. The limit is 10 functions.
 
 ## Known Limitations
 
-- openrouteservice provides live provider data for location search, POI discovery, and driving/walking route estimates, but RouteMosaic still labels opening hours, availability, prices, accessibility, dietary safety, traffic, and weather as items to verify directly before travel.
+- Google Places and Routes provide live provider data for location search, POI discovery, and driving/walking route estimates, but RouteMosaic still labels opening hours, availability, prices, accessibility, dietary safety, traffic, and weather as items to verify directly before travel.
 - Weather returns seasonal guidance unless a weather provider is configured.
 - Route estimates use configured provider data or explicitly labeled fallback estimates.
 - Specific restaurants are included only when retrieved from a configured place provider.

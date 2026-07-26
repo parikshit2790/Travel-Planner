@@ -2,6 +2,7 @@ import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "
 import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
+import { googleDestinationResearch, googleRouteEstimate } from "./google-provider.js";
 import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
 import { openAiDestinationResearch } from "./openai-destination-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
@@ -150,6 +151,17 @@ function handleWeatherSummary({ destination = "", startDate = "", endDate = "" }
 }
 
 async function researchDestination(destination, trip, config) {
+  if (config.aiProvider === "openai" && config.aiApiKey) {
+    try {
+      return await openAiDestinationResearch(destination, trip, config);
+    } catch (error) {
+      if (!config.placeProvider || config.placeProvider === "mock") throw error;
+      console.warn("[RouteMosaic planner] AI destination research fallback", JSON.stringify({ code: error?.code || "AI_DESTINATION_RESEARCH_FAILED", destination: canonicalLogName(destination) }));
+    }
+  }
+  if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
+  if (config.placeProvider === "google") return googleDestinationResearch(destination, trip, config);
+  if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
   const curatedProfile = resolveDestinationProfile(destination);
   if (curatedProfile && !String(curatedProfile.id || "").startsWith("generic-")) {
     return {
@@ -162,21 +174,12 @@ async function researchDestination(destination, trip, config) {
       }
     };
   }
-  if (config.aiProvider === "openai" && config.aiApiKey) {
-    try {
-      return await openAiDestinationResearch(destination, trip, config);
-    } catch (error) {
-      if (!config.placeProvider || config.placeProvider === "mock") throw error;
-      console.warn("[RouteMosaic planner] AI destination research fallback", JSON.stringify({ code: error?.code || "AI_DESTINATION_RESEARCH_FAILED", destination: canonicalLogName(destination) }));
-    }
-  }
-  if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
-  if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
   throw new Error("Place provider is not implemented in this build.");
 }
 
 async function estimateRoute(origin, destination, mode, config) {
   if (config.routeProvider === "mock") return mockRouteEstimate(origin, destination, mode);
+  if (config.routeProvider === "google") return googleRouteEstimate(origin, destination, mode, config);
   if (config.routeProvider === "openrouteservice") return openRouteServiceRouteEstimate(origin, destination, mode, config);
   if (config.routeProvider === "approximate") {
     const estimate = mockRouteEstimate(origin, destination, mode);

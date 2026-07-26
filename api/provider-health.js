@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   setProviderHealthHeaders(res);
   if (req.method === "GET") {
     try {
-      const result = handleProviderHealthAction("status");
+      const result = await handleProviderHealthAction("status");
       if (result.body?.success === false) {
         res.status(result.status).json(result.body);
         return;
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   }
   try {
     const { action } = parseActionRequest(req);
-    const result = handleProviderHealthAction(action || "status");
+    const result = await handleProviderHealthAction(action || "status");
     if (result.body?.success === false) {
       res.status(result.status).json(result.body);
       return;

@@ -1,5 +1,6 @@
 import { providerConfig, validatePlanningProviders } from "./env.js";
 import { withTimeout } from "./http.js";
+import { googleLocationSearch } from "./google-provider.js";
 import { mockLocationSearch } from "./mock-provider.js";
 import { openRouteServiceLocationSearch } from "./openrouteservice-provider.js";
 
@@ -36,6 +37,7 @@ async function handleLocationSearch({ query } = {}) {
 
 async function searchLocations(query, config) {
   if (config.placeProvider === "mock") return mockLocationSearch(query);
+  if (config.placeProvider === "google") return googleLocationSearch(query, config);
   if (config.placeProvider === "openrouteservice") return openRouteServiceLocationSearch(query, config);
   throw new Error("Place provider is not implemented in this build.");
 }

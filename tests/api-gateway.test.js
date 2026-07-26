@@ -101,7 +101,7 @@ assert.equal(unknownLocation.body.error.code, "UNKNOWN_ACTION");
 
 process.env.PLACE_API_KEY = "secret-place-value";
 process.env.ROUTE_API_KEY = "secret-route-value";
-const health = handleProviderHealthAction("status");
+const health = await handleProviderHealthAction("status");
 assert.equal(health.status, 200);
 assert.ok(["mock", "live", "unavailable"].includes(health.body.mode));
 assert.equal(typeof health.body.placeProviderAvailable, "boolean");

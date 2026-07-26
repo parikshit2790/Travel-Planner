@@ -1,20 +1,25 @@
 export function providerConfig() {
   const production = process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
   const development = !production && process.env.VERCEL_ENV !== "preview";
+  const placeProvider = normalizeProvider(process.env.PLACE_PROVIDER || (production ? "" : "mock"));
+  const routeProvider = normalizeProvider(process.env.ROUTE_PROVIDER || (production ? "" : "mock"));
+  const weatherProvider = normalizeProvider(process.env.WEATHER_PROVIDER || "");
+  const aiProvider = normalizeProvider(process.env.AI_PROVIDER || "");
   return {
     production,
     development,
-    placeProvider: process.env.PLACE_PROVIDER || (production ? "" : "mock"),
-    placeApiKey: process.env.PLACE_API_KEY || "",
-    openRouteServiceApiKey: process.env.OPENROUTESERVICE_API_KEY || "",
-    routeProvider: process.env.ROUTE_PROVIDER || (production ? "" : "mock"),
-    routeApiKey: process.env.ROUTE_API_KEY || "",
-    weatherProvider: process.env.WEATHER_PROVIDER || "",
-    weatherApiKey: process.env.WEATHER_API_KEY || "",
-    aiProvider: process.env.AI_PROVIDER || "",
-    aiApiKey: process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "",
-    aiModel: process.env.AI_MODEL || process.env.OPENAI_MODEL || "gpt-5-mini",
-    timeoutMs: Number(process.env.PROVIDER_TIMEOUT_MS || 10000),
+    placeProvider,
+    placeApiKey: cleanEnv(process.env.PLACE_API_KEY),
+    googleMapsApiKey: cleanEnv(process.env.GOOGLE_MAPS_API_KEY),
+    openRouteServiceApiKey: cleanEnv(process.env.OPENROUTESERVICE_API_KEY),
+    routeProvider,
+    routeApiKey: cleanEnv(process.env.ROUTE_API_KEY),
+    weatherProvider,
+    weatherApiKey: cleanEnv(process.env.WEATHER_API_KEY),
+    aiProvider,
+    aiApiKey: cleanEnv(process.env.AI_API_KEY || process.env.OPENAI_API_KEY),
+    aiModel: cleanEnv(process.env.AI_MODEL || process.env.OPENAI_MODEL) || "gpt-5-mini",
+    timeoutMs: Number(cleanEnv(process.env.PROVIDER_TIMEOUT_MS) || 10000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
   };
 }
@@ -29,16 +34,18 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   const weatherMissing = [];
   const aiMissing = [];
   const openRouteServiceKey = config.openRouteServiceApiKey || config.placeApiKey || config.routeApiKey;
+  const googleMapsKey = config.googleMapsApiKey || config.placeApiKey || config.routeApiKey;
   if (!config.placeProvider) placeMissing.push("PLACE_PROVIDER");
   if (!config.routeProvider) routeMissing.push("ROUTE_PROVIDER");
   if (config.placeProvider === "openrouteservice" && !openRouteServiceKey) placeMissing.push("OPENROUTESERVICE_API_KEY");
   if (config.routeProvider === "openrouteservice" && !openRouteServiceKey) routeMissing.push("OPENROUTESERVICE_API_KEY");
+  if (config.placeProvider === "google" && !googleMapsKey) placeMissing.push("GOOGLE_MAPS_API_KEY");
+  if (config.routeProvider === "google" && !googleMapsKey) routeMissing.push("GOOGLE_MAPS_API_KEY");
   if (config.placeProvider === "opentripmap" && !config.placeApiKey) placeMissing.push("PLACE_API_KEY");
-  if (config.routeProvider === "google" && !config.routeApiKey) routeMissing.push("ROUTE_API_KEY");
   if (config.weatherProvider && !config.weatherApiKey && !["open-meteo", "mock"].includes(config.weatherProvider)) weatherMissing.push("WEATHER_API_KEY");
   if (config.aiProvider && !config.aiApiKey) aiMissing.push("AI_API_KEY");
-  const placeImplemented = ["mock", "openrouteservice"].includes(config.placeProvider);
-  const routeImplemented = ["mock", "approximate", "openrouteservice"].includes(config.routeProvider);
+  const placeImplemented = ["mock", "openrouteservice", "google"].includes(config.placeProvider);
+  const routeImplemented = ["mock", "approximate", "openrouteservice", "google"].includes(config.routeProvider);
   const weatherImplemented = !config.weatherProvider;
   const aiImplemented = !config.aiProvider || ["openai"].includes(config.aiProvider);
   if (config.placeProvider && !placeImplemented) placeMissing.push(`Adapter not implemented: ${config.placeProvider}`);
@@ -108,6 +115,14 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
     };
   }
   return { ...status, errors, blockingErrors };
+}
+
+function normalizeProvider(value) {
+  return cleanEnv(value).toLowerCase();
+}
+
+function cleanEnv(value) {
+  return String(value || "").trim();
 }
 
 function safeProviderStatus(provider, missing, canGenerate) {

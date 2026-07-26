@@ -48,6 +48,48 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
   return profile;
 }
 
+export async function openAiSmokeCheck(config = {}) {
+  const apiKey = config.aiApiKey || "";
+  if (!apiKey) throw aiProviderError("OPENAI_API_KEY_REQUIRED", "AI destination research is not configured.", false, 500);
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: config.aiModel || "gpt-5-mini",
+      input: "Return JSON only: {\"ok\":true,\"provider\":\"openai\"}.",
+      text: {
+        format: {
+          type: "json_schema",
+          name: "route_mosaic_openai_smoke",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["ok", "provider"],
+            properties: {
+              ok: { type: "boolean" },
+              provider: { type: "string" }
+            }
+          }
+        }
+      },
+      max_output_tokens: 80
+    })
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 429) throw aiProviderError("RATE_LIMITED", "AI destination research is temporarily busy.", true, response.status);
+    if (response.status === 401 || response.status === 403) throw aiProviderError("PROVIDER_AUTH_FAILED", "AI destination research authorization failed.", false, response.status);
+    throw aiProviderError(response.status >= 500 ? "PROVIDER_UNAVAILABLE" : "PROVIDER_CONFIGURATION_REQUIRED", "AI destination research failed.", response.status >= 500, response.status);
+  }
+  const parsed = parseStructuredOutput(json);
+  if (parsed?.ok !== true) throw aiProviderError("INVALID_PROVIDER_RESPONSE", "AI smoke check returned an invalid response.", true, 502);
+  return { ok: true, provider: "openai" };
+}
+
 function destinationPrompt(destinationName, trip) {
   return [
     `Destination: ${destinationName}`,
