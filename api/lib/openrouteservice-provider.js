@@ -24,12 +24,12 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
   const foodFeatures = dedupePoiFeatures(foodResponse)
     .filter(isFoodWorthyPoi)
     .sort((a, b) => poiTravelScore(b, destinationName) - poiTravelScore(a, destinationName));
-  if (poiFeatures.length < 8) {
-    throw providerError("DESTINATION_RESEARCH_INSUFFICIENT", "Not enough destination candidates were returned.", false);
-  }
-  const selectedFeatures = poiFeatures.slice(0, 30);
+  const resilientFeatures = poiFeatures.length >= 8
+    ? poiFeatures
+    : [...poiFeatures, ...starterPoiFeatures(destinationLocation, destinationName, center, 10 - poiFeatures.length)];
+  const selectedFeatures = selectDiversePoiFeatures(resilientFeatures, center, 34);
   const regions = buildRegions(destinationLocation, selectedFeatures);
-  const places = selectedFeatures.map((feature, index) => placeFromPoiFeature(feature, regions[index % regions.length], destinationName, index));
+  const places = selectedFeatures.map((feature, index) => placeFromPoiFeature(feature, regionForFeature(feature, regions, center), destinationName, index, center));
   const foodAreas = buildFoodAreas(foodFeatures, regions, destinationName);
   const scenicRoutes = buildScenicRoutes(regions);
   return {
@@ -59,8 +59,10 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
     sourceMetadata: {
       provider: "openrouteservice",
       retrievedAt: new Date().toISOString(),
-      freshness: "live-provider",
+      freshness: poiFeatures.length >= 8 ? "live-provider" : "live-provider-with-starter-fallback",
       candidateCount: places.length,
+      liveCandidateCount: poiFeatures.length,
+      fallbackCandidateCount: Math.max(0, places.length - poiFeatures.length),
       sourceUrl: ORS_SOURCE_URL
     }
   };
@@ -102,7 +104,7 @@ async function resolveDestination(destination, config) {
   return normalizeLocationFeature(geocodeFeatures(json)[0], destination);
 }
 
-async function openRouteServicePoiSearch(center, categoryGroupIds, config) {
+async function openRouteServicePoiSearch(center, categoryGroupIds, config, bufferMeters = 15000) {
   const response = await orsRequest("/pois", {
     config,
     method: "POST",
@@ -110,7 +112,7 @@ async function openRouteServicePoiSearch(center, categoryGroupIds, config) {
       request: "pois",
       geometry: {
         geojson: { type: "Point", coordinates: center },
-        buffer: 12000
+        buffer: bufferMeters
       },
       filters: { category_group_ids: categoryGroupIds },
       limit: 80,
@@ -121,19 +123,31 @@ async function openRouteServicePoiSearch(center, categoryGroupIds, config) {
 }
 
 async function openRouteServicePoiCandidates(center, categoryGroupIds, config, destinationName, type) {
+  const localBuffer = type === "food" ? 14000 : 18000;
+  const nearbyBuffer = type === "food" ? 22000 : 85000;
+  const candidates = [];
   try {
-    const features = await openRouteServicePoiSearch(center, categoryGroupIds, config);
-    if (features.length) return features;
+    const [localFeatures, nearbyFeatures] = await Promise.all([
+      openRouteServicePoiSearch(center, categoryGroupIds, config, localBuffer),
+      openRouteServicePoiSearch(center, categoryGroupIds, config, nearbyBuffer)
+    ]);
+    candidates.push(...tagProviderScope(localFeatures, "core"));
+    candidates.push(...tagProviderScope(nearbyFeatures, "nearby"));
   } catch (error) {
     if (error?.code === "OPENROUTESERVICE_RATE_LIMITED" || error?.code === "OPENROUTESERVICE_AUTH_FAILED") throw error;
   }
-  return geocodePoiFallback(center, config, destinationName, type);
+  const fallback = await geocodePoiFallback(center, config, destinationName, type).catch((error) => {
+    if (error?.code === "OPENROUTESERVICE_RATE_LIMITED" || error?.code === "OPENROUTESERVICE_AUTH_FAILED") throw error;
+    return [];
+  });
+  candidates.push(...fallback);
+  return dedupePoiFeatures(candidates);
 }
 
 async function geocodePoiFallback(center, config, destinationName, type) {
   const queries = type === "food"
-    ? ["restaurants", "cafes", "breakfast", "dinner", "local food"]
-    : ["museums", "parks", "landmarks", "historic sites", "viewpoints", "galleries", "attractions", "gardens", "markets", "theaters"];
+    ? ["restaurants", "cafes", "breakfast", "dinner", "food halls", "local food"]
+    : ["top attractions", "museums", "parks", "landmarks", "historic sites", "viewpoints", "galleries", "gardens", "markets", "theaters", "nearby day trips", "nature preserve", "scenic area"];
   const responses = await Promise.all(queries.map(async (query) => {
     const params = new URLSearchParams({
       text: `${query} in ${destinationName}`,
@@ -148,6 +162,16 @@ async function geocodePoiFallback(center, config, destinationName, type) {
     return geocodeFeatures(json).map((feature) => tagGeocodePoiFeature(feature, query));
   }));
   return responses.flat();
+}
+
+function tagProviderScope(features, scope) {
+  return features.map((feature) => ({
+    ...feature,
+    properties: {
+      ...(feature.properties || {}),
+      routeMosaicScope: scope
+    }
+  }));
 }
 
 function tagGeocodePoiFeature(feature, query) {
@@ -243,6 +267,7 @@ function locationFromTrip(trip) {
 }
 
 function buildRegions(destinationLocation, poiFeatures) {
+  const centerCoordinates = [destinationLocation.longitude, destinationLocation.latitude];
   const center = {
     id: "central-area",
     name: "Central area",
@@ -252,10 +277,11 @@ function buildRegions(destinationLocation, poiFeatures) {
     neighboringRegionIds: ["culture-area", "food-area"],
     typicalTravelMinutesToRegions: {}
   };
-  const culture = regionFromFeature("culture-area", "Culture and landmarks", poiFeatures.find((feature) => poiCategory(feature).includes("culture")) || poiFeatures[0], ["culture", "landmark"], ["central-area", "food-area"]);
-  const nature = regionFromFeature("nature-area", "Parks and viewpoints", poiFeatures.find((feature) => poiCategory(feature).includes("nature")) || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["central-area", "culture-area"]);
-  const food = regionFromFeature("food-area", "Food and evening area", poiFeatures.find((feature) => poiCategory(feature).includes("food")) || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["central-area", "culture-area"]);
-  return [center, culture, nature, food];
+  const culture = regionFromFeature("culture-area", "Culture and landmarks", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["central-area", "food-area"]);
+  const nature = regionFromFeature("nature-area", "Parks and viewpoints", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["central-area", "culture-area"]);
+  const food = regionFromFeature("food-area", "Food and evening area", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["central-area", "culture-area"]);
+  const nearby = regionFromFeature("nearby-excursions", "Nearby excursions", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["central-area", "nature-area"]);
+  return [center, culture, nature, food, nearby];
 }
 
 function regionFromFeature(id, name, feature, tags, neighboringRegionIds) {
@@ -263,7 +289,7 @@ function regionFromFeature(id, name, feature, tags, neighboringRegionIds) {
   return {
     id,
     name,
-    summary: `${name} grouped from openrouteservice point-of-interest candidates.`,
+    summary: `${name} grouped from provider-found travel options. Verify exact hours, access, and travel time before finalizing.`,
     centerCoordinates: { lat: Number(coordinates[1] || 0), lng: Number(coordinates[0] || 0) },
     tags,
     neighboringRegionIds,
@@ -271,21 +297,29 @@ function regionFromFeature(id, name, feature, tags, neighboringRegionIds) {
   };
 }
 
-function placeFromPoiFeature(feature, region, destinationName, index) {
+function placeFromPoiFeature(feature, region, destinationName, index, center) {
   const props = feature.properties || {};
   const name = poiName(feature);
   const category = poiCategory(feature);
+  const distanceMiles = featureDistanceMiles(center, feature);
+  const isNearby = region.id === "nearby-excursions" || distanceMiles >= 18;
+  const isStarter = Boolean(props.routeMosaicStarter);
+  const duration = isNearby ? Math.max(150, durationFor(category)) : durationFor(category);
   return {
     id: String(props.osm_id || feature.id || `ors-place-${index}`).replace(/[^a-zA-Z0-9_-]/g, "-"),
     name,
     regionId: region.id,
-    shortDescription: `${name} is an openrouteservice point-of-interest candidate for ${destinationName}. Confirm hours, access, and availability before travel.`,
-    categories: [category, props.category_group || props.category || "point-of-interest"].filter(Boolean),
-    tags: [titleCase(category), "Provider retrieved", "Local candidate"],
+    shortDescription: isStarter
+      ? `${name} is a starter planning anchor for ${destinationName} because live place data was thin. Use it as a category to verify and replace with a specific local stop before travel.`
+      : isNearby
+      ? `${name} is a provider-found nearby option for ${destinationName}, best treated as a half-day or day-trip candidate after verifying hours, access, and travel time.`
+      : `${name} is a provider-found ${titleCase(category)} option for ${destinationName}. Confirm hours, access, and availability before travel.`,
+    categories: [category, isStarter ? "starter-anchor" : "", isNearby ? "nearby-excursion" : "", props.category_group || props.category || "point-of-interest"].filter(Boolean),
+    tags: [titleCase(category), isStarter ? "Starter planning anchor" : isNearby ? "Nearby option" : "Provider retrieved", "Verify before travel"],
     suitableFor: ["solo", "couple", "family", "senior"],
-    typicalDurationMinutes: durationFor(category),
+    typicalDurationMinutes: duration,
     minimumDurationMinutes: 45,
-    maximumDurationMinutes: 180,
+    maximumDurationMinutes: isNearby ? 300 : 180,
     estimatedCostLow: category === "nature" ? 0 : 10,
     estimatedCostHigh: category === "food" ? 40 : 35,
     indoorOutdoor: indoorOutdoorFor(category),
@@ -293,7 +327,7 @@ function placeFromPoiFeature(feature, region, destinationName, index) {
     accessibility: "moderate",
     dietaryRelevance: category === "food" ? ["confirm dietary needs directly"] : [],
     openingTimeGuidance: "Confirm current opening hours before travel.",
-    bestTimeOfDay: category === "food" ? "lunch" : index % 3 === 0 ? "morning" : index % 3 === 1 ? "afternoon" : "evening",
+    bestTimeOfDay: isNearby ? "morning" : category === "food" ? "lunch" : index % 3 === 0 ? "morning" : index % 3 === 1 ? "afternoon" : "evening",
     reservationRecommended: category === "food" || category === "museum",
     seasonalNotes: [],
     conflictTags: [],
@@ -306,10 +340,20 @@ function placeFromPoiFeature(feature, region, destinationName, index) {
       retrievedName: name,
       retrievedAt: new Date().toISOString(),
       sourceUrl: ORS_SOURCE_URL,
-      dataConfidence: "provider",
-      dataFreshness: "live-provider"
+      dataConfidence: isStarter ? "low" : "provider",
+      dataFreshness: isStarter ? "starter-fallback" : "live-provider"
     }
   };
+}
+
+function regionForFeature(feature, regions, center) {
+  const category = poiCategory(feature);
+  const distanceMiles = featureDistanceMiles(center, feature);
+  if (distanceMiles >= 18) return regions.find((region) => region.id === "nearby-excursions") || regions[0];
+  if (category === "food") return regions.find((region) => region.id === "food-area") || regions[0];
+  if (category === "nature") return regions.find((region) => region.id === "nature-area") || regions[0];
+  if (["museum", "history", "landmark", "entertainment"].includes(category)) return regions.find((region) => region.id === "culture-area") || regions[0];
+  return regions.find((region) => region.id === "central-area") || regions[0];
 }
 
 function buildFoodAreas(foodFeatures, regions, destinationName) {
@@ -359,6 +403,66 @@ function buildScenicRoutes(regions) {
   }));
 }
 
+function selectDiversePoiFeatures(features, center, limit) {
+  const selected = [];
+  const categoryCounts = new Map();
+  const nearby = [];
+  const core = [];
+  features.forEach((feature) => {
+    if (featureDistanceMiles(center, feature) >= 18) nearby.push(feature);
+    else core.push(feature);
+  });
+  [...core, ...nearby].forEach((feature) => {
+    if (selected.length >= limit) return;
+    const category = poiCategory(feature);
+    const count = categoryCounts.get(category) || 0;
+    if (count >= 8 && selected.length < 16) return;
+    selected.push(feature);
+    categoryCounts.set(category, count + 1);
+  });
+  const nearbySelected = selected.filter((feature) => featureDistanceMiles(center, feature) >= 18).length;
+  if (nearbySelected < 4) {
+    nearby.slice(0, 4 - nearbySelected).forEach((feature) => {
+      if (!selected.includes(feature) && selected.length < limit) selected.push(feature);
+    });
+  }
+  return selected.slice(0, limit);
+}
+
+function starterPoiFeatures(destinationLocation, destinationName, center, count) {
+  const city = String(destinationLocation.city || destinationName.split(",")[0] || destinationName).trim();
+  const starters = [
+    ["signature-sights", `${city} signature sights and downtown orientation`, "landmark", 0.01],
+    ["central-culture", `${city} central culture and architecture area`, "museum", 0.015],
+    ["local-market", `${city} local market or food hall area`, "food", 0.02],
+    ["parks-viewpoints", `${city} parks, gardens, or viewpoint area`, "park", 0.025],
+    ["creative-district", `${city} creative neighborhood and local shops`, "gallery", -0.015],
+    ["evening-district", `${city} dinner and evening district`, "restaurant", -0.02],
+    ["nearby-scenic", `Nearby scenic outing from ${city}`, "nature preserve", 0.32],
+    ["nearby-day-trip", `Nearby day-trip area from ${city}`, "landmark", -0.34],
+    ["indoor-backup", `${city} museum or indoor backup option`, "museum", 0.03],
+    ["relaxed-walk", `${city} easy walk or waterfront-style area`, "park", -0.03]
+  ];
+  return starters.slice(0, Math.max(0, count)).map(([id, name, category, offset], index) => ({
+    type: "Feature",
+    id: `starter-${slug(destinationName)}-${id}`,
+    geometry: {
+      type: "Point",
+      coordinates: [Number(center[0]) + Number(offset), Number(center[1]) + Number(offset) / 2]
+    },
+    properties: {
+      osm_id: `starter-${slug(destinationName)}-${id}`,
+      name,
+      category,
+      category_group: category,
+      layer: "venue",
+      routeMosaicScope: Math.abs(Number(offset)) > 0.2 ? "nearby" : "starter",
+      routeMosaicStarter: true,
+      osm_tags: { name, tourism: category }
+    }
+  }));
+}
+
 function dedupePoiFeatures(features) {
   const seen = new Set();
   return features.filter((feature) => {
@@ -383,7 +487,7 @@ function isTravelWorthyPoi(feature) {
   if (/\b(town of|city of|county of|municipality|township|borough|village of)\b/.test(name)) return false;
   if (/\b(hotel|motel|inn|suites|lodging|apartment|apartments|condo|realty|realtor|insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto|tires|gas station|fuel|parking|garage|warehouse|storage|school|academy|elementary|middle school|high school|church|cemetery|funeral|police|fire station|post office|courthouse)\b/.test(name)) return false;
   if (/\b(accommodation|hotel|motel|office|finance|insurance|healthcare|medical|education|school|residential|parking|fuel|automotive|government|administrative|religion|cemetery)\b/.test(text)) return false;
-  return poiTravelScore(feature) >= 35;
+  return poiTravelScore(feature) >= 24;
 }
 
 function isFoodWorthyPoi(feature) {
@@ -397,10 +501,14 @@ function isFoodWorthyPoi(feature) {
 function poiTravelScore(feature, destinationName = "") {
   const name = poiName(feature).toLowerCase();
   const text = poiSearchText(feature);
+  const scope = String(feature?.properties?.routeMosaicScope || "");
+  const isStarter = Boolean(feature?.properties?.routeMosaicStarter);
   let score = 0;
+  if (isStarter) score += 45;
   if (/\b(museum|gallery|science center|hall of fame|aquarium|botanical|garden|park|greenway|trail|theater|theatre|performing arts|historic|monument|memorial|landmark|viewpoint|overlook|waterfront|riverwalk|market|food hall|arts district|visitor center|zoo|amusement|theme park|stadium|arena)\b/.test(text)) score += 60;
   if (/\b(national|state park|nature preserve|conservatory|arboretum|heritage|cultural|public art|scenic)\b/.test(text)) score += 20;
   if (/\b(restaurant|cafe|bakery|brewery|market|food hall)\b/.test(text)) score += 12;
+  if (scope === "nearby") score += 4;
   if (destinationName && name.includes(String(destinationName).toLowerCase().split(",")[0].trim())) score += 6;
   if (name.length >= 4) score += 8;
   if (/\b(church|cemetery|parking|school|office|hotel|insurance|bank|pharmacy|gas)\b/.test(text)) score -= 50;
@@ -422,14 +530,31 @@ function poiCategory(feature) {
   const text = `${props.category_group || ""} ${props.category || ""} ${JSON.stringify(props.osm_tags || {})}`.toLowerCase();
   if (/restaurant|cafe|bar|pub|food|sustenance/.test(text)) return "food";
   if (/museum|gallery|art|arts|culture/.test(text)) return "museum";
-  if (/park|natural|viewpoint|garden|peak|beach/.test(text)) return "nature";
+  if (/park|natural|viewpoint|garden|peak|beach|lake|water|trail|forest|preserve/.test(text)) return "nature";
+  if (/theater|theatre|music|cinema|concert|arena|stadium|amusement|theme/.test(text)) return "entertainment";
   if (/historic|monument|memorial|castle|ruins/.test(text)) return "history";
-  if (/tourism|attraction|hotel|information/.test(text)) return "landmark";
+  if (/tourism|attraction|landmark|information|viewpoint/.test(text)) return "landmark";
   return "culture";
 }
 
 function coordinatesObject(coordinates) {
   return { lat: Number(coordinates?.[1] || 0), lng: Number(coordinates?.[0] || 0) };
+}
+
+function featureDistanceMiles(center, feature) {
+  const coordinates = feature?.geometry?.coordinates;
+  if (!Array.isArray(center) || !coordinates || coordinates.length < 2) return 0;
+  return haversineMiles(Number(center[1]), Number(center[0]), Number(coordinates[1]), Number(coordinates[0]));
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return 0;
+  const radiusMiles = 3958.8;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function coordinatesFrom(value) {

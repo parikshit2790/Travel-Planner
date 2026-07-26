@@ -12,6 +12,7 @@ const secret = "ors-secret-value";
 const requiredLocations = new Map([
   ["raleigh", ["Raleigh", "North Carolina", "United States", -78.6382, 35.7796]],
   ["austin", ["Austin", "Texas", "United States", -97.7431, 30.2672]],
+  ["dallas", ["Dallas", "Texas", "United States", -96.797, 32.7767]],
   ["houston", ["Houston", "Texas", "United States", -95.3698, 29.7604]],
   ["charlotte", ["Charlotte", "North Carolina", "United States", -80.8431, 35.2271]],
   ["san jose", ["San Jose", "California", "United States", -121.8863, 37.3382]],
@@ -83,6 +84,27 @@ try {
     assert.equal(typeof results[0].longitude, "number");
   }
 
+  for (const query of ["raleigh", "austin", "houston", "san jose", "new york", "paris", "tokyo", "glacier national park"]) {
+    const [city, region, country, longitude, latitude] = requiredLocations.get(query);
+    const destinationProfile = await openRouteServiceDestinationResearch(`${city}, ${region}, ${country}`, {
+      destinationLocation: {
+        canonicalName: `${city}, ${region}, ${country}`,
+        latitude,
+        longitude,
+        country,
+        stateOrProvince: region
+      }
+    }, providerConfigFixture());
+    const destinationText = JSON.stringify(destinationProfile);
+    assert.equal(destinationProfile.sourceMetadata.provider, "openrouteservice");
+    assert.ok(destinationProfile.places.length >= 8, `${query} should produce enough travel candidates`);
+    assert.ok(destinationProfile.regions.some((item) => item.id === "nearby-excursions"), `${query} should include nearby excursions region`);
+    assert.ok(destinationText.includes("Nearby"), `${query} should include nearby-aware planning data`);
+    assert.equal(destinationText.includes("openrouteservice point-of-interest candidate"), false);
+    assert.equal(destinationText.includes("Gatewood Insurance"), false);
+    assert.equal(destinationText.includes("Hampton Inn"), false);
+  }
+
   const publicSearch = await handleLocationAction("search", { query: "Raleigh" });
   assert.equal(publicSearch.status, 200);
   assert.equal(publicSearch.body.results[0].canonicalName, "Raleigh, North Carolina, United States");
@@ -91,6 +113,43 @@ try {
   const resolved = await handleLocationAction("resolve", { query: "Tokyo" });
   assert.equal(resolved.status, 200);
   assert.equal(resolved.body.location.canonicalName, "Tokyo, Japan");
+
+  globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options, { thinPois: true });
+  const thinDallasTrip = {
+    from: "Austin, Texas, United States",
+    fromDisplay: "Austin, Texas, United States",
+    destination: "Dallas, Texas, United States",
+    destinationDisplay: "Dallas, Texas, United States",
+    destinationLocation: {
+      canonicalName: "Dallas, Texas, United States",
+      latitude: 32.7767,
+      longitude: -96.797,
+      country: "United States",
+      stateOrProvince: "Texas"
+    },
+    startDate: "2026-08-08",
+    endDate: "2026-08-10",
+    days: 3,
+    adults: 1,
+    children: 0,
+    seniors: 0,
+    groupType: "Solo trip",
+    transportation: "Fly and rent a car",
+    schedule: { pace: "Balanced", majorActivities: 2 },
+    food: { diet: [], restrictions: [], cuisineInterests: [], eveningPreferences: [] },
+    preferences: [],
+    travelers: [{ id: "traveler-1", name: "Traveler 1", ageGroup: "Adult (18-64)", restrictions: [], notes: "" }]
+  };
+  const thinDallasResearch = await handlePlannerAction("research-destination", { trip: thinDallasTrip }, { requestId: "test-dallas-thin-research" });
+  assert.equal(thinDallasResearch.status, 200);
+  assert.equal(thinDallasResearch.body.profile.sourceMetadata.freshness, "live-provider-with-starter-fallback");
+  assert.ok(thinDallasResearch.body.profile.places.length >= 8);
+  assert.ok(JSON.stringify(thinDallasResearch.body.profile).includes("starter planning anchor"));
+  const thinDallasPlan = await handlePlannerAction("generate-trip", { trip: thinDallasTrip, destinationProfile: thinDallasResearch.body.profile }, { requestId: "test-dallas-thin-generate" });
+  assert.equal(thinDallasPlan.status, 200);
+  assert.equal(thinDallasPlan.body.status, "ready");
+  assert.ok(JSON.stringify(thinDallasPlan.body.plan).includes("Dallas"));
+  globalThis.fetch = async (url, options = {}) => mockOpenRouteServiceFetch(url, options);
 
   const profile = await openRouteServiceDestinationResearch("Glacier National Park", {
     destinationLocation: {
@@ -249,7 +308,9 @@ function mockOpenRouteServiceFetch(url, options = {}, fixtures = {}) {
     const request = JSON.parse(options.body || "{}");
     const isFood = request.filters?.category_group_ids?.length === 1 && request.filters.category_group_ids[0] === 560;
     if (fixtures.noisyPois) return mockJson({ features: isFood ? foodPoiFeatures() : noisyPoiFeatures() });
-    return mockJson({ features: isFood ? foodPoiFeatures() : poiFeatures() });
+    if (fixtures.thinPois) return mockJson({ features: isFood ? [] : [poiFeature("Dallas Arts District", "gallery", 1), poiFeature("Klyde Warren Park", "park", 2)] });
+    const isNearby = Number(request.geometry?.buffer || 0) > 30000;
+    return mockJson({ features: isFood ? foodPoiFeatures(isNearby) : poiFeatures(isNearby) });
   }
   if (parsed.pathname.includes("/v2/directions/")) {
     return mockJson({ routes: [{ summary: { duration: parsed.pathname.includes("foot-walking") ? 4200 : 39600, distance: parsed.pathname.includes("foot-walking") ? 5400 : 1030000 } }] });
@@ -277,16 +338,16 @@ function geocodeFeature(text) {
   };
 }
 
-function poiFeatures() {
+function poiFeatures(isNearby = false) {
   return Array.from({ length: 12 }, (_, index) => {
-    const categories = ["museum", "park", "restaurant", "historic", "viewpoint", "gallery"];
+    const categories = ["museum", "park", "restaurant", "historic", "viewpoint", "gallery", "theater", "garden"];
     const category = categories[index % categories.length];
-    return poiFeature(`Provider ${titleCase(category)} ${index + 1}`, category, index);
+    return poiFeature(`${isNearby ? "Nearby" : "Provider"} ${titleCase(category)} ${index + 1}`, category, index, "venue", isNearby ? 0.35 : 0.01);
   });
 }
 
-function foodPoiFeatures() {
-  return Array.from({ length: 5 }, (_, index) => poiFeature(`Local Dining ${index + 1}`, "restaurant", index));
+function foodPoiFeatures(isNearby = false) {
+  return Array.from({ length: 5 }, (_, index) => poiFeature(`${isNearby ? "Nearby" : "Local"} Dining ${index + 1}`, "restaurant", index, "venue", isNearby ? 0.18 : 0.01));
 }
 
 function noisyPoiFeatures() {
@@ -299,11 +360,11 @@ function noisyPoiFeatures() {
   ];
 }
 
-function poiFeature(name, category, index, layer = "venue") {
+function poiFeature(name, category, index, layer = "venue", coordinateOffset = 0.01) {
   return {
     type: "Feature",
     id: `poi-${index}-${category}`,
-    geometry: { type: "Point", coordinates: [-80.84 + index / 100, 35.22 + index / 100] },
+    geometry: { type: "Point", coordinates: [-80.84 + index * coordinateOffset, 35.22 + index * coordinateOffset] },
     properties: {
       osm_id: `poi-${index}-${category}`,
       name,
