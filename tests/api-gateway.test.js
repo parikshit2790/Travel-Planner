@@ -4,6 +4,7 @@ import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
 import { handleLocationAction } from "../api/lib/location-actions.js";
 import { handlePlannerAction } from "../api/lib/planner-actions.js";
 import { handleProviderHealthAction } from "../api/lib/provider-health-actions.js";
+import providerHealthHandler from "../api/provider-health.js";
 
 const apiRouteFiles = fs.readdirSync("api").filter((entry) => /\.(js|ts)$/.test(entry)).sort();
 assert.deepEqual(apiRouteFiles, ["locations.js", "planner.js", "provider-health.js"]);
@@ -108,4 +109,102 @@ assert.equal("routeProvider" in health.body, false);
 assert.ok(!JSON.stringify(health.body).includes("secret-place-value"));
 assert.ok(!JSON.stringify(health.body).includes("secret-route-value"));
 
+const originalEnv = {
+  NODE_ENV: process.env.NODE_ENV,
+  VERCEL_ENV: process.env.VERCEL_ENV,
+  PLACE_PROVIDER: process.env.PLACE_PROVIDER,
+  ROUTE_PROVIDER: process.env.ROUTE_PROVIDER,
+  WEATHER_PROVIDER: process.env.WEATHER_PROVIDER,
+  PLACE_API_KEY: process.env.PLACE_API_KEY,
+  ROUTE_API_KEY: process.env.ROUTE_API_KEY
+};
+
+process.env.NODE_ENV = "production";
+process.env.VERCEL_ENV = "production";
+process.env.PLACE_PROVIDER = "mock";
+process.env.ROUTE_PROVIDER = "mock";
+process.env.WEATHER_PROVIDER = "";
+process.env.PLACE_API_KEY = "secret-place-value";
+process.env.ROUTE_API_KEY = "secret-route-value";
+
+const getHealth = await invokeProviderHealth("GET");
+assert.equal(getHealth.statusCode, 200);
+assert.match(getHealth.headers["Content-Type"], /application\/json/);
+assert.match(getHealth.headers["Cache-Control"], /no-store/);
+assert.equal(getHealth.body.success, true);
+assert.equal(getHealth.body.data.canGenerate, true);
+assert.equal(getHealth.body.data.mode, "mock");
+assert.equal(getHealth.body.data.placeProviderAvailable, true);
+assert.equal(getHealth.body.data.routeProviderAvailable, true);
+assert.equal(getHealth.body.data.weatherProviderAvailable, false);
+assert.equal("diagnostics" in getHealth.body.data, false);
+assert.ok(!JSON.stringify(getHealth.body).includes("secret-place-value"));
+assert.ok(!JSON.stringify(getHealth.body).includes("secret-route-value"));
+
+const postHealth = await invokeProviderHealth("POST", { action: "status", payload: {} });
+assert.equal(postHealth.statusCode, 200);
+assert.equal(postHealth.body.success, true);
+assert.equal(postHealth.body.canGenerate, true);
+assert.equal(postHealth.body.mode, "mock");
+
+process.env.PLACE_PROVIDER = "";
+process.env.ROUTE_PROVIDER = "";
+const missingHealth = await invokeProviderHealth("GET");
+assert.equal(missingHealth.statusCode, 200);
+assert.equal(missingHealth.body.data.canGenerate, false);
+assert.equal(missingHealth.body.data.mode, "unavailable");
+assert.equal("diagnostics" in missingHealth.body.data, false);
+assert.ok(!JSON.stringify(missingHealth.body).includes("PLACE_PROVIDER"));
+assert.ok(!JSON.stringify(missingHealth.body).includes("ROUTE_PROVIDER"));
+
+const badMethod = await invokeProviderHealth("PUT");
+assert.equal(badMethod.statusCode, 405);
+assert.equal(badMethod.headers.Allow, "GET, POST");
+assert.equal(badMethod.body.success, false);
+assert.equal(badMethod.body.error.code, "METHOD_NOT_ALLOWED");
+
+restoreEnv(originalEnv);
+
 console.log("API gateway tests passed");
+
+async function invokeProviderHealth(method, body = {}) {
+  const req = { method, body };
+  const res = createMockResponse();
+  await providerHealthHandler(req, res);
+  return res.snapshot();
+}
+
+function createMockResponse() {
+  const response = {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    setHeader(key, value) {
+      this.headers[key] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      if (!this.headers["Content-Type"]) this.headers["Content-Type"] = "application/json";
+      return this;
+    },
+    snapshot() {
+      return {
+        statusCode: this.statusCode,
+        headers: this.headers,
+        body: this.body
+      };
+    }
+  };
+  return response;
+}
+
+function restoreEnv(values) {
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
+}
