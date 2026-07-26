@@ -1,6 +1,8 @@
 import { createRequestId, parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "../server/lib/action-response.js";
 import { handlePlannerAction } from "../server/lib/planner-actions.js";
 
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   const requestId = createRequestId("planner");
   const startedAt = Date.now();
@@ -30,7 +32,6 @@ export default async function handler(req, res) {
 
 function codeForError(error) {
   if (error instanceof SyntaxError) return "INVALID_JSON_BODY";
-  if (String(error?.message || "").toLowerCase().includes("timed out")) return "REQUEST_TIMEOUT";
   return error?.code || "PLANNER_REQUEST_FAILED";
 }
 
@@ -46,7 +47,7 @@ function retryableForError(error) {
 
 function messageForError(code) {
   if (code === "INVALID_JSON_BODY") return "The planner request body was invalid.";
-  if (code === "REQUEST_TIMEOUT") return "Trip generation took too long. Please retry.";
+  if (["REQUEST_TIMEOUT", "AI_TIMEOUT", "GOOGLE_TIMEOUT", "PLANNER_TIMEOUT", "ROUTE_TIMEOUT"].includes(code)) return "Trip generation took too long. Please retry.";
   if (code === "INSUFFICIENT_DESTINATION_DATA") return "We could not find enough reliable destination information for this trip.";
   if (code === "ROUTE_ESTIMATE_FAILED") return "We found destination ideas, but could not calculate reliable travel times.";
   if (code === "PROVIDER_UNAVAILABLE") return "Trip planning services are temporarily unavailable.";

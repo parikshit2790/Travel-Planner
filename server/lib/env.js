@@ -5,6 +5,7 @@ export function providerConfig() {
   const routeProvider = normalizeProvider(process.env.ROUTE_PROVIDER || (production ? "" : "mock"));
   const weatherProvider = normalizeProvider(process.env.WEATHER_PROVIDER || "");
   const aiProvider = normalizeProvider(process.env.AI_PROVIDER || "");
+  const providerTimeoutMs = positiveNumber(process.env.PROVIDER_TIMEOUT_MS, 10000);
   return {
     production,
     development,
@@ -19,7 +20,11 @@ export function providerConfig() {
     aiProvider,
     aiApiKey: cleanEnv(process.env.AI_API_KEY || process.env.OPENAI_API_KEY),
     aiModel: cleanEnv(process.env.AI_MODEL || process.env.OPENAI_MODEL) || "gpt-5-mini",
-    timeoutMs: Number(cleanEnv(process.env.PROVIDER_TIMEOUT_MS) || 10000),
+    timeoutMs: providerTimeoutMs,
+    googleRequestTimeoutMs: positiveNumber(process.env.GOOGLE_REQUEST_TIMEOUT_MS, providerTimeoutMs),
+    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 40000),
+    plannerRequestTimeoutMs: positiveNumber(process.env.PLANNER_REQUEST_TIMEOUT_MS, 55000),
+    frontendGenerationTimeoutMs: positiveNumber(process.env.FRONTEND_GENERATION_TIMEOUT_MS, 65000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
   };
 }
@@ -123,6 +128,11 @@ function normalizeProvider(value) {
 
 function cleanEnv(value) {
   return String(value || "").trim();
+}
+
+function positiveNumber(value, fallback) {
+  const parsed = Number(cleanEnv(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function safeProviderStatus(provider, missing, canGenerate) {

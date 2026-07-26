@@ -45,7 +45,7 @@ const vercel = fs.readFileSync("vercel.json", "utf8");
 assert.ok(vercel.includes("api/.*"));
 
 const envExample = fs.readFileSync(".env.example", "utf8");
-["PLACE_PROVIDER", "PLACE_API_KEY", "OPENROUTESERVICE_API_KEY", "ROUTE_PROVIDER", "ROUTE_API_KEY", "WEATHER_PROVIDER", "AI_PROVIDER", "PROVIDER_TIMEOUT_MS", "CACHE_TTL_SECONDS"].forEach((key) => assert.ok(envExample.includes(key)));
+["PLACE_PROVIDER", "PLACE_API_KEY", "OPENROUTESERVICE_API_KEY", "ROUTE_PROVIDER", "ROUTE_API_KEY", "WEATHER_PROVIDER", "AI_PROVIDER", "PROVIDER_TIMEOUT_MS", "GOOGLE_REQUEST_TIMEOUT_MS", "OPENAI_REQUEST_TIMEOUT_MS", "PLANNER_REQUEST_TIMEOUT_MS", "FRONTEND_GENERATION_TIMEOUT_MS", "CACHE_TTL_SECONDS"].forEach((key) => assert.ok(envExample.includes(key)));
 
 const providerErrors = validatePlanningProviders({ production: true, placeProvider: "", routeProvider: "", placeApiKey: "", routeApiKey: "" });
 assert.ok(providerErrors.some((error) => error.includes("PLACE_PROVIDER")));

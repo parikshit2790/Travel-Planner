@@ -1,9 +1,29 @@
-async function postAction(endpoint, action, payload = {}) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, payload })
-  });
+const DEFAULT_FRONTEND_GENERATION_TIMEOUT_MS = 65000;
+
+async function postAction(endpoint, action, payload = {}, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 0);
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), Math.max(1, timeoutMs)) : null;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller?.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, payload })
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("Trip generation took too long. Please retry.");
+      timeoutError.code = "FRONTEND_TIMEOUT";
+      timeoutError.retryable = true;
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   const contentType = response.headers.get("content-type") || "";
   const rawBody = await response.text().catch(() => "");
   const data = contentType.includes("application/json") ? parseJsonOrNull(rawBody) : null;
@@ -62,7 +82,7 @@ function messageForCode(code) {
   if (code === "INSUFFICIENT_DESTINATION_DATA") return "We could not find enough reliable destination information for this trip.";
   if (code === "ROUTE_ESTIMATE_FAILED") return "We found destination ideas, but could not calculate reliable travel times.";
   if (code === "PROVIDER_UNAVAILABLE" || code === "PROVIDER_RATE_LIMITED") return "Trip planning services are temporarily unavailable.";
-  if (code === "REQUEST_TIMEOUT") return "Trip generation took too long. Please retry.";
+  if (["REQUEST_TIMEOUT", "AI_TIMEOUT", "GOOGLE_TIMEOUT", "PLANNER_TIMEOUT", "ROUTE_TIMEOUT", "FRONTEND_TIMEOUT"].includes(code)) return "Trip generation took too long. Please retry.";
   if (code === "INVALID_RESPONSE") return "The trip service returned an invalid response.";
   return "";
 }
@@ -81,10 +101,10 @@ export const routeMosaicApi = {
     return postAction("/api/locations", "place-details", payload);
   },
   researchDestination(trip) {
-    return postAction("/api/planner", "research-destination", { trip });
+    return postAction("/api/planner", "research-destination", { trip }, { timeoutMs: frontendGenerationTimeoutMs() });
   },
   generateTrip(trip, destinationProfile, variationSeed = 0) {
-    return postAction("/api/planner", "generate-trip", { trip, destinationProfile, variationSeed });
+    return postAction("/api/planner", "generate-trip", { trip, destinationProfile, variationSeed }, { timeoutMs: frontendGenerationTimeoutMs() });
   },
   regeneratePlan(plan) {
     return postAction("/api/planner", "regenerate-plan", { plan });
@@ -111,3 +131,7 @@ export const routeMosaicApi = {
     return postAction("/api/provider-health", "status");
   }
 };
+
+function frontendGenerationTimeoutMs() {
+  return Number(globalThis.ROUTEMOSAIC_FRONTEND_GENERATION_TIMEOUT_MS || DEFAULT_FRONTEND_GENERATION_TIMEOUT_MS);
+}

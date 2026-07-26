@@ -266,16 +266,29 @@ async function googleRoutesRequest(path, { config, operation, fieldMask, body } 
 async function googleRequest(url, { config, operation, method = "POST", fieldMask, body } = {}) {
   const apiKey = googleApiKey(config);
   if (!apiKey) throw googleProviderError("PROVIDER_CONFIGURATION_REQUIRED", "Google Maps API key is required.", false, 500);
-  const response = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      ...(fieldMask ? { "X-Goog-FieldMask": fieldMask } : {})
-    },
-    body: body ? JSON.stringify(removeUndefined(body)) : undefined
-  });
-  const json = await response.json().catch(() => ({}));
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)));
+  let response;
+  let json;
+  try {
+    response = await fetch(url, {
+      method,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        ...(fieldMask ? { "X-Goog-FieldMask": fieldMask } : {})
+      },
+      body: body ? JSON.stringify(removeUndefined(body)) : undefined
+    });
+    json = await response.json().catch(() => ({}));
+  } catch (error) {
+    if (error?.name === "AbortError") throw googleProviderError("GOOGLE_TIMEOUT", "Google provider request timed out.", true, 408);
+    if (error?.code === "REQUEST_TIMEOUT" || error?.status === 408 || String(error?.message || "").toLowerCase().includes("timed out")) throw googleProviderError("GOOGLE_TIMEOUT", "Google provider request timed out.", true, 408);
+    throw googleProviderError("PROVIDER_UNAVAILABLE", "Google provider request failed.", true, 503);
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (response.ok) return json;
   throw googleProviderError(mapGoogleErrorCode(response.status, json, operation), "Google provider request failed.", response.status >= 500, response.status);
 }
@@ -287,7 +300,7 @@ function googleApiKey(config) {
 function mapGoogleErrorCode(status, json, operation) {
   const providerStatus = String(json?.error?.status || json?.status || "").toUpperCase();
   const message = String(json?.error?.message || json?.message || "").toLowerCase();
-  if (status === 408 || message.includes("timeout")) return "REQUEST_TIMEOUT";
+  if (status === 408 || message.includes("timeout")) return "GOOGLE_TIMEOUT";
   if (status === 429 || providerStatus === "RESOURCE_EXHAUSTED") return message.includes("quota") ? "PROVIDER_QUOTA_EXCEEDED" : "RATE_LIMITED";
   if (status === 401 || providerStatus === "UNAUTHENTICATED") return "PROVIDER_AUTH_FAILED";
   if (status === 403 || providerStatus === "PERMISSION_DENIED") {

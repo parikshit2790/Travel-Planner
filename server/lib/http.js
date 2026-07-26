@@ -7,10 +7,17 @@ export function sendJson(res, status, body) {
   res.status(status).json(body);
 }
 
-export function withTimeout(promise, ms, label = "Request") {
+export function withTimeout(promise, ms, label = "Request", code = "REQUEST_TIMEOUT", status = 504) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    timeoutId = setTimeout(() => {
+      const error = new Error(`${label} timed out`);
+      error.code = code;
+      error.status = status;
+      error.retryable = true;
+      error.stage = label;
+      reject(error);
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }

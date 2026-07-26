@@ -105,7 +105,7 @@ try {
   await assertGoogleFailure("key-restricted", "PROVIDER_AUTH_FAILED");
   await assertGoogleFailure("quota", "PROVIDER_QUOTA_EXCEEDED");
   await assertGoogleFailure("malformed", "INVALID_PROVIDER_RESPONSE");
-  await assertGoogleFailure("timeout", "REQUEST_TIMEOUT");
+  await assertGoogleFailure("timeout", "GOOGLE_TIMEOUT");
 } finally {
   globalThis.fetch = originalFetch;
   restoreEnv(originalEnv);

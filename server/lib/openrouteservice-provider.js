@@ -191,16 +191,29 @@ async function orsRequest(path, { config, method = "GET", body = null } = {}) {
   if (!apiKey) throw providerError("OPENROUTESERVICE_API_KEY_REQUIRED", "openrouteservice API key is required.", false);
   const url = path.startsWith("http") ? new URL(path) : new URL(`${ORS_BASE_URL}${path}`);
   if (method === "GET") url.searchParams.set("api_key", apiKey);
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: "application/json",
-      Authorization: apiKey,
-      ...(body ? { "Content-Type": "application/json" } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const json = await response.json().catch(() => ({}));
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)));
+  let response;
+  let json;
+  try {
+    response = await fetch(url, {
+      method,
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: apiKey,
+        ...(body ? { "Content-Type": "application/json" } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    json = await response.json().catch(() => ({}));
+  } catch (error) {
+    if (error?.name === "AbortError") throw providerError("GOOGLE_TIMEOUT", "Map provider request timed out.", true, 408);
+    if (error?.code === "REQUEST_TIMEOUT" || error?.status === 408 || String(error?.message || "").toLowerCase().includes("timed out")) throw providerError("GOOGLE_TIMEOUT", "Map provider request timed out.", true, 408);
+    throw providerError("OPENROUTESERVICE_UNAVAILABLE", "openrouteservice request failed.", true, 503);
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (response.ok) return json;
   if (response.status === 429) throw providerError("OPENROUTESERVICE_RATE_LIMITED", "openrouteservice rate limit reached.", true, response.status);
   if (response.status === 401 || response.status === 403) throw providerError("OPENROUTESERVICE_AUTH_FAILED", "openrouteservice authorization failed.", false, response.status);

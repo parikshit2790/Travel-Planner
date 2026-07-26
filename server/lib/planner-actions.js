@@ -7,6 +7,7 @@ import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } fr
 import { openAiDestinationResearch } from "./openai-destination-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
 import { withTimeout } from "./http.js";
+import { destinationResearchCacheKey, getCachedDestinationResearch } from "./destination-cache.js";
 
 export async function handlePlannerAction(action, payload = {}, context = {}) {
   const requestId = context.requestId || requestIdFor("planner");
@@ -50,8 +51,15 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
   }
   try {
     logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "start", destination });
-    const profile = await withTimeout(researchDestination(destination, trip, config), config.timeoutMs, "Destination research");
-    logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "complete", destination, candidateCount: profile.places?.length || 0, durationMs: Date.now() - startedAt });
+    const key = destinationResearchCacheKey(destination, trip, config);
+    const { profile, cacheStatus } = await withTimeout(
+      getCachedDestinationResearch(key, () => researchDestination(destination, trip, config), { ttlSeconds: config.cacheTtlSeconds }),
+      config.plannerRequestTimeoutMs,
+      "Destination research",
+      "PLANNER_TIMEOUT",
+      504
+    );
+    logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "complete", destination, cacheStatus, candidateCount: profile.places?.length || 0, durationMs: Date.now() - startedAt });
     return {
       status: 200,
       body: {
@@ -61,7 +69,7 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
           routeProvider: config.routeProvider,
           generatedAt: new Date().toISOString(),
           candidateCount: profile.places.length,
-          cache: "miss"
+          cache: cacheStatus
         } } : {})
       }
     };
@@ -120,11 +128,17 @@ async function handleRouteEstimate({ origin, destination, mode = "driving" } = {
   }
   if (!origin || !destination) return actionError(400, "ROUTE_POINTS_REQUIRED", "Origin and destination are required.", false, requestId);
   try {
-    const estimate = await withTimeout(estimateRoute(origin, destination, mode, config), config.timeoutMs, "Route estimate");
+    const estimate = await withTimeout(estimateRoute(origin, destination, mode, config), config.googleRequestTimeoutMs, "Route estimate", "ROUTE_TIMEOUT", 504);
     return { status: 200, body: { estimate } };
   } catch (error) {
     const code = routeErrorCode(error);
-    return actionError(code === "OPENROUTESERVICE_RATE_LIMITED" ? 429 : 502, code === "OPENROUTESERVICE_RATE_LIMITED" ? "PROVIDER_RATE_LIMITED" : "ROUTE_ESTIMATE_FAILED", code === "OPENROUTESERVICE_RATE_LIMITED" ? "Trip planning services are temporarily busy. Please retry." : "We found destination ideas, but could not calculate reliable travel times.", true, requestId);
+    if (code === "OPENROUTESERVICE_RATE_LIMITED") {
+      return actionError(429, "PROVIDER_RATE_LIMITED", "Trip planning services are temporarily busy. Please retry.", true, requestId);
+    }
+    if (["GOOGLE_TIMEOUT", "ROUTE_TIMEOUT", "REQUEST_TIMEOUT"].includes(code)) {
+      return actionError(504, "ROUTE_TIMEOUT", "Route estimation took too long. Please retry.", true, requestId);
+    }
+    return actionError(502, "ROUTE_ESTIMATE_FAILED", "We found destination ideas, but could not calculate reliable travel times.", true, requestId);
   }
 }
 
@@ -206,6 +220,7 @@ function logPlannerEvent(event) {
     destination: canonicalLogName(event.destination),
     candidateCount: event.candidateCount,
     routeCount: event.routeCount,
+    cacheStatus: event.cacheStatus,
     errorCode: event.errorCode,
     durationMs: event.durationMs
   };
@@ -219,6 +234,7 @@ function canonicalLogName(value) {
 function destinationResearchCode(error) {
   if (error?.code === "MOCK_DESTINATION_UNAVAILABLE") return "MOCK_DESTINATION_UNAVAILABLE";
   if (error?.code === "DESTINATION_RESEARCH_INSUFFICIENT") return "INSUFFICIENT_DESTINATION_DATA";
+  if (["AI_TIMEOUT", "GOOGLE_TIMEOUT", "PLANNER_TIMEOUT"].includes(error?.code)) return error.code;
   if (error?.code === "OPENROUTESERVICE_RATE_LIMITED") return "PROVIDER_RATE_LIMITED";
   if (String(error?.message || "").toLowerCase().includes("timed out")) return "REQUEST_TIMEOUT";
   return "DESTINATION_RESEARCH_FAILED";
@@ -227,7 +243,7 @@ function destinationResearchCode(error) {
 function statusForDestinationResearch(code) {
   if (code === "MOCK_DESTINATION_UNAVAILABLE" || code === "INSUFFICIENT_DESTINATION_DATA") return 422;
   if (code === "PROVIDER_RATE_LIMITED") return 429;
-  if (code === "REQUEST_TIMEOUT") return 504;
+  if (["REQUEST_TIMEOUT", "AI_TIMEOUT", "GOOGLE_TIMEOUT", "PLANNER_TIMEOUT"].includes(code)) return 504;
   return 502;
 }
 
@@ -235,7 +251,9 @@ function messageForDestinationResearch(code) {
   if (code === "MOCK_DESTINATION_UNAVAILABLE") return "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.";
   if (code === "INSUFFICIENT_DESTINATION_DATA") return "We could not find enough reliable destination information for this trip.";
   if (code === "PROVIDER_RATE_LIMITED") return "Trip planning services are temporarily busy. Please retry.";
-  if (code === "REQUEST_TIMEOUT") return "Trip generation took too long. Please retry.";
+  if (code === "AI_TIMEOUT") return "Destination intelligence took too long. Please retry.";
+  if (code === "GOOGLE_TIMEOUT") return "Map provider research took too long. Please retry.";
+  if (code === "PLANNER_TIMEOUT" || code === "REQUEST_TIMEOUT") return "Trip generation took too long. Please retry.";
   return "Destination research failed. Please try again later.";
 }
 

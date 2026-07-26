@@ -1897,10 +1897,26 @@ function reviewStep() {
       ${reviewCard("Comfort and Budget", 5, "comfort", [["Pace", `${trip.schedule.pace} pace`], ["Major Activities / Day", trip.schedule.majorActivities || 2], ["Max Driving / Day", trip.transport.maxDrivingDay || "4 hours"], ["Budget Range", trip.budget.total || "$1,500-$3,500"], ["Accommodation", chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel with free parking and breakfast"])]])}
       ${reviewIssuesCard(issues)}
     </div>
+    ${generationProgressPanel()}
     ${providerDiagnosticsPanel()}
-    ${wizardFooter("Back", "Save and Exit", "Build My Trip", blocking.length ? "disabled" : "")}
+    ${wizardFooter("Back", "Save and Exit", ui.generatingPlan ? "Building..." : "Build My Trip", blocking.length || ui.generatingPlan ? "disabled" : "")}
   </section>
   ${previewSection()}`;
+}
+
+function generationProgressPanel() {
+  if (!ui.generatingPlan && !ui.planAnnouncement) return "";
+  const steps = [
+    "Researching destination highlights",
+    "Grouping nearby experiences",
+    "Applying traveler and food preferences",
+    "Scheduling the itinerary"
+  ];
+  return `<section class="generation-progress" role="status" aria-live="polite">
+    <strong>${esc(ui.generatingPlan ? "Building your trip..." : "Trip planning update")}</strong>
+    <span>${esc(ui.planAnnouncement || "Preparing trip plan.")}</span>
+    <div>${steps.map((step) => `<i>${esc(step)}</i>`).join("")}</div>
+  </section>`;
 }
 
 function providerDiagnosticsPanel() {
@@ -2075,7 +2091,7 @@ function whyItFits() {
 
 function wizardFooter(backLabel, saveLabel, primaryLabel, primaryDisabled = "") {
   const backButton = backLabel ? button(backLabel, "prev") : "";
-  const primaryAction = primaryLabel === "Build My Trip" ? "buildTripPlan" : primaryLabel === "Continue" ? "next" : "noop";
+  const primaryAction = primaryLabel === "Build My Trip" || primaryLabel === "Building..." ? "buildTripPlan" : primaryLabel === "Continue" ? "next" : "noop";
   return `<div class="wizard-footer">${backButton}${button(saveLabel, "saveExit")}<button class="primary" data-action="${primaryAction}" ${primaryDisabled}>${esc(primaryLabel)}</button></div>`;
 }
 
@@ -2631,6 +2647,7 @@ function setPath(root, path, value) {
 }
 
 async function buildTripPlanAction(name) {
+  if (ui.generatingPlan) return;
   if (blockingValidationIssues().length) {
     ui.showWarnings = true;
     ui.toast = "Resolve blocking issues before building your trip.";
@@ -2638,11 +2655,13 @@ async function buildTripPlanAction(name) {
     return;
   }
   ui.generatingPlan = true;
-  ui.planAnnouncement = "Building destination intelligence, grouping nearby experiences, applying traveler needs, and scheduling your days.";
+  ui.planAnnouncement = "Researching destination highlights and nearby day-trip options.";
   ui.toast = "Building your trip plan...";
   render();
   try {
     const destinationProfile = name !== "regeneratePlan" ? await ensureDestinationIntelligence() : null;
+    ui.planAnnouncement = "Grouping nearby experiences, applying preferences, and scheduling your days.";
+    render();
     const result = name === "regeneratePlan" && state.plan
       ? await routeMosaicApi.regeneratePlan(state.plan)
       : await routeMosaicApi.generateTrip(state.trip, destinationProfile, state.plan?.generationMetadata?.variationSeed || 0);
@@ -2668,6 +2687,7 @@ async function buildTripPlanAction(name) {
     state.planError = error?.code ? { status: "error", code: error.code, message: error.message, retryable: error.retryable } : null;
     ui.showWarnings = true;
     ui.toast = error?.message || "Trip plan could not be generated yet.";
+    ui.planAnnouncement = "Trip generation stopped before a complete plan was created.";
   }
   ui.generatingPlan = false;
   persist("Updated");

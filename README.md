@@ -29,7 +29,11 @@ WEATHER_API_KEY=
 AI_PROVIDER=openai
 OPENAI_API_KEY=
 AI_MODEL=gpt-5-mini
-PROVIDER_TIMEOUT_MS=20000
+PROVIDER_TIMEOUT_MS=10000
+GOOGLE_REQUEST_TIMEOUT_MS=10000
+OPENAI_REQUEST_TIMEOUT_MS=40000
+PLANNER_REQUEST_TIMEOUT_MS=55000
+FRONTEND_GENERATION_TIMEOUT_MS=65000
 CACHE_TTL_SECONDS=86400
 ```
 
@@ -58,7 +62,11 @@ GOOGLE_MAPS_API_KEY=<secret key>
 AI_PROVIDER=openai
 OPENAI_API_KEY=<secret key>
 AI_MODEL=gpt-5-mini
-PROVIDER_TIMEOUT_MS=20000
+PROVIDER_TIMEOUT_MS=10000
+GOOGLE_REQUEST_TIMEOUT_MS=10000
+OPENAI_REQUEST_TIMEOUT_MS=40000
+PLANNER_REQUEST_TIMEOUT_MS=55000
+FRONTEND_GENERATION_TIMEOUT_MS=65000
 ```
 
 Enable these Google APIs in the same Google Cloud project as the key:
@@ -82,6 +90,10 @@ PLACE_PROVIDER=openrouteservice
 ROUTE_PROVIDER=openrouteservice
 OPENROUTESERVICE_API_KEY=<secret key>
 PROVIDER_TIMEOUT_MS=10000
+GOOGLE_REQUEST_TIMEOUT_MS=10000
+OPENAI_REQUEST_TIMEOUT_MS=40000
+PLANNER_REQUEST_TIMEOUT_MS=55000
+FRONTEND_GENERATION_TIMEOUT_MS=65000
 ```
 
 `OPENROUTESERVICE_API_KEY` is the preferred key variable. `PLACE_API_KEY` and `ROUTE_API_KEY` remain accepted as backward-compatible generic key slots, but a single `OPENROUTESERVICE_API_KEY` is recommended so the same secret powers autocomplete, geocoding, POI research, and routing.
@@ -96,7 +108,11 @@ Use OpenAI for production destination research so RouteMosaic can generate stron
 AI_PROVIDER=openai
 OPENAI_API_KEY=<secret key>
 AI_MODEL=gpt-5-mini
-PROVIDER_TIMEOUT_MS=20000
+PROVIDER_TIMEOUT_MS=10000
+GOOGLE_REQUEST_TIMEOUT_MS=10000
+OPENAI_REQUEST_TIMEOUT_MS=40000
+PLANNER_REQUEST_TIMEOUT_MS=55000
+FRONTEND_GENERATION_TIMEOUT_MS=65000
 ```
 
 With `AI_PROVIDER=openai`, RouteMosaic asks the server-side destination intelligence adapter to produce structured regions, must-do places, neighborhoods, food areas, and nearby excursions. Google Places/Routes power location autocomplete, place lookup, POI discovery, and route estimates. If AI research fails, the app falls back to provider/map data and clearly lower-confidence starter planning anchors.

@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/planner.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/((?!api/.*|robots.txt|sitemap.xml|manifest.webmanifest|sw.js|public/.*|src/.*).*)",

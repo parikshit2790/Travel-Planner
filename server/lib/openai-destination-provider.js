@@ -1,7 +1,7 @@
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_SOURCE_URL = "https://openai.com";
 const DEFAULT_OPENAI_MODEL = "gpt-5-mini";
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 40000;
 
 export async function openAiDestinationResearch(destination, trip = {}, config = {}) {
   const apiKey = config.aiApiKey || "";
@@ -99,9 +99,9 @@ export async function openAiSmokeCheck(config = {}) {
 async function postOpenAiResponse(config, body) {
   const apiKey = config.aiApiKey || "";
   if (!apiKey) throw aiProviderError("OPENAI_API_KEY_REQUIRED", "AI destination research is not configured.", false, 500);
-  const timeoutMs = Number(config.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Number(config.openAiRequestTimeoutMs || config.timeoutMs || DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
   try {
     const response = await fetch(OPENAI_RESPONSES_URL, {
       method: "POST",
