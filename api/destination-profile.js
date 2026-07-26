@@ -9,7 +9,6 @@ export default async function handler(req, res) {
   if (config.production && errors.length) {
     sendJson(res, 503, {
       error: "Destination-agnostic planning is not configured yet.",
-      details: errors,
       code: "PROVIDER_CONFIGURATION_REQUIRED"
     });
     return;

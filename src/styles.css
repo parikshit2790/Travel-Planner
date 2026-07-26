@@ -510,6 +510,12 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .badge.ready, .badge.trip-basics-ready { color: var(--evergreen); background: color-mix(in srgb, var(--evergreen) 11%, #fff); }
 .badge.ready-with-advisory { color: var(--warn); background: color-mix(in srgb, var(--sand) 44%, #fff); }
 .badge.provider-facts-not-connected, .badge.needs-fixing { color: var(--warn); }
+.provider-diagnostics {
+  border-color: color-mix(in srgb, var(--blue) 30%, var(--line));
+  background: color-mix(in srgb, var(--sky) 10%, #fff);
+}
+.provider-diagnostics .eyebrow { color: var(--blue); }
+.provider-diagnostics table { margin-top: 10px; }
 
 @media (max-width: 1280px) {
   .compact-grid, .style-scale-grid { grid-template-columns: 1fr; }

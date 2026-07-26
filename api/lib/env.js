@@ -1,7 +1,9 @@
 export function providerConfig() {
   const production = process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+  const development = !production && process.env.VERCEL_ENV !== "preview";
   return {
     production,
+    development,
     placeProvider: process.env.PLACE_PROVIDER || (production ? "" : "mock"),
     placeApiKey: process.env.PLACE_API_KEY || "",
     routeProvider: process.env.ROUTE_PROVIDER || (production ? "" : "mock"),
@@ -17,10 +19,74 @@ export function providerConfig() {
 }
 
 export function validatePlanningProviders(config = providerConfig()) {
-  const errors = [];
-  if (!config.placeProvider) errors.push("PLACE_PROVIDER is required for production destination research.");
-  if (!config.routeProvider) errors.push("ROUTE_PROVIDER is required for production route estimates.");
-  if (config.placeProvider === "opentripmap" && !config.placeApiKey) errors.push("PLACE_API_KEY is required when PLACE_PROVIDER=opentripmap.");
-  if (config.routeProvider === "google" && !config.routeApiKey) errors.push("ROUTE_API_KEY is required when ROUTE_PROVIDER=google.");
-  return errors;
+  return providerStatus(config).errors;
+}
+
+export function providerStatus(config = providerConfig(), { includeDiagnostics = false } = {}) {
+  const placeMissing = [];
+  const routeMissing = [];
+  const weatherMissing = [];
+  const aiMissing = [];
+  if (!config.placeProvider) placeMissing.push("PLACE_PROVIDER");
+  if (!config.routeProvider) routeMissing.push("ROUTE_PROVIDER");
+  if (config.placeProvider === "opentripmap" && !config.placeApiKey) placeMissing.push("PLACE_API_KEY");
+  if (config.routeProvider === "google" && !config.routeApiKey) routeMissing.push("ROUTE_API_KEY");
+  if (config.weatherProvider && !config.weatherApiKey && !["open-meteo", "mock"].includes(config.weatherProvider)) weatherMissing.push("WEATHER_API_KEY");
+  if (config.aiProvider && !config.aiApiKey) aiMissing.push("AI_API_KEY");
+  const placeImplemented = ["mock"].includes(config.placeProvider);
+  const routeImplemented = ["mock", "approximate"].includes(config.routeProvider);
+  const weatherImplemented = !config.weatherProvider;
+  const aiImplemented = !config.aiProvider;
+  if (config.placeProvider && !placeImplemented) placeMissing.push(`Adapter not implemented: ${config.placeProvider}`);
+  if (config.routeProvider && !routeImplemented) routeMissing.push(`Adapter not implemented: ${config.routeProvider}`);
+  if (config.weatherProvider && !weatherImplemented) weatherMissing.push(`Adapter not implemented: ${config.weatherProvider}`);
+  if (config.aiProvider && !aiImplemented) aiMissing.push(`Adapter not implemented: ${config.aiProvider}`);
+  const canGenerate = placeMissing.length === 0 && routeMissing.length === 0;
+  const status = {
+    available: canGenerate,
+    status: canGenerate ? "available" : "temporarily unavailable",
+    canGenerate,
+    placeProvider: safeProviderStatus(config.placeProvider, placeMissing, canGenerate),
+    routeProvider: safeProviderStatus(config.routeProvider, routeMissing, canGenerate),
+    weatherProvider: {
+      configured: Boolean(config.weatherProvider) && weatherMissing.length === 0,
+      provider: config.weatherProvider || "none",
+      optional: true,
+      status: config.weatherProvider && weatherMissing.length === 0 ? "available" : "degraded"
+    },
+    aiProvider: {
+      configured: Boolean(config.aiProvider) && aiMissing.length === 0,
+      provider: config.aiProvider || "none",
+      optional: true,
+      status: config.aiProvider && aiMissing.length === 0 ? "available" : "degraded"
+    },
+    publicMessage: canGenerate ? "Trip generation is available." : "Trip generation is temporarily unavailable. Please try again later.",
+    checkedAt: new Date().toISOString()
+  };
+  const errors = [
+    ...placeMissing.map((item) => `Place provider: ${item}`),
+    ...routeMissing.map((item) => `Route provider: ${item}`),
+    ...weatherMissing.map((item) => `Weather provider: ${item}`),
+    ...aiMissing.map((item) => `AI provider: ${item}`)
+  ];
+  if (includeDiagnostics) {
+    status.diagnostics = {
+      environment: config.production ? "production" : config.development ? "development" : "preview",
+      placeProviderMissing: placeMissing,
+      routeProviderMissing: routeMissing,
+      weatherProviderMissing: weatherMissing,
+      aiProviderMissing: aiMissing,
+      errors
+    };
+  }
+  return { ...status, errors };
+}
+
+function safeProviderStatus(provider, missing, canGenerate) {
+  return {
+    configured: missing.length === 0,
+    provider: provider || "not configured",
+    missingVariables: [],
+    status: missing.length === 0 ? "available" : canGenerate ? "degraded" : "temporarily unavailable"
+  };
 }

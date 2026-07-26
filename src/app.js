@@ -338,6 +338,23 @@ function render() {
   positionRestrictionOverlay();
 }
 
+async function refreshProviderStatus({ rerender = true } = {}) {
+  try {
+    const response = await fetch("/api/providers/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (!response.ok) throw new Error("Provider status unavailable");
+    state.providerStatus = await response.json();
+  } catch {
+    state.providerStatus = {
+      available: false,
+      status: "temporarily unavailable",
+      canGenerate: false,
+      publicMessage: "Trip generation is temporarily unavailable. Please try again later.",
+      checkedAt: new Date().toISOString()
+    };
+  }
+  if (rerender) render();
+}
+
 function isStaticInfoRoute() {
   return ["/privacy", "/terms", "/travel-disclaimer", "/contact", "/saved-trips"].includes(window.location.pathname);
 }
@@ -1869,9 +1886,25 @@ function reviewStep() {
       ${reviewCard("Comfort and Budget", 5, "comfort", [["Pace", `${trip.schedule.pace} pace`], ["Major Activities / Day", trip.schedule.majorActivities || 2], ["Max Driving / Day", trip.transport.maxDrivingDay || "4 hours"], ["Budget Range", trip.budget.total || "$1,500-$3,500"], ["Accommodation", chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel with free parking and breakfast"])]])}
       ${reviewIssuesCard(issues)}
     </div>
+    ${providerDiagnosticsPanel()}
     ${wizardFooter("Back", "Save and Exit", "Build My Trip", blocking.length ? "disabled" : "")}
   </section>
   ${previewSection()}`;
+}
+
+function providerDiagnosticsPanel() {
+  const status = state.providerStatus;
+  if (!status?.diagnostics) return "";
+  const rows = [
+    ["Place", status.placeProvider?.provider, status.placeProvider?.status, status.diagnostics.placeProviderMissing?.join(", ") || "None"],
+    ["Route", status.routeProvider?.provider, status.routeProvider?.status, status.diagnostics.routeProviderMissing?.join(", ") || "None"],
+    ["Weather", status.weatherProvider?.provider, status.weatherProvider?.status, status.diagnostics.weatherProviderMissing?.join(", ") || "None"],
+    ["AI", status.aiProvider?.provider, status.aiProvider?.status, status.diagnostics.aiProviderMissing?.join(", ") || "None"]
+  ];
+  return `<section class="panel provider-diagnostics">
+    <div class="panel-head"><div><p class="eyebrow">Development Only</p><h3>Provider Configuration</h3></div><button data-action="refreshProviderStatus">Retry Configuration Check</button></div>
+    ${table(["Service", "Provider", "Status", "Missing"], rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell || "")}</td>`).join("")}</tr>`))}
+  </section>`;
 }
 
 function quickInterpretTable() {
@@ -1896,10 +1929,11 @@ function reviewCard(title, step, tone, rows) {
 
 function reviewIssuesCard(issues) {
   const firstIssue = issues[0];
+  const providerIssue = firstIssue?.field === "provider.configuration";
   return `<article class="review-card review-issues issues-card">
     <div class="review-card-art" aria-hidden="true"></div>
     <div class="review-card-content">
-      <div class="panel-head mini-head"><h3>Issues and Advisories</h3><button data-step="${firstIssue?.owningStep || 1}">Edit</button></div>
+      <div class="panel-head mini-head"><h3>Issues and Advisories</h3>${providerIssue ? `<button data-action="refreshProviderStatus">Retry</button>` : `<button data-step="${firstIssue?.owningStep || 1}">Edit</button>`}</div>
       ${firstIssue ? `<div class="issue-summary"><strong>${esc(firstIssue.issue)}</strong><p>${esc(firstIssue.action || "Review this item before building your trip.")}</p></div>` : `<div class="issue-summary clear"><strong>No issues found.</strong><p>Your trip is ready to build.</p></div>`}
     </div>
   </article>`;
@@ -1933,7 +1967,18 @@ function preferenceSummaryByImportance(...importanceValues) {
 }
 
 function reviewIssues() {
-  return getTripIssues(state.trip);
+  const issues = [...getTripIssues(state.trip)];
+  if (state.activeStep === 6 && (!state.providerStatus || state.providerStatus.canGenerate === false)) {
+    issues.unshift({
+      severity: "Critical",
+      blocking: true,
+      field: "provider.configuration",
+      owningStep: 6,
+      issue: "Trip generation is temporarily unavailable because destination and route services are not configured.",
+      action: "Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session."
+    });
+  }
+  return issues;
 }
 
 function crossStepIssues() {
@@ -1995,6 +2040,10 @@ function bind() {
     ui.openRestrictionTravelerId = null;
     ui.restrictionSearch = "";
     state.activeStep = Number(el.dataset.step);
+    if (state.activeStep === 6) {
+      refreshProviderStatus();
+      return;
+    }
     persist("Opened");
   }));
   document.querySelectorAll("[data-field]").forEach((el) => {
@@ -2543,7 +2592,7 @@ async function buildTripPlanAction(name) {
       ui.planSection = "overview";
       ui.planAnnouncement = "Trip plan generated.";
       ui.toast = result.plan.generationMetadata.usesGenericDestinationProfile
-        ? "Starter trip plan generated. Add an OpenAI API key in Vercel for richer destination intelligence."
+        ? "Starter trip plan generated. Some destination intelligence is limited right now."
         : "Trip plan generated.";
       requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
     } else {
@@ -2574,7 +2623,7 @@ async function ensureDestinationIntelligence() {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      if (error.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Destination planning providers are not configured yet. Add place and route providers in Vercel, then retry.");
+      if (error.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session.");
       throw new Error(error.error || "Destination research failed. Please retry.");
     }
     const data = await response.json();
@@ -2738,7 +2787,17 @@ function action(name) {
     state.plan = regenerateMeals(state.plan);
     ui.planAnnouncement = "Meals regenerated while activities stayed in place.";
   }
-  if (name === "next") state.activeStep = Math.min(6, state.activeStep + 1);
+  if (name === "next") {
+    state.activeStep = Math.min(6, state.activeStep + 1);
+    if (state.activeStep === 6) {
+      ui.openRestrictionTravelerId = null;
+      ui.restrictionSearch = "";
+      ui.openExperienceCategory = null;
+      ui.experienceSearch = "";
+      refreshProviderStatus();
+      return;
+    }
+  }
   if (name === "prev") state.activeStep = Math.max(1, state.activeStep - 1);
   if (name === "next" || name === "prev") {
     ui.openRestrictionTravelerId = null;
@@ -2886,6 +2945,11 @@ function action(name) {
   if (name === "togglePlanningPrinciples") {
     ui.planningPrinciplesOpen = !ui.planningPrinciplesOpen;
     ui.planningPrinciplesSuppressHover = false;
+  }
+  if (name === "refreshProviderStatus") {
+    ui.toast = "Checking trip generation services...";
+    refreshProviderStatus();
+    return;
   }
   if (name === "saveExit") {
     saveExplicitDraft();

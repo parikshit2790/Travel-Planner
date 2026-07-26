@@ -15,7 +15,7 @@ Destination-specific places must come from retrieved provider data, curated data
 
 ## Environment
 
-Copy `.env.example` and configure provider variables in Vercel.
+Copy `.env.example` locally, then configure the same variables in Vercel for Preview and Production.
 
 ```bash
 PLACE_PROVIDER=mock
@@ -31,7 +31,40 @@ PROVIDER_TIMEOUT_MS=10000
 CACHE_TTL_SECONDS=86400
 ```
 
-Mock providers are for local development and deterministic tests. Public production worldwide claims require at least one real place-data provider and one real route-data provider. Do not put secret keys in public frontend variables.
+Supported provider adapters in this build:
+
+- `PLACE_PROVIDER=mock` for local deterministic destination/place data.
+- `ROUTE_PROVIDER=mock` for local deterministic route estimates.
+- `ROUTE_PROVIDER=approximate` for clearly labeled coordinate-style estimates.
+- Empty `WEATHER_PROVIDER` returns seasonal guidance only.
+- `AI_PROVIDER` and `AI_API_KEY`/`OPENAI_API_KEY` are reserved for future enrichment and are not required for current deterministic generation.
+
+Mock providers are for local development and deterministic tests. Public production worldwide claims require at least one real place-data provider adapter and one real route-data provider adapter. Do not put secret keys in public frontend variables.
+
+### Admin Setup
+
+1. For local development, create `website/.env.local` from `.env.example`.
+2. Use `PLACE_PROVIDER=mock` and `ROUTE_PROVIDER=mock` only for deterministic development and tests.
+3. Do not use `VITE_`, `NEXT_PUBLIC_`, or other client-exposed prefixes for provider keys.
+4. On Vercel, add provider variables under Project Settings -> Environment Variables.
+5. Set values separately for Production and Preview.
+6. Redeploy after changing environment variables; already-built deployments do not pick up new values.
+7. Keep API keys secret. No real keys belong in `.env.example`, README, frontend code, or committed files.
+8. When real place/route adapters are added, enable required provider billing, restrict keys to approved APIs/domains where supported, and use HTTPS endpoints with timeouts below the Vercel runtime limit.
+
+Expected development provider status:
+
+```json
+{
+  "available": true,
+  "status": "available",
+  "canGenerate": true,
+  "placeProvider": { "configured": true, "provider": "mock", "missingVariables": [], "status": "available" },
+  "routeProvider": { "configured": true, "provider": "mock", "missingVariables": [], "status": "available" }
+}
+```
+
+The public UI intentionally shows only a generic temporary-unavailable message when providers are missing. Exact missing variables are shown only in the development diagnostics panel.
 
 ## Server Routes
 
@@ -40,6 +73,7 @@ Mock providers are for local development and deterministic tests. Public product
 - `POST /api/destination-profile`
 - `POST /api/routes/estimate`
 - `POST /api/weather/summary`
+- `POST /api/providers/status`
 - `POST /api/trips/generate`
 - `POST /api/trips/regenerate-day`
 - `POST /api/trips/regenerate-meals`
@@ -79,10 +113,11 @@ Static local hosting does not run Vercel API functions. Use Vercel dev or deploy
 pnpm run typecheck
 pnpm run test
 pnpm run lint
+pnpm run test:providers
 pnpm run build
 ```
 
-Provider smoke tests should be added as `test:providers` once real provider credentials are configured. Do not run live-provider tests in CI without secrets.
+`test:providers` currently checks the provider contract with deterministic mock data. Expand it to live-provider smoke tests only after real adapters and credentials are available. Do not run live-provider tests in CI without secrets.
 
 ## Known Limitations
 

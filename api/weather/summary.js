@@ -23,5 +23,5 @@ export default async function handler(req, res) {
     });
     return;
   }
-  sendJson(res, 501, { error: `WEATHER_PROVIDER=${config.weatherProvider} is not implemented in this build.`, code: "PROVIDER_NOT_IMPLEMENTED" });
+  sendJson(res, 501, { error: "Live weather guidance is not available yet.", code: "PROVIDER_NOT_IMPLEMENTED" });
 }

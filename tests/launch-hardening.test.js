@@ -8,6 +8,7 @@ const manifest = fs.readFileSync("manifest.webmanifest", "utf8");
 const sw = fs.readFileSync("sw.js", "utf8");
 const build = fs.readFileSync("scripts/build.js", "utf8");
 const api = fs.readFileSync("api/destination-profile.js", "utf8");
+const providerStatusApi = fs.readFileSync("api/providers/status.js", "utf8");
 const robots = fs.readFileSync("robots.txt", "utf8");
 const sitemap = fs.readFileSync("sitemap.xml", "utf8");
 const vercel = fs.readFileSync("vercel.json", "utf8");
@@ -32,6 +33,9 @@ assert.ok(build.includes('cpSync("public"'));
 assert.ok(api.includes("validatePlanningProviders"));
 assert.ok(api.includes("PROVIDER_CONFIGURATION_REQUIRED"));
 assert.ok(api.includes("mockDestinationResearch"));
+assert.ok(!api.includes("details: errors"));
+assert.ok(providerStatusApi.includes("providerStatus"));
+assert.ok(providerStatusApi.includes("config.development"));
 
 assert.ok(app.includes("function renderStaticInfoPage"));
 assert.ok(app.includes("/privacy"));

@@ -5,7 +5,7 @@ import { mockLocationSearch } from "../lib/mock-provider.js";
 export default async function handler(req, res) {
   if (!requirePost(req, res)) return;
   const config = providerConfig();
-  if (config.production && validatePlanningProviders(config).some((error) => error.includes("PLACE_PROVIDER"))) {
+  if (config.production && validatePlanningProviders(config).some((error) => error.startsWith("Place provider:"))) {
     sendJson(res, 503, { error: "Location provider is not configured.", code: "PROVIDER_CONFIGURATION_REQUIRED" });
     return;
   }

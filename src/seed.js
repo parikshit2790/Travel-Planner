@@ -8,7 +8,8 @@ export const initialState = {
   profiles: [],
   preview: null,
   lastSaved: null,
-  savedTripsOpen: false
+  savedTripsOpen: false,
+  providerStatus: null
 };
 
 export function createSampleLosAngelesTrip(today = new Date()) {

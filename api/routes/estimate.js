@@ -5,7 +5,7 @@ import { mockRouteEstimate } from "../lib/mock-provider.js";
 export default async function handler(req, res) {
   if (!requirePost(req, res)) return;
   const config = providerConfig();
-  if (config.production && validatePlanningProviders(config).some((error) => error.includes("ROUTE_PROVIDER"))) {
+  if (config.production && validatePlanningProviders(config).some((error) => error.startsWith("Route provider:"))) {
     sendJson(res, 503, { error: "Route provider is not configured.", code: "PROVIDER_CONFIGURATION_REQUIRED" });
     return;
   }
