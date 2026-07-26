@@ -18,9 +18,10 @@ Destination-specific places must come from retrieved provider data, curated data
 Copy `.env.example` locally, then configure the same variables in Vercel for Preview and Production.
 
 ```bash
-PLACE_PROVIDER=mock
+PLACE_PROVIDER=openrouteservice
 PLACE_API_KEY=
-ROUTE_PROVIDER=mock
+OPENROUTESERVICE_API_KEY=
+ROUTE_PROVIDER=openrouteservice
 ROUTE_API_KEY=
 WEATHER_PROVIDER=
 WEATHER_API_KEY=
@@ -34,12 +35,29 @@ CACHE_TTL_SECONDS=86400
 Supported provider adapters in this build:
 
 - `PLACE_PROVIDER=mock` for local deterministic destination/place data.
+- `PLACE_PROVIDER=openrouteservice` for live location autocomplete, geocoding, destination resolution, and destination point-of-interest discovery.
 - `ROUTE_PROVIDER=mock` for local deterministic route estimates.
 - `ROUTE_PROVIDER=approximate` for clearly labeled coordinate-style estimates.
+- `ROUTE_PROVIDER=openrouteservice` for live driving and walking route duration and distance estimates.
 - Empty `WEATHER_PROVIDER` returns seasonal guidance only.
 - `AI_PROVIDER` and `AI_API_KEY`/`OPENAI_API_KEY` are reserved for future enrichment and are not required for current deterministic generation.
 
-Mock providers are for local development and deterministic tests. Public production worldwide claims require at least one real place-data provider adapter and one real route-data provider adapter. Do not put secret keys in public frontend variables.
+Mock providers are for local development and deterministic tests. Public production worldwide planning should use `openrouteservice` or another real provider adapter for both place and route data. Do not put secret keys in public frontend variables.
+
+### openrouteservice Setup
+
+Use these Vercel Environment Variables for live provider mode:
+
+```bash
+PLACE_PROVIDER=openrouteservice
+ROUTE_PROVIDER=openrouteservice
+OPENROUTESERVICE_API_KEY=<secret key>
+PROVIDER_TIMEOUT_MS=10000
+```
+
+`OPENROUTESERVICE_API_KEY` is the preferred key variable. `PLACE_API_KEY` and `ROUTE_API_KEY` remain accepted as backward-compatible generic key slots, but a single `OPENROUTESERVICE_API_KEY` is recommended so the same secret powers autocomplete, geocoding, POI research, and routing.
+
+Get the API key from the official openrouteservice dashboard at `https://openrouteservice.org/dev/`. Enable access for geocoding/autocomplete, POIs, and directions according to your openrouteservice account limits. After changing Vercel variables, redeploy the Production deployment.
 
 ### Admin Setup
 
@@ -51,6 +69,7 @@ Mock providers are for local development and deterministic tests. Public product
 6. Redeploy after changing environment variables; already-built deployments do not pick up new values.
 7. Keep API keys secret. No real keys belong in `.env.example`, README, frontend code, or committed files.
 8. When real place/route adapters are added, enable required provider billing, restrict keys to approved APIs/domains where supported, and use HTTPS endpoints with timeouts below the Vercel runtime limit.
+9. For RouteMosaic production, verify `/api/provider-health` after redeploying. It should return `success: true`, `data.mode: "live"`, `data.canGenerate: true`, `data.placeProviderAvailable: true`, `data.destinationResearchAvailable: true`, and `data.routeProviderAvailable: true`.
 
 Expected development provider status:
 
@@ -70,7 +89,7 @@ The public UI intentionally shows only a generic temporary-unavailable message w
 
 - `POST /api/planner` with an `action` body for destination research, trip generation, regeneration, alternatives, route estimates, and weather summaries.
 - `POST /api/locations` with an `action` body for location search and future location-resolution actions.
-- `POST /api/provider-health` with an `action` body for public provider availability and development-only diagnostics.
+- `GET /api/provider-health` for safe browser checks and `POST /api/provider-health` with an `action` body for public provider availability and development-only diagnostics.
 
 The SPA rewrite excludes `/api/*` so Vercel functions are not intercepted by `index.html`.
 
@@ -111,13 +130,13 @@ pnpm run build
 pnpm run verify:vercel-functions
 ```
 
-`test:providers` currently checks the provider contract with deterministic mock data. Expand it to live-provider smoke tests only after real adapters and credentials are available. Do not run live-provider tests in CI without secrets.
+`test:providers` checks the mock contract and the openrouteservice adapter contract with mocked network responses for Raleigh, Austin, Houston, Charlotte, San Jose, New York, Paris, Tokyo, and Glacier National Park. Do not run live-provider smoke tests in CI without secrets.
 
 `verify:vercel-functions` reads `.vercel/output/functions` when Vercel output exists. Otherwise it counts deployable source route files under `api/`, `pages/api/`, `src/api/`, `app/api/`, and `functions/`, excluding shared `lib` folders. The limit is 10 functions.
 
 ## Known Limitations
 
-- Current real-provider adapters are scaffolded behind server routes; mock mode is deterministic and not suitable for public worldwide claims.
+- openrouteservice provides live provider data for location search, POI discovery, and driving/walking route estimates, but RouteMosaic still labels opening hours, availability, prices, accessibility, dietary safety, traffic, and weather as items to verify directly before travel.
 - Weather returns seasonal guidance unless a weather provider is configured.
 - Route estimates use configured provider data or explicitly labeled fallback estimates.
 - Specific restaurants are included only when retrieved from a configured place provider.

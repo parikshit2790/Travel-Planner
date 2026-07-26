@@ -11,6 +11,7 @@ export function handleProviderHealthAction(action) {
     canGenerate: status.canGenerate,
     mode: status.mode,
     placeProviderAvailable: status.placeProviderAvailable,
+    destinationResearchAvailable: status.destinationResearchAvailable,
     routeProviderAvailable: status.routeProviderAvailable,
     weatherProviderAvailable: status.weatherProviderAvailable,
     publicMessage: status.publicMessage,

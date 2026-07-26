@@ -1,6 +1,7 @@
 import { providerConfig, validatePlanningProviders } from "./env.js";
 import { withTimeout } from "./http.js";
 import { mockLocationSearch } from "./mock-provider.js";
+import { openRouteServiceLocationSearch } from "./openrouteservice-provider.js";
 
 export async function handleLocationAction(action, payload = {}) {
   switch (action) {
@@ -10,7 +11,7 @@ export async function handleLocationAction(action, payload = {}) {
     case "resolve":
     case "clarify":
     case "place-details":
-      return actionError(501, "LOCATION_ACTION_NOT_IMPLEMENTED", "This location action is not available yet.");
+      return handleLocationResolve(payload);
     default:
       return actionError(400, "UNKNOWN_ACTION", "Unknown location action.");
   }
@@ -35,7 +36,22 @@ async function handleLocationSearch({ query } = {}) {
 
 async function searchLocations(query, config) {
   if (config.placeProvider === "mock") return mockLocationSearch(query);
+  if (config.placeProvider === "openrouteservice") return openRouteServiceLocationSearch(query, config);
   throw new Error("Place provider is not implemented in this build.");
+}
+
+async function handleLocationResolve(payload = {}) {
+  const query = payload.query || payload.text || payload.location || payload.input;
+  const result = await handleLocationSearch({ query });
+  if (result.status !== 200) return result;
+  return {
+    status: 200,
+    body: {
+      location: result.body.results[0] || null,
+      results: result.body.results,
+      ambiguous: result.body.ambiguous
+    }
+  };
 }
 
 function publicLocationResult(result) {

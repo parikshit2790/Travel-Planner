@@ -6,6 +6,7 @@ export function providerConfig() {
     development,
     placeProvider: process.env.PLACE_PROVIDER || (production ? "" : "mock"),
     placeApiKey: process.env.PLACE_API_KEY || "",
+    openRouteServiceApiKey: process.env.OPENROUTESERVICE_API_KEY || "",
     routeProvider: process.env.ROUTE_PROVIDER || (production ? "" : "mock"),
     routeApiKey: process.env.ROUTE_API_KEY || "",
     weatherProvider: process.env.WEATHER_PROVIDER || "",
@@ -27,14 +28,17 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
   const routeMissing = [];
   const weatherMissing = [];
   const aiMissing = [];
+  const openRouteServiceKey = config.openRouteServiceApiKey || config.placeApiKey || config.routeApiKey;
   if (!config.placeProvider) placeMissing.push("PLACE_PROVIDER");
   if (!config.routeProvider) routeMissing.push("ROUTE_PROVIDER");
+  if (config.placeProvider === "openrouteservice" && !openRouteServiceKey) placeMissing.push("OPENROUTESERVICE_API_KEY");
+  if (config.routeProvider === "openrouteservice" && !openRouteServiceKey) routeMissing.push("OPENROUTESERVICE_API_KEY");
   if (config.placeProvider === "opentripmap" && !config.placeApiKey) placeMissing.push("PLACE_API_KEY");
   if (config.routeProvider === "google" && !config.routeApiKey) routeMissing.push("ROUTE_API_KEY");
   if (config.weatherProvider && !config.weatherApiKey && !["open-meteo", "mock"].includes(config.weatherProvider)) weatherMissing.push("WEATHER_API_KEY");
   if (config.aiProvider && !config.aiApiKey) aiMissing.push("AI_API_KEY");
-  const placeImplemented = ["mock"].includes(config.placeProvider);
-  const routeImplemented = ["mock", "approximate"].includes(config.routeProvider);
+  const placeImplemented = ["mock", "openrouteservice"].includes(config.placeProvider);
+  const routeImplemented = ["mock", "approximate", "openrouteservice"].includes(config.routeProvider);
   const weatherImplemented = !config.weatherProvider;
   const aiImplemented = !config.aiProvider;
   if (config.placeProvider && !placeImplemented) placeMissing.push(`Adapter not implemented: ${config.placeProvider}`);
@@ -50,6 +54,7 @@ export function providerStatus(config = providerConfig(), { includeDiagnostics =
     canGenerate,
     mode,
     placeProviderAvailable: placeMissing.length === 0,
+    destinationResearchAvailable: placeMissing.length === 0,
     routeProviderAvailable: routeMissing.length === 0,
     weatherProviderAvailable: Boolean(config.weatherProvider) && weatherMissing.length === 0,
     placeProvider: safeProviderStatus(config.placeProvider, placeMissing, canGenerate),

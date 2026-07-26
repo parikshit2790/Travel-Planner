@@ -45,7 +45,7 @@ const vercel = fs.readFileSync("vercel.json", "utf8");
 assert.ok(vercel.includes("api/.*"));
 
 const envExample = fs.readFileSync(".env.example", "utf8");
-["PLACE_PROVIDER", "PLACE_API_KEY", "ROUTE_PROVIDER", "ROUTE_API_KEY", "WEATHER_PROVIDER", "AI_PROVIDER", "PROVIDER_TIMEOUT_MS", "CACHE_TTL_SECONDS"].forEach((key) => assert.ok(envExample.includes(key)));
+["PLACE_PROVIDER", "PLACE_API_KEY", "OPENROUTESERVICE_API_KEY", "ROUTE_PROVIDER", "ROUTE_API_KEY", "WEATHER_PROVIDER", "AI_PROVIDER", "PROVIDER_TIMEOUT_MS", "CACHE_TTL_SECONDS"].forEach((key) => assert.ok(envExample.includes(key)));
 
 const providerErrors = validatePlanningProviders({ production: true, placeProvider: "", routeProvider: "", placeApiKey: "", routeApiKey: "" });
 assert.ok(providerErrors.some((error) => error.includes("PLACE_PROVIDER")));
@@ -57,6 +57,7 @@ assert.equal(healthyStatus.mode, "mock");
 assert.equal(healthyStatus.placeProvider.configured, true);
 assert.equal(healthyStatus.routeProvider.configured, true);
 assert.equal(healthyStatus.placeProviderAvailable, true);
+assert.equal(healthyStatus.destinationResearchAvailable, true);
 assert.equal(healthyStatus.routeProviderAvailable, true);
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-place"));
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-route"));
@@ -71,9 +72,12 @@ assert.equal(routeMissingStatus.canGenerate, false);
 assert.equal(routeMissingStatus.mode, "unavailable");
 assert.equal(routeMissingStatus.placeProvider.configured, true);
 
-const liveStatus = providerStatus({ production: true, development: false, placeProvider: "live-provider", routeProvider: "live-route", placeApiKey: "", routeApiKey: "" });
-assert.equal(liveStatus.mode, "unavailable");
+const liveStatus = providerStatus({ production: true, development: false, placeProvider: "openrouteservice", routeProvider: "openrouteservice", openRouteServiceApiKey: "secret-ors", placeApiKey: "", routeApiKey: "" });
+assert.equal(liveStatus.mode, "live");
+assert.equal(liveStatus.canGenerate, true);
+assert.equal(liveStatus.destinationResearchAvailable, true);
 assert.notEqual(liveStatus.mode, healthyStatus.mode);
+assert.ok(!JSON.stringify(liveStatus).includes("secret-ors"));
 
 const optionalMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", weatherProvider: "tomorrow", weatherApiKey: "", aiProvider: "openai", aiApiKey: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(optionalMissingStatus.canGenerate, true);

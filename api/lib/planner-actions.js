@@ -2,6 +2,7 @@ import { registerGeneratedDestinationProfile } from "../../src/destination-data.
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js?v=53";
 import { providerConfig, validatePlanningProviders } from "./env.js";
 import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
+import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
 import { withTimeout } from "./http.js";
 
 export async function handlePlannerAction(action, payload = {}) {
@@ -141,11 +142,13 @@ function handleWeatherSummary({ destination = "", startDate = "", endDate = "" }
 
 async function researchDestination(destination, trip, config) {
   if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
+  if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
   throw new Error("Place provider is not implemented in this build.");
 }
 
 async function estimateRoute(origin, destination, mode, config) {
   if (config.routeProvider === "mock") return mockRouteEstimate(origin, destination, mode);
+  if (config.routeProvider === "openrouteservice") return openRouteServiceRouteEstimate(origin, destination, mode, config);
   if (config.routeProvider === "approximate") {
     const estimate = mockRouteEstimate(origin, destination, mode);
     return { ...estimate, provider: "coordinate-approximation", disclaimer: "Coordinate-based approximation, not live route data." };
