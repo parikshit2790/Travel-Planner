@@ -1,5 +1,5 @@
-import { registerGeneratedDestinationProfile } from "../../src/destination-data.js?v=53";
-import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js?v=53";
+import { registerGeneratedDestinationProfile } from "../../src/destination-data.js";
+import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
 import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";

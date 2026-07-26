@@ -1,4 +1,4 @@
-import { routeMosaicApi } from "./api-client.js?v=53";
+import { routeMosaicApi } from "./api-client.js";
 
 export const LOCATION_MIN_QUERY_LENGTH = 2;
 export const LOCATION_SEARCH_DEBOUNCE_MS = 300;

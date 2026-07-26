@@ -5,8 +5,8 @@ import {
   getTripIssues,
   travelerTotal,
   uid
-} from "./domain.js?v=53";
-import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=53";
+} from "./domain.js";
+import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 

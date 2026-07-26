@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=53";
-import { routeMosaicApi } from "./api-client.js?v=53";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js";
+import { routeMosaicApi } from "./api-client.js";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -34,8 +34,8 @@ import {
   travelerRestrictionOptions,
   uid,
   validateBasics
-} from "./domain.js?v=53";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=53";
+} from "./domain.js";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -49,8 +49,8 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js?v=53";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js?v=53";
+} from "./planner.js";
+import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();

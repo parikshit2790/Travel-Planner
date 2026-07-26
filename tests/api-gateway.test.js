@@ -12,6 +12,7 @@ assert.deepEqual(apiRouteFiles, ["locations.js", "planner.js", "provider-health.
 const actionResponse = fs.readFileSync("api/lib/action-response.js", "utf8");
 assert.ok(actionResponse.includes("METHOD_NOT_ALLOWED"));
 assert.ok(actionResponse.includes("ACTION_REQUIRED") || fs.readFileSync("api/planner.js", "utf8").includes("ACTION_REQUIRED"));
+assert.equal(/\.\.\/\.\.\/src\/[^"']+\?v=/.test(fs.readFileSync("api/lib/planner-actions.js", "utf8")), false);
 
 const unknownPlanner = await handlePlannerAction("not-real", {});
 assert.equal(unknownPlanner.status, 400);

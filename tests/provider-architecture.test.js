@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
-import { registerGeneratedDestinationProfile } from "../src/destination-data.js?v=53";
-import { generateTripPlan } from "../src/planner.js?v=53";
+import { registerGeneratedDestinationProfile } from "../src/destination-data.js";
+import { generateTripPlan } from "../src/planner.js";
 import { mockDestinationResearch } from "../api/lib/mock-provider.js";
 import { providerStatus, validatePlanningProviders } from "../api/lib/env.js";
 
