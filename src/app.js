@@ -63,7 +63,7 @@ import {
 
 const TRIP_DESCRIPTION_PLACEHOLDER = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
 const TRIP_DESCRIPTION_SAMPLE = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
-const TRIP_DESCRIPTION_HELPER = "Describe what would make this trip feel successful—must-do places, nearby cities you are considering, pace, special occasions, food priorities, and anything you want us to avoid.";
+const TRIP_DESCRIPTION_HELPER = "Tell us what would make this trip feel successful—must-dos, nearby cities, pace, food priorities, and anything to avoid.";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -98,8 +98,7 @@ let ui = {
   locationHighlight: { from: -1, destination: -1, destinationRegions: -1 },
   locationRequestId: { from: 0, destination: 0, destinationRegions: 0 },
   touchedBasicsFields: new Set(),
-  basicsSubmitAttempted: false,
-  showTripDescriptionExample: false
+  basicsSubmitAttempted: false
 };
 
 let globalListenersBound = false;
@@ -915,6 +914,8 @@ function iconSvg(name) {
   const icons = {
     travelers: `<svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="4"/><circle cx="17" cy="10" r="3"/><path d="M2.5 21c.8-4.4 3-7 6.5-7s5.7 2.6 6.5 7"/><path d="M14.5 20c.6-3.2 2.3-5 4.7-5 1.4 0 2.6.6 3.5 1.9"/></svg>`,
     calendar: `<svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2z"/><path d="M8 2v5M16 2v5M3 10h18M7 14h3M14 14h3M7 18h3M14 18h3"/></svg>`,
+    route: `<svg viewBox="0 0 24 24"><path d="M5 6c4 0 4 5 8 5s4 7 8 7"/><circle cx="5" cy="6" r="2.5"/><path d="M19 15l2 3-3 2"/></svg>`,
+    sparkle: `<svg viewBox="0 0 24 24"><path d="M12 3l1.6 5.2L19 10l-5.4 1.8L12 17l-1.6-5.2L5 10l5.4-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 4l.7 1.8L8 6.5l-2.3.7L5 9l-.7-1.8L2 6.5l2.3-.7z"/></svg>`,
     warning: `<svg viewBox="0 0 24 24"><path d="M12 3 22 21H2z"/><path d="M12 9v5M12 18h.01"/></svg>`,
     heart: `<svg viewBox="0 0 24 24"><path d="M20.8 5.7a5.2 5.2 0 0 0-7.4 0L12 7.1l-1.4-1.4a5.2 5.2 0 1 0-7.4 7.4L12 22l8.8-8.9a5.2 5.2 0 0 0 0-7.4z"/></svg>`,
     mapPin: `<svg viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13A7 7 0 0 0 5 9c0 6.9 7 13 7 13z"/><circle cx="12" cy="9" r="2.5"/></svg>`,
@@ -949,14 +950,43 @@ function iconSvg(name) {
 }
 
 function tripBasicsChrome(trip, travelerCount, issueCount) {
-  const hasContext = String(trip.from || "").trim() && String(trip.destination || "").trim();
-  return `${hasContext ? tripContextBar(trip, travelerCount, issueCount) : ""}
-  <section class="status-grid basics-status">
-    ${metric("Travelers", travelerCount, trip.groupType)}
-    ${metric("Dates", trip.days || "Not set", trip.startDate && trip.endDate ? formatShortDateRange(trip.startDate, trip.endDate) : tripDateSummary(trip))}
-    ${metric("Issues", issueCount, issueCount === 1 ? "Travel note" : issueCount ? "Travel notes" : "No trip notes")}
-    ${metric("Preferences", countUniqueActivePreferences(trip), "Preferences selected")}
+  const facts = tripSnapshotFacts(trip, issueCount);
+  return `<section class="trip-snapshot ${facts.some((item) => item.real) ? "has-facts" : "empty"}" aria-label="Trip Snapshot">
+    <div><p class="eyebrow">Trip Snapshot</p><strong>${facts.some((item) => item.real) ? "Your trip is taking shape" : "Start planning in three simple moves"}</strong></div>
+    <div class="trip-snapshot-items">${facts.map((item) => snapshotItem(item)).join("")}</div>
   </section>`;
+}
+
+function tripSnapshotFacts(trip, issueCount) {
+  const facts = [];
+  const origin = String(trip.from || "").trim();
+  const destination = String(trip.destination || "").trim();
+  if (origin && destination) {
+    facts.push({ icon: "mapPin", label: "Route", value: `${normalizePlaceName(trip.fromDisplay || trip.from)} → ${normalizePlaceName(trip.destinationDisplay || trip.destination)}`, real: true });
+  } else if (origin || destination) {
+    facts.push({ icon: "mapPin", label: origin ? "Origin added" : "Destination added", value: normalizePlaceName(origin || destination), real: true });
+  }
+  if (trip.startDate && trip.endDate && Number(trip.days)) {
+    facts.push({ icon: "calendar", label: "Dates", value: `${formatShortDateRange(trip.startDate, trip.endDate)} · ${trip.days} day${Number(trip.days) === 1 ? "" : "s"}`, real: true });
+  }
+  const structure = tripStructureOptions.find((option) => option.value === trip.routePreferences?.tripStructure);
+  if (structure && facts.length) facts.push({ icon: "route", label: "Trip shape", value: structure.label, real: true });
+  const preferenceCount = countUniqueActivePreferences(trip);
+  if (preferenceCount > 0) facts.push({ icon: "heart", label: "Preferences", value: `${preferenceCount} selected`, real: true });
+  if (issueCount > 0) facts.push({ icon: "warning", label: "Needs attention", value: `${issueCount} issue${issueCount === 1 ? "" : "s"}`, real: true });
+  if (facts.length) return facts.slice(0, 4);
+  return [
+    { icon: "mapPin", label: "Start with where you're going", value: "Origin and destination", real: false },
+    { icon: "route", label: "Choose your trip shape", value: "One city, day trips, or multi-city", real: false },
+    { icon: "heart", label: "Add what matters most", value: "Must-dos, pace, food, and avoidances", real: false }
+  ];
+}
+
+function snapshotItem(item) {
+  return `<article class="snapshot-item ${item.real ? "real" : "empty"}">
+    <span aria-hidden="true">${iconSvg(item.icon)}</span>
+    <div><strong>${esc(item.label)}</strong><small>${esc(item.value)}</small></div>
+  </article>`;
 }
 
 function wizardChrome(trip, travelerCount, issueCount) {
@@ -997,7 +1027,7 @@ function allIssueMessages() {
 function visibleReviewIssues() {
   if (state.activeStep !== 1) return reviewIssues();
   const visibleBasics = new Set(visibleTripBasicsIssues().map((issue) => issue.issue));
-  return reviewIssues().filter((issue) => issue.owningStep || visibleBasics.has(issue.issue));
+  return reviewIssues().filter((issue) => visibleBasics.has(issue.issue));
 }
 
 function visibleTripBasicsIssues() {
@@ -1082,7 +1112,7 @@ function basicsStep() {
     ${routeSummary(trip)}
     ${Number(trip.days) ? `<p class="derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
     ${tripDescriptionField(trip)}
-    <div class="button-row"><button class="secondary-action" data-action="viewTripDescriptionExample">View Example</button><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
+    <div class="button-row"><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
     ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
     ${tripAdvisoryPanel(issues)}
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
@@ -1096,16 +1126,18 @@ function tripStructureSection(trip) {
   const showDayTripLimits = ["one-base-day-trips", "recommend"].includes(prefs.tripStructure);
   const showMultiCityLimits = ["multi-city", "recommend"].includes(prefs.tripStructure);
   const showArrivalLogistics = /fly|train|bus/i.test(trip.transportation || "");
+  const routeDetailsOpen = Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || prefs.arrivalPoint || prefs.departurePoint || ui.basicsSubmitAttempted);
   return `<section class="trip-structure-section full">
     <div class="section-kicker"><span>Trip Structure</span><strong>Choose the route shape before daily scheduling.</strong></div>
     <div class="trip-structure-options">
-      ${tripStructureOptions.map((option) => `<label class="trip-structure-card ${prefs.tripStructure === option.value ? "selected" : ""}">
+      ${tripStructureOptions.map((option) => `<label class="trip-structure-card structure-${esc(option.value)} ${prefs.tripStructure === option.value ? "selected" : ""}">
         <input type="radio" name="trip-structure" data-field="trip.routePreferences.tripStructure" value="${esc(option.value)}" ${prefs.tripStructure === option.value ? "checked" : ""}>
+        <i aria-hidden="true">${iconSvg(tripStructureIcon(option.value))}</i>
         <span><strong>${esc(option.label)}</strong><small>${esc(option.helper)}</small></span>
       </label>`).join("")}
     </div>
-    <details class="progressive-fields" ${prefs.placesInMind || prefs.mustDoPlaces || showMultiCityLimits ? "open" : ""}>
-      <summary>Route-shaping details</summary>
+    <details class="progressive-fields route-shaping-fields" ${routeDetailsOpen ? "open" : ""}>
+      <summary><span>Route-shaping details</span><small>${esc(routePreferenceSummary(prefs))}</small></summary>
       <div class="form-grid route-detail-grid">
         ${fieldShell("Places Already in Mind", input("trip.routePreferences.placesInMind", prefs.placesInMind, "Places Already in Mind"), "Cities, neighborhoods, parks, or nearby areas you are already considering.")}
         ${fieldShell("Must-do Places", input("trip.routePreferences.mustDoPlaces", prefs.mustDoPlaces, "Must-do Places"), "RouteMosaic should protect these before lower-priority ideas.")}
@@ -1123,8 +1155,8 @@ function tripStructureSection(trip) {
         ${fieldShell("Existing Reservations", textarea("trip.routePreferences.existingReservations", prefs.existingReservations, "Existing Reservations"), "Booked meals, tours, hotels, shows, ferries, or tickets.")}
       </div>
     </details>
-    <details class="progressive-fields">
-      <summary>Comfort and preparation preferences</summary>
+    <details class="progressive-fields comfort-prep-fields">
+      <summary><span>Comfort and preparation preferences</span><small>${esc(comfortPreferenceSummary(prefs))}</small></summary>
       <div class="form-grid route-detail-grid">
         ${fieldShell("Need Recovery Time After Arrival", select("trip.routePreferences.recoveryAfterArrival", prefs.recoveryAfterArrival, ["Yes", "No", "Maybe"], "Need Recovery Time After Arrival"), "Keeps arrival day realistic.")}
         ${fieldShell("Night-driving Comfort", select("trip.routePreferences.nightDrivingComfort", prefs.nightDrivingComfort, ["Comfortable", "Prefer to avoid", "Avoid"], "Night-driving Comfort"), "Used for transfer and evening return planning.")}
@@ -1139,6 +1171,23 @@ function tripStructureSection(trip) {
   </section>`;
 }
 
+function tripStructureIcon(value) {
+  return {
+    "one-city": "city",
+    "one-base-day-trips": "bed",
+    "multi-city": "route",
+    recommend: "sparkle"
+  }[value] || "route";
+}
+
+function routePreferenceSummary(prefs) {
+  return `Nearby cities ${String(prefs.openToNearbyCities || "Yes").toLowerCase()} · ${prefs.maxHotelChanges || "1"} hotel change · ${prefs.maxTransferDriveTime || "3 hours"} transfer limit`;
+}
+
+function comfortPreferenceSummary(prefs) {
+  return `${prefs.nightDrivingComfort || "Prefer to avoid"} night driving · ${prefs.earlyStarts || "Open if worth it"} early starts · offline maps ${String(prefs.offlineMaps || "Yes").toLowerCase()}`;
+}
+
 function tripDescriptionField(trip) {
   const sampleAdded = String(trip.description || "") === TRIP_DESCRIPTION_SAMPLE;
   return `<div class="field-shell full trip-description-field">
@@ -1146,9 +1195,8 @@ function tripDescriptionField(trip) {
     <textarea id="trip-description" data-field="trip.description" aria-describedby="trip-description-helper" placeholder="${esc(TRIP_DESCRIPTION_PLACEHOLDER)}">${esc(trip.description || "")}</textarea>
     <div class="trip-description-help-row">
       <small id="trip-description-helper" class="field-helper">${esc(TRIP_DESCRIPTION_HELPER)}</small>
-      <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use Sample Description"}</button>
+      <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use sample description"}</button>
     </div>
-    ${ui.showTripDescriptionExample ? `<div class="description-example-panel"><strong>Example</strong><p>${esc(TRIP_DESCRIPTION_PLACEHOLDER)}</p></div>` : ""}
   </div>`;
 }
 
@@ -2091,6 +2139,7 @@ function providerDiagnosticsPanel() {
 
 function quickInterpretTable() {
   const interpreted = state.trip.interpretedSuggestions || [];
+  if (!interpreted.length) return "";
   const selectedCount = interpreted.filter((pref) => pref.include && !pref.applied).length;
   return `<section class="panel secondary"><div class="panel-head"><div><p class="eyebrow">Original Request</p><h2>Interpreted Preferences</h2></div><button data-action="applyInterpretation" ${selectedCount ? "" : "disabled"}>Apply Selected Preferences</button></div>
     <p class="muted">${esc(state.trip.originalText || state.trip.description || "Add a trip description, then interpret it.")}</p>
@@ -2916,10 +2965,6 @@ function action(name) {
     state.trip.originalText = TRIP_DESCRIPTION_SAMPLE;
     ui.interpretationError = "";
     ui.toast = "Sample description added.";
-  }
-  if (name === "viewTripDescriptionExample") {
-    ui.showTripDescriptionExample = !ui.showTripDescriptionExample;
-    ui.toast = ui.showTripDescriptionExample ? "Trip description example shown." : "";
   }
   if (name === "toggleSavedTrips") state.savedTripsOpen = !state.savedTripsOpen;
   if (name.startsWith("openSavedTrip:")) {

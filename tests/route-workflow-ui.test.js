@@ -21,9 +21,16 @@ assert.ok(domain.includes("approvedTripShape"));
 assert.ok(domain.includes("routeOptions"));
 
 assert.ok(css.includes(".trip-structure-options"));
+assert.ok(css.includes(".structure-one-city"));
+assert.ok(css.includes(".structure-one-base-day-trips"));
+assert.ok(css.includes(".structure-multi-city"));
+assert.ok(css.includes(".structure-recommend"));
+assert.ok(css.includes(".route-shaping-fields"));
+assert.ok(css.includes(".comfort-prep-fields"));
 assert.ok(css.includes(".route-option-grid"));
 assert.ok(css.includes(".approved-route-preview"));
 assert.ok(css.includes(".route-action-strip"));
+assert.ok(css.includes(".trip-structure-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }"), "Tablet layout should use two-column route controls");
 assert.ok(css.includes(".trip-structure-options, .route-detail-grid, .route-option-grid { grid-template-columns: 1fr; }"), "Mobile layout should stack route controls");
 
 console.log("Route workflow UI tests passed");
