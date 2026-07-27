@@ -938,6 +938,7 @@ function iconSvg(name) {
     accessibility: `<svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2"/><path d="M12 7v6M7 9h10M9 21l3-8 3 8M5 21h14"/></svg>`,
     clock: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>`,
     car: `<svg viewBox="0 0 24 24"><path d="M5 16h14M7 16v3M17 16v3M6 16l2-6h8l2 6M8 10l1-3h6l1 3"/><circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/></svg>`,
+    briefcase: `<svg viewBox="0 0 24 24"><path d="M6 8V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v2"/><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8v12M15 8v12M3 13h18"/></svg>`,
     bed: `<svg viewBox="0 0 24 24"><path d="M4 5v14M4 12h16v7M8 12V8h5a3 3 0 0 1 3 3v1"/></svg>`,
     dollar: `<svg viewBox="0 0 24 24"><path d="M12 3v18M17 7.5c-1-1-2.4-1.5-4.2-1.5-2.2 0-3.8 1-3.8 2.7 0 1.8 1.7 2.4 4.1 3 2.5.6 4.2 1.2 4.2 3.3 0 1.8-1.7 3-4.3 3-1.9 0-3.6-.6-4.9-1.8"/></svg>`,
     sun: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>`,
@@ -1096,27 +1097,35 @@ function basicsStep() {
   const issues = visibleTripBasicsIssues();
   const blocking = issues.some((issue) => issue.blocking);
   const status = stepStatus(trip, issues);
-  return `<section class="panel trip-basics-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 1</p><h2>Trip Basics</h2></div>${badge(status)}</div>
+  return `<div class="trip-basics-experience">
+    <section class="trip-basics-status-strip">
+      <div><p class="eyebrow">Step 1</p><h2>Trip Basics</h2></div>${badge(status)}
+    </section>
     ${sampleTripPanel(trip)}
-    <div class="form-grid basics-grid">
-      ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
-      ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
-      ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number"), "Inclusive trip length.")}
-      ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
-      ${fieldShell("Start Date", input("trip.startDate", trip.startDate, "Start Date", "date"), "First travel day.")}
-      ${fieldShell("End Date", input("trip.endDate", trip.endDate, "End Date", "date"), "Calculated from start date and trip length.")}
-    </div>
-    ${destinationRegionsField(trip)}
+    <section class="trip-essentials-section step-1-zone" aria-label="Trip Essentials">
+      <div class="zone-head"><span aria-hidden="true">${iconSvg("mapPin")}</span><div><p class="eyebrow">Trip Essentials</p><h2>Tell us where and when.</h2></div></div>
+      <div class="form-grid basics-grid">
+        ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
+        ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
+        ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number"), "Inclusive trip length.")}
+        ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
+        ${fieldShell("Start Date", input("trip.startDate", trip.startDate, "Start Date", "date"), "First travel day.")}
+        ${fieldShell("End Date", input("trip.endDate", trip.endDate, "End Date", "date"), "Calculated from start date and trip length.")}
+      </div>
+      ${destinationRegionsField(trip)}
+    </section>
     ${tripStructureSection(trip)}
     ${routeSummary(trip)}
-    ${Number(trip.days) ? `<p class="derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
-    ${tripDescriptionField(trip)}
-    <div class="button-row"><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
-    ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
+    ${Number(trip.days) ? `<p class="derived-summary basics-derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
+    <section class="trip-intent-section step-1-zone" aria-label="Trip Intent">
+      <div class="zone-head"><span aria-hidden="true">${iconSvg("sparkle")}</span><div><p class="eyebrow">Trip Intent</p><h2>Tell us what would make this trip feel right.</h2></div></div>
+      ${tripDescriptionField(trip)}
+      <div class="button-row trip-intent-actions"><button class="secondary-action interpret-action" data-action="interpretText">${iconSvg("sparkle")}<span>Interpret My Trip</span></button></div>
+      ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
+    </section>
     ${tripAdvisoryPanel(issues)}
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
-  </section>
+  </div>
   ${quickInterpretTable()}`;
 }
 
@@ -1128,7 +1137,7 @@ function tripStructureSection(trip) {
   const showArrivalLogistics = /fly|train|bus/i.test(trip.transportation || "");
   const routeDetailsOpen = Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || prefs.arrivalPoint || prefs.departurePoint || ui.basicsSubmitAttempted);
   return `<section class="trip-structure-section full">
-    <div class="section-kicker"><span>Trip Structure</span><strong>Choose the route shape before daily scheduling.</strong></div>
+    <div class="section-kicker"><span>Choose your trip shape</span><strong>Decide how many bases and how much movement feels right.</strong></div>
     <div class="trip-structure-options">
       ${tripStructureOptions.map((option) => `<label class="trip-structure-card structure-${esc(option.value)} ${prefs.tripStructure === option.value ? "selected" : ""}">
         <input type="radio" name="trip-structure" data-field="trip.routePreferences.tripStructure" value="${esc(option.value)}" ${prefs.tripStructure === option.value ? "checked" : ""}>
@@ -1137,7 +1146,7 @@ function tripStructureSection(trip) {
       </label>`).join("")}
     </div>
     <details class="progressive-fields route-shaping-fields" ${routeDetailsOpen ? "open" : ""}>
-      <summary><span>Route-shaping details</span><small>${esc(routePreferenceSummary(prefs))}</small></summary>
+      <summary><span><i aria-hidden="true">${iconSvg("route")}</i>Route-shaping details</span>${preferenceChips(routePreferenceSummary(prefs))}</summary>
       <div class="form-grid route-detail-grid">
         ${fieldShell("Places Already in Mind", input("trip.routePreferences.placesInMind", prefs.placesInMind, "Places Already in Mind"), "Cities, neighborhoods, parks, or nearby areas you are already considering.")}
         ${fieldShell("Must-do Places", input("trip.routePreferences.mustDoPlaces", prefs.mustDoPlaces, "Must-do Places"), "RouteMosaic should protect these before lower-priority ideas.")}
@@ -1156,7 +1165,7 @@ function tripStructureSection(trip) {
       </div>
     </details>
     <details class="progressive-fields comfort-prep-fields">
-      <summary><span>Comfort and preparation preferences</span><small>${esc(comfortPreferenceSummary(prefs))}</small></summary>
+      <summary><span><i aria-hidden="true">${iconSvg("moon")}</i>Comfort and preparation preferences</span>${preferenceChips(comfortPreferenceSummary(prefs))}</summary>
       <div class="form-grid route-detail-grid">
         ${fieldShell("Need Recovery Time After Arrival", select("trip.routePreferences.recoveryAfterArrival", prefs.recoveryAfterArrival, ["Yes", "No", "Maybe"], "Need Recovery Time After Arrival"), "Keeps arrival day realistic.")}
         ${fieldShell("Night-driving Comfort", select("trip.routePreferences.nightDrivingComfort", prefs.nightDrivingComfort, ["Comfortable", "Prefer to avoid", "Avoid"], "Night-driving Comfort"), "Used for transfer and evening return planning.")}
@@ -1181,11 +1190,15 @@ function tripStructureIcon(value) {
 }
 
 function routePreferenceSummary(prefs) {
-  return `Nearby cities ${String(prefs.openToNearbyCities || "Yes").toLowerCase()} · ${prefs.maxHotelChanges || "1"} hotel change · ${prefs.maxTransferDriveTime || "3 hours"} transfer limit`;
+  return [`Nearby cities ${String(prefs.openToNearbyCities || "Yes").toLowerCase()}`, `${prefs.maxHotelChanges || "1"} hotel change`, `${prefs.maxTransferDriveTime || "3 hours"} transfer limit`];
 }
 
 function comfortPreferenceSummary(prefs) {
-  return `${prefs.nightDrivingComfort || "Prefer to avoid"} night driving · ${prefs.earlyStarts || "Open if worth it"} early starts · offline maps ${String(prefs.offlineMaps || "Yes").toLowerCase()}`;
+  return [`${prefs.nightDrivingComfort || "Prefer to avoid"} night driving`, `${prefs.earlyStarts || "Open if worth it"} early starts`, `Offline maps ${String(prefs.offlineMaps || "Yes").toLowerCase()}`];
+}
+
+function preferenceChips(items) {
+  return `<small class="summary-chips">${items.map((item) => `<em>${esc(item)}</em>`).join("")}</small>`;
 }
 
 function tripDescriptionField(trip) {
@@ -1268,9 +1281,10 @@ function approvedRoutePreview(option) {
 function sampleTripPanel(trip) {
   const hasSample = Boolean(trip.sampleTrip);
   return `<section class="sample-trip-panel">
-    <div><strong>${hasSample ? "Sample Trip" : "Want to try it first?"}</strong><p>${hasSample ? "You are editing a sample Los Angeles trip. All fields are editable." : "Load a realistic Los Angeles sample, or start blank and enter your own trip."}</p></div>
+    <span class="sample-trip-icon" aria-hidden="true">${iconSvg("briefcase")}</span>
+    <div><strong>${hasSample ? "Sample trip loaded" : "Try a sample trip"}</strong><p>${hasSample ? "You are editing a sample Los Angeles trip. All fields are editable." : "Load a realistic Los Angeles example."}</p></div>
     <div>
-      ${hasSample ? `<button data-action="clearSampleTrip">Clear Sample</button>` : `<button data-action="loadSampleTrip">Try a Sample Los Angeles Trip</button>`}
+      ${hasSample ? `<button data-action="clearSampleTrip">Clear Sample</button>` : `<button data-action="loadSampleTrip">Try Los Angeles sample</button>`}
     </div>
   </section>`;
 }

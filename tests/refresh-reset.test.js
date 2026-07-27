@@ -63,7 +63,7 @@ assert.ok(app.includes("localStorage.setItem(SAVED_DRAFT_KEY"));
 assert.ok(app.includes("if (name === \"saveExit\")"));
 assert.ok(app.includes("Draft saved."));
 assert.ok(app.includes("Saved locally in this browser"));
-assert.ok(app.includes("Try a Sample Los Angeles Trip"));
+assert.ok(app.includes("Try Los Angeles sample"));
 assert.ok(app.includes("createSampleLosAngelesTrip"));
 assert.ok(app.includes("localStorage.removeItem(key)"));
 assert.equal(STORAGE_KEY, "routemosaic-personalization-state-v3");
