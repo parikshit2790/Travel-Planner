@@ -72,6 +72,7 @@ export function normalizePlanningInput(trip, variationSeed = 0) {
     alcohol: structuredClone(trip.alcohol || {}),
     budget: structuredClone(trip.budget || {}),
     lodging: structuredClone(trip.lodging || {}),
+    transportation: trip.transportation || "",
     transport: structuredClone(trip.transport || {}),
     preferences: structuredClone(trip.preferences || []),
     travelersDetail: structuredClone(trip.travelers || []),
@@ -321,20 +322,43 @@ function scheduleDay(profile, input, constraints, places, dayIndex) {
   const items = [];
   const buffers = paceDefaults(input.pace).buffer;
   const mealDuration = input.pace === "Relaxed" ? 75 : 60;
+  const travelContext = tripTravelContext(profile, input);
+  const isArrivalDay = dayIndex === 0 && travelContext.needsArrivalLogistics;
+  const isDepartureDay = dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
   const breakfastStart = constraints.breakfastMinutes;
-  const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60);
+  const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, isArrivalDay ? 16 * 60 : 0);
   const firstRegion = places[0]?.regionId || "santa-monica";
-  addMeal(items, "breakfast", breakfastStart, 45, "Breakfast near the day base", mealRecommendation(profile, input, firstRegion, "breakfast"), firstRegion, input, constraints);
+  if (isArrivalDay) {
+    addMeal(items, "breakfast", breakfastStart, 45, "Pre-departure breakfast", {
+      primary: "Breakfast before leaving or on the first route stop",
+      secondary: "Simple cafe or hotel breakfast before departure",
+      text: "Keep breakfast simple before the arrival travel block. Choose a cafe, hotel breakfast, or route stop that fits the group; verify menus and timing directly.",
+      cuisine: "Flexible",
+      price: moneyRange(mealCost(input, "breakfast").low, mealCost(input, "breakfast").high),
+      reservation: "No reservation needed for a simple travel-morning breakfast."
+    }, firstRegion, input, constraints);
+    items.push(arrivalTravelItem(profile, input, travelContext));
+    addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch"), firstRegion, input, constraints);
+    items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
+  } else {
+    addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast"), firstRegion, input, constraints);
+  }
   let cursor = activityStart;
-  places.forEach((place, index) => {
+  const dayPlaces = isDepartureDay ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1) : places;
+  dayPlaces.forEach((place, index) => {
+    if (isTimeSensitiveClosed(place, cursor)) {
+      items.push(simpleItem("note", cursor, 20, `Verify hours for ${place.name}`, `${place.name} is not scheduled as a late activity because opening hours are not verified for this time window.`));
+      cursor += 30;
+      return;
+    }
     if (index > 0) {
-      const previous = places[index - 1];
-      const travel = estimateTravel(profile, previous.regionId, place.regionId);
+      const previous = dayPlaces[index - 1];
+      const travel = estimateTravel(profile, previous, place);
       items.push(travelItem(previous.name, place.name, cursor, travel));
       cursor += travel.durationMinutes + buffers;
     }
     if (index === 1 && cursor > constraints.lunchMinutes - 30) {
-      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, "Lunch near the route", mealRecommendation(profile, input, place.regionId, "lunch"), place.regionId, input, constraints);
+      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), mealRecommendation(profile, input, place.regionId, "lunch"), place.regionId, input, constraints);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
     }
     items.push(activityItem(place, cursor, constraints, index));
@@ -342,18 +366,22 @@ function scheduleDay(profile, input, constraints, places, dayIndex) {
   });
   if (!items.some((item) => item.type === "lunch")) {
     const lunchRegion = places[0]?.regionId || firstRegion;
-    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, "Lunch near the main activity area", mealRecommendation(profile, input, lunchRegion, "lunch"), lunchRegion, input, constraints);
+    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), mealRecommendation(profile, input, lunchRegion, "lunch"), lunchRegion, input, constraints);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
   if (input.pace !== "Packed") {
     items.push(simpleItem("freeTime", afterActivities, input.pace === "Relaxed" ? 90 : 60, "Reset and free time", "A buffer window to rest, freshen up, or handle traffic without compressing dinner."));
   }
   const dinnerRegion = places.at(-1)?.regionId || firstRegion;
-  addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, "Dinner aligned with your food preferences", mealRecommendation(profile, input, dinnerRegion, "dinner"), dinnerRegion, input, constraints);
+  addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner"), dinnerRegion, input, constraints);
   const eveningStart = constraints.dinnerMinutes + (input.pace === "Relaxed" ? 105 : 90);
   const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex);
-  if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
+  if (!isDepartureDay && (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed")) items.push(evening);
   else items.push(simpleItem("note", eveningStart, 20, "Early return", "Skipped a late evening activity to respect the preferred return time."));
+  if (isDepartureDay) {
+    items.push(simpleItem("lodging", 10 * 60, 30, "Hotel checkout", "Check out, load bags, and keep the final day lighter so the return trip is not rushed."));
+    items.push(departureTravelItem(profile, input, travelContext));
+  }
   return sortAndFormat(items);
 }
 
@@ -367,7 +395,9 @@ function activityItem(place, start, constraints, index) {
     title: place.name,
     description: place.shortDescription,
     placeId: place.id,
-    neighborhood: place.regionId,
+    regionId: place.regionId,
+    neighborhood: "",
+    areaLabel: "",
     locationLabel: place.name,
     category: place.categories[0] || "activity",
     tags: place.tags,
@@ -396,6 +426,7 @@ function activityItem(place, start, constraints, index) {
 }
 
 function addMeal(items, type, start, duration, title, recommendation, regionId, input, constraints) {
+  const meal = typeof recommendation === "string" ? { text: recommendation, primary: "", secondary: "", cuisine: "", price: "", reservation: "" } : recommendation;
   items.push({
     id: uid("item"),
     type,
@@ -403,10 +434,20 @@ function addMeal(items, type, start, duration, title, recommendation, regionId, 
     endTimeMinutes: start + duration,
     durationMinutes: duration,
     title,
-    description: recommendation,
+    description: meal.text,
+    mealDetails: {
+      primaryOption: meal.primary,
+      secondaryOption: meal.secondary,
+      cuisine: meal.cuisine,
+      priceRange: meal.price,
+      reservationGuidance: meal.reservation,
+      hoursConfidence: "Unverified; confirm current hours before relying on this meal."
+    },
     placeId: "",
-    neighborhood: regionId,
-    locationLabel: regionId,
+    regionId,
+    neighborhood: "",
+    areaLabel: "",
+    locationLabel: meal.primary || regionId,
     category: "meal",
     tags: ["meal", type],
     estimatedCostPerPerson: mealCost(input, type),
@@ -453,6 +494,91 @@ function simpleItem(type, start, duration, title, description) {
   };
 }
 
+function tripTravelContext(profile, input) {
+  const transportText = `${input.transportation || ""} ${input.transport?.mode || ""}`.toLowerCase();
+  const origin = normalizeText(input.origin);
+  const destination = normalizeText(input.destination || profile.canonicalName);
+  const sameDestination = origin && destination && (origin === destination || destination.includes(origin) || origin.includes(destination));
+  const driving = /drive|car|rent/.test(transportText) && !/fly/.test(transportText);
+  const originCoordinates = input.fromLocation?.latitude && input.fromLocation?.longitude
+    ? { lat: Number(input.fromLocation.latitude), lng: Number(input.fromLocation.longitude) }
+    : knownLocationCoordinates(input.origin);
+  const destinationCoordinates = profile.regions[0]?.centerCoordinates;
+  const distance = originCoordinates && destinationCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, destinationCoordinates.lat, destinationCoordinates.lng) : 0;
+  const driveMinutes = distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150;
+  return {
+    needsArrivalLogistics: Boolean(driving && input.origin && !sameDestination),
+    needsDepartureLogistics: Boolean(driving && input.origin && !sameDestination && input.numberOfDays > 1),
+    transportMode: driving ? "drive" : "fly",
+    departureMinutes: driving ? 8 * 60 : 9 * 60,
+    arrivalMinutes: driving ? Math.min(15 * 60, 8 * 60 + driveMinutes) : 13 * 60 + 30,
+    originDriveMinutes: driveMinutes,
+    originDistanceMiles: Math.round(distance),
+    estimateType: distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate"
+  };
+}
+
+function knownLocationCoordinates(value) {
+  const text = normalizeText(value);
+  if (/augusta/.test(text) && /georgia|ga/.test(text)) return { lat: 33.4735, lng: -82.0105 };
+  if (/charlotte/.test(text)) return { lat: 35.2271, lng: -80.8431 };
+  if (/asheville/.test(text)) return { lat: 35.5951, lng: -82.5515 };
+  return null;
+}
+
+function isDepartureFriendly(place) {
+  const text = normalizeText(`${place.name} ${place.categories?.join(" ")} ${place.tags?.join(" ")}`);
+  if (/full day|theme park|estate|waterfall|day trip|nearby excursion|hike|mountain|whitewater/.test(text)) return false;
+  return Number(place.typicalDurationMinutes || 0) <= 120;
+}
+
+function isTimeSensitiveClosed(place, startMinutes) {
+  const text = normalizeText(`${place.name} ${place.categories?.join(" ")} ${place.tags?.join(" ")}`);
+  const needsDaytime = /museum|visitor center|estate|gallery|garden|arboretum|nature center|ticket|tour/.test(text);
+  return needsDaytime && startMinutes >= 17 * 60;
+}
+
+function arrivalTravelItem(profile, input, context) {
+  const duration = context.originDriveMinutes;
+  const description = context.transportMode === "drive"
+    ? `Drive from ${input.origin || "your origin"} to ${profile.canonicalName}; includes conservative fuel, restroom, meal, parking, and arrival buffer. Assumes an ${formatTime(context.departureMinutes)} departure because no exact departure time was entered.`
+    : `Arrival logistics for ${profile.canonicalName}; includes airport or station buffer, luggage, rental car or transfer pickup, and hotel approach time.`;
+  return {
+    ...simpleItem("travel", context.departureMinutes, duration, `Travel to ${profile.canonicalName}`, description),
+    travelFromPrevious: {
+      mode: context.transportMode === "drive" ? "Drive" : "Arrival transfer",
+      durationMinutes: duration,
+      distanceMiles: context.originDistanceMiles,
+      fromLabel: input.origin || "Origin",
+      toLabel: profile.canonicalName,
+      estimateType: context.estimateType,
+      note: "Conservative arrival-day estimate; verify live traffic or flight times."
+    },
+    replaceable: false
+  };
+}
+
+function departureTravelItem(profile, input, context) {
+  const duration = Math.max(60, context.originDriveMinutes);
+  const start = Math.max(12 * 60 + 30, 18 * 60 - duration);
+  const description = context.transportMode === "drive"
+    ? `Return drive toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
+    : "Departure buffer for checkout, luggage, airport/station transfer, security or boarding time, and contingency.";
+  return {
+    ...simpleItem("travel", start, duration, `Depart ${profile.canonicalName}`, description),
+    travelFromPrevious: {
+      mode: context.transportMode === "drive" ? "Drive" : "Departure transfer",
+      durationMinutes: duration,
+      distanceMiles: context.originDistanceMiles,
+      fromLabel: profile.canonicalName,
+      toLabel: input.origin || "Origin",
+      estimateType: context.estimateType,
+      note: "Conservative departure-day estimate; verify live traffic or flight times."
+    },
+    replaceable: false
+  };
+}
+
 function travelItem(fromLabel, toLabel, start, travel) {
   return {
     ...simpleItem("travel", start, travel.durationMinutes, `Estimated drive to ${toLabel}`, `Estimated drive: ${travel.durationMinutes}-${travel.durationMinutes + 15} minutes depending on traffic.`),
@@ -473,7 +599,9 @@ function eveningItem(profile, input, constraints, regionId, start, dayIndex) {
       : "Keep the evening flexible with a sunset viewpoint, cafe, or relaxed walk.";
   return {
     ...simpleItem("evening", start, quiet ? 75 : 105, title, description),
-    neighborhood: regionId,
+    regionId,
+    neighborhood: "",
+    areaLabel: "",
     locationLabel: regionName(profile, regionId),
     estimatedCostPerPerson: { low: 10, high: nightlife ? 45 : 25 },
     dietaryNotes: constraints.noAlcohol ? "No-alcohol preference applied." : "",
@@ -615,7 +743,8 @@ export function regenerateMeals(plan) {
     draft.days.forEach((day) => {
       day.scheduleItems = day.scheduleItems.map((item) => {
         if (!["breakfast", "lunch", "dinner"].includes(item.type) || item.locked) return item;
-        return { ...item, description: mealRecommendation(profile, input, item.neighborhood || "santa-monica", item.type), dietaryNotes: constraints.dietarySummary };
+        const meal = mealRecommendation(profile, input, item.regionId || item.neighborhood || "santa-monica", item.type);
+        return { ...item, description: meal.text, mealDetails: { ...(item.mealDetails || {}), primaryOption: meal.primary, secondaryOption: meal.secondary, cuisine: meal.cuisine, priceRange: meal.price, reservationGuidance: meal.reservation }, dietaryNotes: constraints.dietarySummary };
       });
     });
     refreshPlanTotals(draft, profile);
@@ -790,6 +919,15 @@ function buildOverview(profile, input, days, budget, route) {
 
 export function validateTripPlan(plan) {
   const blocking = [];
+  const publicText = JSON.stringify({
+    overview: plan.overview,
+    days: plan.days,
+    foodPlan: plan.foodPlan,
+    routeSummary: plan.routeSummary,
+    hotelBase: plan.hotelBase
+  });
+  const internalLeak = internalOutputTerms().find((term) => publicText.toLowerCase().includes(term));
+  if (internalLeak) blocking.push(advisory("internal-language", "blocking", "content", "Internal planning language leaked", "Generated itinerary includes internal provider or taxonomy wording.", "Regenerate with sanitized destination data."));
   if (plan.days.length !== plan.numberOfDays) blocking.push(advisory("day-count", "blocking", "dates", "Incorrect day count", "Generated day count does not match the inclusive trip length.", "Regenerate after fixing dates."));
   plan.days.forEach((day) => {
     if (!day.date) blocking.push(advisory(`date-${day.id}`, "blocking", "dates", `Day ${day.dayNumber} missing date`, "Every generated day must have a date.", "Regenerate the trip."));
@@ -818,7 +956,7 @@ export function compatibleAlternatives(plan, itemId) {
   const input = plan.preferencesSnapshot;
   const constraints = buildTravelerConstraintProfile(input);
   return scoreCandidates(profile, input, constraints)
-    .filter(({ place }) => place.id !== current.placeId && (!current.neighborhood || place.regionId === current.neighborhood || place.accessibility === "good"))
+    .filter(({ place }) => place.id !== current.placeId && (!(current.regionId || current.neighborhood) || place.regionId === (current.regionId || current.neighborhood) || place.accessibility === "good"))
     .slice(0, 6)
     .map(({ place, reasons }) => ({
       placeId: place.id,
@@ -831,8 +969,8 @@ export function compatibleAlternatives(plan, itemId) {
       indoorOutdoor: place.indoorOutdoor,
       walkingLevel: place.accessibility === "limited" ? "Higher walking" : place.accessibility === "good" ? "Lower walking" : "Moderate walking",
       accessibilityFit: constraints.minimalWalking && place.accessibility === "good" ? "Strong accessibility fit" : place.accessibility === "limited" ? "Accessibility caution" : "Standard accessibility check",
-      routeImpact: place.regionId === current.neighborhood ? "Low route impact" : "Timing may shift for route fit",
-      group: place.regionId === current.neighborhood ? "Nearby Alternative" : place.indoorOutdoor === "indoor" ? "Indoor Backup" : place.estimatedCostHigh <= 20 ? "Lower-Cost Option" : "Best Fit",
+      routeImpact: place.regionId === (current.regionId || current.neighborhood) ? "Low route impact" : "Timing may shift for route fit",
+      group: place.regionId === (current.regionId || current.neighborhood) ? "Nearby Alternative" : place.indoorOutdoor === "indoor" ? "Indoor Backup" : place.estimatedCostHigh <= 20 ? "Lower-Cost Option" : "Best Fit",
       reason: reasons[0] || "Compatible with this route and preference profile."
     }));
 }
@@ -937,19 +1075,76 @@ function dayThemeLabel(regions) {
   return "Regional highlights";
 }
 
-function estimateTravel(profile, fromRegionId, toRegionId) {
-  if (fromRegionId === toRegionId) return { mode: "Drive", durationMinutes: 8, distanceMiles: 2, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "local-estimate", note: "Estimated short transfer; confirm real traffic day-of." };
+function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
+  const fromRegionId = typeof fromPlaceOrRegion === "string" ? fromPlaceOrRegion : fromPlaceOrRegion?.regionId;
+  const toRegionId = typeof toPlaceOrRegion === "string" ? toPlaceOrRegion : toPlaceOrRegion?.regionId;
+  const fromCoordinates = coordinatesFor(profile, fromPlaceOrRegion);
+  const toCoordinates = coordinatesFor(profile, toPlaceOrRegion);
   const route = profile.scenicRoutes.find((item) => (item.originRegionId === fromRegionId && item.destinationRegionId === toRegionId) || (item.originRegionId === toRegionId && item.destinationRegionId === fromRegionId));
-  const minutes = route?.estimatedDriveMinutes || 32;
-  return { mode: "Drive", durationMinutes: minutes, distanceMiles: route?.estimatedDistanceMiles || Math.round(minutes * 0.7), fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "curated-region-estimate", note: `Estimated drive: ${minutes}-${minutes + 15} minutes depending on traffic.` };
+  if (fromCoordinates && toCoordinates) {
+    const distanceMiles = haversineMiles(fromCoordinates.lat, fromCoordinates.lng, toCoordinates.lat, toCoordinates.lng);
+    const minimum = Math.ceil(distanceMiles / (route?.tags?.includes("scenic") || distanceMiles > 18 ? 0.65 : 0.45));
+    const routeMinutes = route?.estimatedDriveMinutes;
+    const durationMinutes = Math.max(8, Math.round(routeMinutes ? Math.max(routeMinutes, minimum) : minimum + (distanceMiles > 20 ? 18 : 8)));
+    return {
+      mode: "Drive",
+      durationMinutes,
+      distanceMiles: Math.max(0.5, Math.round(distanceMiles * 10) / 10),
+      fromLabel: placeOrRegionLabel(profile, fromPlaceOrRegion, fromRegionId),
+      toLabel: placeOrRegionLabel(profile, toPlaceOrRegion, toRegionId),
+      estimateType: route ? "curated-coordinate-estimate" : "coordinate-plausibility-estimate",
+      note: `Estimated drive: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify live traffic before traveling.`
+    };
+  }
+  if (fromRegionId === toRegionId) return { mode: "Drive", durationMinutes: 12, distanceMiles: 3, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "same-area-estimate", note: "Short same-area transfer estimate; verify exact location and parking." };
+  const minutes = route?.estimatedDriveMinutes || 35;
+  return { mode: "Drive", durationMinutes: minutes, distanceMiles: route?.estimatedDistanceMiles || Math.round(minutes * 0.7), fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "curated-region-estimate", note: `Estimated drive: about ${minutes} minutes. Verify live traffic before traveling.` };
+}
+
+function coordinatesFor(profile, placeOrRegion) {
+  if (!placeOrRegion) return null;
+  if (typeof placeOrRegion === "object") {
+    if (Number.isFinite(placeOrRegion.coordinates?.lat) && Number.isFinite(placeOrRegion.coordinates?.lng)) return placeOrRegion.coordinates;
+    if (Number.isFinite(placeOrRegion.latitude) && Number.isFinite(placeOrRegion.longitude)) return { lat: Number(placeOrRegion.latitude), lng: Number(placeOrRegion.longitude) };
+  }
+  const regionId = typeof placeOrRegion === "string" ? placeOrRegion : placeOrRegion.regionId;
+  const region = profile.regions.find((item) => item.id === regionId);
+  return region?.centerCoordinates || null;
+}
+
+function placeOrRegionLabel(profile, placeOrRegion, regionId) {
+  if (typeof placeOrRegion === "object" && placeOrRegion?.name) return placeOrRegion.name;
+  return regionName(profile, regionId);
+}
+
+function mealTitle(profile, regionId, mealType) {
+  const region = regionName(profile, regionId);
+  if (mealType === "breakfast") return `${region} breakfast option`;
+  if (mealType === "lunch") return `${region} lunch option`;
+  return `${region} dinner option`;
 }
 
 function mealRecommendation(profile, input, regionId, mealType) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
   const cuisine = (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item)))) || (input.food.cuisine || [])[0] || "local";
-  if (mealType === "breakfast") return `Quick ${cuisine.toLowerCase()}-friendly breakfast or cafe option near ${regionName(profile, regionId)}; confirm dietary details directly.`;
-  if (mealType === "lunch") return `Casual ${cuisine.toLowerCase()} lunch around ${area?.name || regionName(profile, regionId)} with route-friendly timing.`;
-  return `${input.food.dinner || "Relaxed"} dinner near ${area?.name || regionName(profile, regionId)}; use reservations for must-do venues.`;
+  const primary = area?.name || `${regionName(profile, regionId)} dining area`;
+  const secondary = secondaryFoodOption(profile, area, regionId);
+  const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
+  const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
+  return {
+    primary,
+    secondary,
+    text: `${primary}. Backup: ${secondary}. Cuisine fit: ${titleCase(cuisine)} / local options. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
+    cuisine: titleCase(cuisine),
+    price,
+    reservation
+  };
+}
+
+function secondaryFoodOption(profile, area, regionId) {
+  const sameRegion = profile.foodAreas.find((candidate) => candidate.id !== area?.id && candidate.regionId === regionId);
+  const other = profile.foodAreas.find((candidate) => candidate.id !== area?.id);
+  return sameRegion?.name || other?.name || `${regionName(profile, regionId)} local restaurant backup`;
 }
 
 function mealCost(input, mealType) {
@@ -996,7 +1191,7 @@ function weatherNote(items, date) {
   const month = Number(String(date).split("-")[1]);
   const outdoorHeavy = items.filter((item) => item.weatherDependency === "high").length >= 2;
   if (month >= 6 && month <= 9 && outdoorHeavy) return "Check heat and sun exposure closer to travel; shift to the indoor backup during excessive heat.";
-  if (items.some((item) => item.indoorOutdoor === "outdoor")) return "Check the forecast closer to the trip; coastal evenings can feel cooler than inland areas.";
+  if (items.some((item) => item.indoorOutdoor === "outdoor")) return "Check the local forecast closer to the trip; adjust outdoor timing for heat, rain, wind, or poor visibility.";
   return "Mostly indoor or mixed day; still confirm hours and ticketing before travel.";
 }
 
@@ -1024,6 +1219,36 @@ function budgetBand(input) {
 
 function normalizeText(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function titleCase(value) {
+  return String(value || "").replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return 0;
+  const radiusMiles = 3958.8;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function internalOutputTerms() {
+  return [
+    "google places landmark candidate",
+    "google places food candidate",
+    "openrouteservice point-of-interest candidate",
+    "provider-found",
+    "provider-retrieved",
+    "culture-area",
+    "nature-area",
+    "central-area",
+    "food and evening area",
+    "food-area",
+    "raw slug"
+  ];
 }
 
 function advisory(id, severity, category, title, message, resolutionSuggestion, relatedDayId = "", relatedScheduleItemId = "") {

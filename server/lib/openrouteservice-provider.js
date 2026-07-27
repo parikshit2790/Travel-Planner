@@ -282,18 +282,18 @@ function locationFromTrip(trip) {
 function buildRegions(destinationLocation, poiFeatures) {
   const centerCoordinates = [destinationLocation.longitude, destinationLocation.latitude];
   const center = {
-    id: "central-area",
-    name: "Central area",
+    id: "downtown-core",
+    name: "Downtown core",
     summary: `Central planning area around ${destinationLocation.canonicalName}.`,
     centerCoordinates: { lat: destinationLocation.latitude, lng: destinationLocation.longitude },
     tags: ["central", "orientation"],
-    neighboringRegionIds: ["culture-area", "food-area"],
+    neighboringRegionIds: ["arts-landmarks", "dining-evenings"],
     typicalTravelMinutesToRegions: {}
   };
-  const culture = regionFromFeature("culture-area", "Culture and landmarks", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["central-area", "food-area"]);
-  const nature = regionFromFeature("nature-area", "Parks and viewpoints", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["central-area", "culture-area"]);
-  const food = regionFromFeature("food-area", "Food and evening area", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["central-area", "culture-area"]);
-  const nearby = regionFromFeature("nearby-excursions", "Nearby excursions", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["central-area", "nature-area"]);
+  const culture = regionFromFeature("arts-landmarks", "Arts, museums, and landmarks", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["downtown-core", "dining-evenings"]);
+  const nature = regionFromFeature("parks-viewpoints", "Parks, gardens, and viewpoints", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["downtown-core", "arts-landmarks"]);
+  const food = regionFromFeature("dining-evenings", "Dining and evening neighborhoods", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["downtown-core", "arts-landmarks"]);
+  const nearby = regionFromFeature("nearby-excursions", "Nearby excursions", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["downtown-core", "parks-viewpoints"]);
   return [center, culture, nature, food, nearby];
 }
 
@@ -302,7 +302,7 @@ function regionFromFeature(id, name, feature, tags, neighboringRegionIds) {
   return {
     id,
     name,
-    summary: `${name} grouped from provider-found travel options. Verify exact hours, access, and travel time before finalizing.`,
+    summary: `${name} grouped from nearby travel options. Verify exact hours, access, and travel time before finalizing.`,
     centerCoordinates: { lat: Number(coordinates[1] || 0), lng: Number(coordinates[0] || 0) },
     tags,
     neighboringRegionIds,
@@ -325,10 +325,10 @@ function placeFromPoiFeature(feature, region, destinationName, index, center) {
     shortDescription: isStarter
       ? `${name} is a starter planning anchor for ${destinationName} because live place data was thin. Use it as a category to verify and replace with a specific local stop before travel.`
       : isNearby
-      ? `${name} is a provider-found nearby option for ${destinationName}, best treated as a half-day or day-trip candidate after verifying hours, access, and travel time.`
-      : `${name} is a provider-found ${titleCase(category)} option for ${destinationName}. Confirm hours, access, and availability before travel.`,
+      ? `${name} is a nearby option for ${destinationName}, best treated as a half-day or day-trip candidate after verifying hours, access, and travel time.`
+      : `${name} is a ${titleCase(category)} option for ${destinationName}. Confirm hours, access, and availability before travel.`,
     categories: [category, isStarter ? "starter-anchor" : "", isNearby ? "nearby-excursion" : "", props.category_group || props.category || "point-of-interest"].filter(Boolean),
-    tags: [titleCase(category), isStarter ? "Starter planning anchor" : isNearby ? "Nearby option" : "Provider retrieved", "Verify before travel"],
+    tags: [titleCase(category), isStarter ? "Starter planning anchor" : isNearby ? "Nearby option" : "Locally relevant option", "Verify before travel"],
     suitableFor: ["solo", "couple", "family", "senior"],
     typicalDurationMinutes: duration,
     minimumDurationMinutes: 45,
@@ -382,7 +382,7 @@ function buildFoodAreas(foodFeatures, regions, destinationName) {
       budgetLevels: ["budget", "moderate"],
       dietarySupport: ["Vegetarian", "Gluten-free"],
       eveningSuitability: ["quiet"],
-      shortDescription: `${poiName(feature)} is a provider-retrieved food candidate for ${destinationName}; confirm menus and restrictions directly.`
+      shortDescription: `${poiName(feature)} is a food option for ${destinationName}; confirm menus, hours, and restrictions directly.`
     };
   });
   while (areas.length < 3) {
@@ -396,7 +396,7 @@ function buildFoodAreas(foodFeatures, regions, destinationName) {
       budgetLevels: ["budget", "moderate"],
       dietarySupport: ["Vegetarian"],
       eveningSuitability: ["quiet"],
-      shortDescription: `Provider POIs around ${region.name}; confirm specific restaurant details directly.`
+      shortDescription: `Dining options around ${region.name}; confirm specific restaurant details directly.`
     });
   }
   return areas.slice(0, 6);
@@ -408,12 +408,26 @@ function buildScenicRoutes(regions) {
     name: `${region.name} to ${regions[index + 1].name}`,
     originRegionId: region.id,
     destinationRegionId: regions[index + 1].id,
-    estimatedDriveMinutes: 15 + index * 8,
-    estimatedDistanceMiles: 4 + index * 3,
+    estimatedDriveMinutes: estimatedRegionDriveMinutes(region, regions[index + 1]),
+    estimatedDistanceMiles: estimatedRegionDistanceMiles(region, regions[index + 1]),
     tags: ["provider-estimate", "route"],
     bestTimeOfDay: "afternoon",
     notes: "Estimated travel time; traffic and conditions may vary."
   }));
+}
+
+function estimatedRegionDistanceMiles(origin, destination) {
+  return Math.max(1, Math.round(haversineMiles(
+    origin.centerCoordinates?.lat,
+    origin.centerCoordinates?.lng,
+    destination.centerCoordinates?.lat,
+    destination.centerCoordinates?.lng
+  )));
+}
+
+function estimatedRegionDriveMinutes(origin, destination) {
+  const miles = estimatedRegionDistanceMiles(origin, destination);
+  return Math.max(10, Math.round(miles / (miles > 18 ? 0.65 : 0.45)) + (miles > 18 ? 18 : 8));
 }
 
 function selectDiversePoiFeatures(features, center, limit) {
