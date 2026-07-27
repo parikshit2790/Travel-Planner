@@ -61,9 +61,9 @@ import {
   tripStructureOptions
 } from "./route-architecture.js";
 
-const TRIP_DESCRIPTION_PLACEHOLDER = "Example: Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic highlights, great vegetarian-friendly food, relaxed evenings, and an optional nearby city such as San Diego or Santa Barbara if it improves the trip without too much driving or changing hotels too often.";
-const TRIP_DESCRIPTION_SAMPLE = "Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic views, famous attractions, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes.";
-const TRIP_DESCRIPTION_HELPER = "Mention must-do places, nearby cities you are considering, pace, food needs, walking limits, hotel-change preferences, and anything you want to avoid.";
+const TRIP_DESCRIPTION_PLACEHOLDER = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
+const TRIP_DESCRIPTION_SAMPLE = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
+const TRIP_DESCRIPTION_HELPER = "Describe what would make this trip feel successful—must-do places, nearby cities you are considering, pace, special occasions, food priorities, and anything you want us to avoid.";
 
 let state = load();
 const locationProvider = createLocationSearchProvider();
@@ -98,7 +98,8 @@ let ui = {
   locationHighlight: { from: -1, destination: -1, destinationRegions: -1 },
   locationRequestId: { from: 0, destination: 0, destinationRegions: 0 },
   touchedBasicsFields: new Set(),
-  basicsSubmitAttempted: false
+  basicsSubmitAttempted: false,
+  showTripDescriptionExample: false
 };
 
 let globalListenersBound = false;
@@ -1081,7 +1082,7 @@ function basicsStep() {
     ${routeSummary(trip)}
     ${Number(trip.days) ? `<p class="derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
     ${tripDescriptionField(trip)}
-    <div class="button-row"><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
+    <div class="button-row"><button class="secondary-action" data-action="viewTripDescriptionExample">View Example</button><button class="secondary-action" data-action="interpretText">Interpret My Trip</button></div>
     ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
     ${tripAdvisoryPanel(issues)}
     <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
@@ -1145,8 +1146,9 @@ function tripDescriptionField(trip) {
     <textarea id="trip-description" data-field="trip.description" aria-describedby="trip-description-helper" placeholder="${esc(TRIP_DESCRIPTION_PLACEHOLDER)}">${esc(trip.description || "")}</textarea>
     <div class="trip-description-help-row">
       <small id="trip-description-helper" class="field-helper">${esc(TRIP_DESCRIPTION_HELPER)}</small>
-      <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use sample description"}</button>
+      <button type="button" class="sample-description-button" data-action="useSampleDescription">${sampleAdded ? "Sample added" : "Use Sample Description"}</button>
     </div>
+    ${ui.showTripDescriptionExample ? `<div class="description-example-panel"><strong>Example</strong><p>${esc(TRIP_DESCRIPTION_PLACEHOLDER)}</p></div>` : ""}
   </div>`;
 }
 
@@ -2914,6 +2916,10 @@ function action(name) {
     state.trip.originalText = TRIP_DESCRIPTION_SAMPLE;
     ui.interpretationError = "";
     ui.toast = "Sample description added.";
+  }
+  if (name === "viewTripDescriptionExample") {
+    ui.showTripDescriptionExample = !ui.showTripDescriptionExample;
+    ui.toast = ui.showTripDescriptionExample ? "Trip description example shown." : "";
   }
   if (name === "toggleSavedTrips") state.savedTripsOpen = !state.savedTripsOpen;
   if (name.startsWith("openSavedTrip:")) {

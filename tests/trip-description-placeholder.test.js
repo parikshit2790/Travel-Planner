@@ -5,9 +5,9 @@ import { initialState } from "../src/seed.js";
 const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");
 
-const placeholder = "Example: Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic highlights, great vegetarian-friendly food, relaxed evenings, and an optional nearby city such as San Diego or Santa Barbara if it improves the trip without too much driving or changing hotels too often.";
-const sample = "Plan a 5-day couple trip to Los Angeles with a balanced pace, scenic views, famous attractions, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes.";
-const helper = "Mention must-do places, nearby cities you are considering, pace, food needs, walking limits, hotel-change preferences, and anything you want to avoid.";
+const placeholder = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
+const sample = placeholder;
+const helper = "Describe what would make this trip feel successful—must-do places, nearby cities you are considering, pace, special occasions, food priorities, and anything you want us to avoid.";
 
 assert.equal(initialState.trip.description, "");
 assert.ok(app.includes(`const TRIP_DESCRIPTION_PLACEHOLDER = "${placeholder}"`));
@@ -18,7 +18,9 @@ assert.ok(app.includes('aria-describedby="trip-description-helper"'));
 assert.ok(app.includes('id="trip-description-helper"'));
 assert.ok(app.includes('data-action="useSampleDescription"'));
 assert.ok(app.includes('type="button" class="sample-description-button"'));
-assert.ok(app.includes("Use sample description"));
+assert.ok(app.includes("View Example"));
+assert.ok(app.includes('data-action="viewTripDescriptionExample"'));
+assert.ok(app.includes("Use Sample Description"));
 assert.ok(app.includes("Sample added"));
 assert.ok(app.includes('if (existing && existing !== TRIP_DESCRIPTION_SAMPLE && !confirm("Replace the existing trip description with the sample?")) return;'));
 assert.ok(app.includes("state.trip.description = TRIP_DESCRIPTION_SAMPLE;"));

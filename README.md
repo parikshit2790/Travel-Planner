@@ -154,15 +154,32 @@ The SPA rewrite excludes `/api/*` so Vercel functions are not intercepted by `in
 ## Data Pipeline
 
 1. Resolve origin and destination.
-2. Research destination via configured providers.
-3. Normalize regions, places, food areas, route estimates, and metadata.
-4. Register the generated profile client-side.
-5. Inject the profile into the planner.
-6. Score and group nearby activities.
-7. Add meals, travel, buffers, evenings, backups, budget, hotel-base suggestion, and advisories.
-8. Validate the structured plan.
+2. Decide the trip shape before detailed daily scheduling: one city, one base with day trips, multi-city, road trip, fly-and-drive, or point-to-point.
+3. Evaluate destination depth before recommending expansion. A longer trip does not automatically require another city.
+4. Suggest nearby cities only when the destination expansion score justifies added experience value against transfer burden, hotel changes, budget, traveler comfort, and date count.
+5. Require explicit user approval before a multi-city route or nearby destination can be used by the detailed itinerary engine.
+6. Research destination via configured providers.
+7. Normalize regions, places, food areas, route estimates, and metadata.
+8. Register the generated profile client-side.
+9. Inject the profile and approved trip shape into the planner.
+10. Score and group nearby activities.
+11. Add meals, travel, buffers, evenings, backups, budget, hotel-base suggestion, and advisories.
+12. Validate the structured plan.
 
 Every activity keeps source metadata: provider, provider place ID, retrieved name, retrieval time, confidence, freshness, and source URL when available.
+
+## Trip Shape Rules
+
+- Trip shape must be decided before daily activity scheduling.
+- Trip Description captures intent; structured fields remain the source of truth.
+- Extracted Trip Description preferences require user review before they become canonical preferences.
+- Nearby cities may be suggested, but they must never be silently added.
+- Multi-city routes require explicit user approval before detailed itinerary generation.
+- Hotel changes, transfer burden, arrival/departure logistics, and day-trip driving limits must be scored before route approval.
+- Approved route options are the source of truth for final itinerary destinations.
+- The final itinerary must use only approved destinations and validated places.
+- If the user sets zero hotel changes, multi-base options must be excluded.
+- Broad destinations must be clarified or represented as route concepts before detailed generation.
 
 ## Trust Rules
 

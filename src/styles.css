@@ -345,6 +345,9 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
   box-shadow: 0 4px 12px rgb(16 42 67 / 0.04);
 }
 .sample-description-button:hover { background: color-mix(in srgb, var(--sky) 10%, #fff); border-color: color-mix(in srgb, var(--blue) 42%, var(--line)); }
+.description-example-panel { border: 1px solid color-mix(in srgb, var(--sky) 28%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--sky) 8%, #fff); color: var(--muted); padding: 10px 12px; line-height: 1.45; }
+.description-example-panel strong { display: block; color: var(--ink); margin-bottom: 4px; }
+.description-example-panel p { margin: 0; }
 .trip-structure-section { border: 1px solid var(--line-soft); border-radius: var(--radius-section); background: linear-gradient(135deg, #fbfdff, #fffaf3); padding: 14px; }
 .section-kicker { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: var(--muted); }
 .section-kicker span { color: var(--blue); font-weight: 900; text-transform: uppercase; font-size: 0.76rem; letter-spacing: 0.02em; }
