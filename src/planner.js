@@ -319,9 +319,9 @@ function improveArchetypeSelection(profile, input, intelligence, dayIndex, theme
   const selectedIds = new Set(selected.map((item) => item.place.id));
   const selectedFlags = selected.map((item) => item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility));
   const hasBeach = selectedFlags.some((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk);
-  const hasNature = selectedFlags.some((flag) => flag.isPark && (flag.isBeachOrWaterfront || flag.isWaterActivity || flag.secondaryTypes?.includes("park-or-outdoor")));
+  const hasNature = selected.some((item) => isCoastalNaturePlace(item.place, selectedFlags[selected.indexOf(item)]));
   const hasEvening = selectedFlags.some((flag) => flag.isEveningAnchor);
-  const pick = (predicate) => candidates.find((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id) && predicate(item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility)));
+  const pick = (predicate) => candidates.find((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id) && predicate(item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility), item.place));
   const replacements = [...selected];
   const replaceLowest = (candidate) => {
     if (!candidate) return;
@@ -334,9 +334,14 @@ function improveArchetypeSelection(profile, input, intelligence, dayIndex, theme
     selectedIds.add(candidate.place.id);
   };
   if (!hasBeach && (dayIndex === 0 || dayIndex === 1)) replaceLowest(pick((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk));
-  if (!hasNature && dayIndex === 1) replaceLowest(pick((flag) => flag.isPark && (flag.isBeachOrWaterfront || flag.isWaterActivity || flag.secondaryTypes?.includes("park-or-outdoor"))));
+  if (!hasNature && dayIndex === 1) replaceLowest(pick((flag, place) => isCoastalNaturePlace(place, flag)));
   if (!hasEvening && dayIndex < input.numberOfDays - 1) replaceLowest(pick((flag) => flag.isEveningAnchor));
   return replacements.slice(0, input.maxActivities);
+}
+
+function isCoastalNaturePlace(place, classification = classifyPlaceForPlanning(place)) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return classification.isPark && /state park|garden|marsh|brookgreen|huntington|atalaya|wildlife|coastal nature/.test(text);
 }
 
 export function buildDays(profile, input, constraints, scored, intelligence = null) {
