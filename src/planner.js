@@ -143,6 +143,7 @@ export function generateTripPlan(trip, options = {}) {
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
       destinationIntelligence: summarizeDestinationIntelligence(destinationIntelligence),
+      destinationArchetype: destinationIntelligence.destinationArchetype,
       tripShapeOptions,
       unsupportedPreferences: normalized.unknownPreferences
     }
@@ -201,6 +202,7 @@ function summarizeDestinationIntelligence(intelligence) {
     routeOptions: intelligence.routeOptions,
     researchConfidence: intelligence.researchConfidence,
     sourceFreshness: intelligence.sourceFreshness,
+    destinationArchetype: intelligence.destinationArchetype,
     consideredCandidates: (intelligence.allCandidates || []).slice(0, 40).map(candidate),
     rejectedCandidates: (intelligence.allCandidates || []).filter((item) => !item.accepted).slice(0, 12).map(candidate)
   };
@@ -285,8 +287,56 @@ export function scoreCandidates(profile, input, constraints, intelligence = buil
       reasons.push("Better as an optional regional extension than a casual in-city stop.");
     }
     if (intelligenceItem?.routeFeasibility?.classification === "not-practical") score += planningWeights.hardExclusion;
+    const archetypeScore = archetypeScoreAdjustment(destinationIntelligenceArchetype(intelligence), classification, placeText, input);
+    if (archetypeScore) {
+      score += archetypeScore.score;
+      reasons.push(archetypeScore.reason);
+    }
     return { place, score, reasons, intelligence: intelligenceItem };
   }).sort((a, b) => b.score - a.score || a.place.name.localeCompare(b.place.name));
+}
+
+function destinationIntelligenceArchetype(intelligence) {
+  return intelligence?.destinationArchetype || { primaryArchetype: "mixed urban/nature", secondaryArchetypes: [] };
+}
+
+function archetypeScoreAdjustment(archetype, classification, placeText, input) {
+  if (archetype?.primaryArchetype !== "beach/coastal") return null;
+  const userRejectsBeach = /avoid beach|no beach|skip beach|not beach/.test(normalizeText(`${input.mustHavePlaces?.join(" ")} ${input.avoidPlaces?.join(" ")}`));
+  if (!userRejectsBeach && (classification.isBeachOrWaterfront || classification.isBoardwalk || classification.isWaterActivity || /oceanfront|marshwalk|skywheel|barefoot landing|broadway at the beach|brookgreen|huntington beach/.test(placeText))) {
+    return { score: 95, reason: "Boosted because this is a destination-defining beach/coastal or waterfront experience." };
+  }
+  if (classification.isEveningAnchor) return { score: 54, reason: "Boosted because the destination has strong evening and waterfront entertainment value." };
+  if (classification.isRestaurant && /seafood|waterfront|oceanfront|breakfast|brunch|cafe|bakery/.test(placeText)) return { score: 24, reason: "Boosted for coastal food identity and route-compatible dining." };
+  if (classification.isMuseum && !/brookgreen|atalaya|coastal|local art/.test(placeText)) return { score: -34, reason: "Reduced because beach/coastal trips should not be dominated by generic indoor museum stops." };
+  if (classification.isEntertainmentCenter && !/broadway at the beach|barefoot landing|skywheel/.test(placeText)) return { score: -58, reason: "Reduced because novelty entertainment is not a primary beach/coastal anchor." };
+  return null;
+}
+
+function improveArchetypeSelection(profile, input, intelligence, dayIndex, themeRegions, selected, candidates, scheduled) {
+  const archetype = intelligence?.destinationArchetype;
+  if (archetype?.primaryArchetype !== "beach/coastal") return selected;
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const selectedFlags = selected.map((item) => item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility));
+  const hasBeach = selectedFlags.some((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk);
+  const hasNature = selectedFlags.some((flag) => flag.isPark && (flag.isBeachOrWaterfront || flag.isWaterActivity || flag.secondaryTypes?.includes("park-or-outdoor")));
+  const hasEvening = selectedFlags.some((flag) => flag.isEveningAnchor);
+  const pick = (predicate) => candidates.find((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id) && predicate(item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility)));
+  const replacements = [...selected];
+  const replaceLowest = (candidate) => {
+    if (!candidate) return;
+    const replaceIndex = replacements.findIndex((item) => {
+      const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+      return flag.isMuseum || flag.isEntertainmentCenter || !(flag.isBeachOrWaterfront || flag.isEveningAnchor || flag.isWaterActivity);
+    });
+    if (replaceIndex >= 0) replacements[replaceIndex] = candidate;
+    else if (replacements.length < input.maxActivities) replacements.push(candidate);
+    selectedIds.add(candidate.place.id);
+  };
+  if (!hasBeach && (dayIndex === 0 || dayIndex === 1)) replaceLowest(pick((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk));
+  if (!hasNature && dayIndex === 1) replaceLowest(pick((flag) => flag.isPark && (flag.isBeachOrWaterfront || flag.isWaterActivity || flag.secondaryTypes?.includes("park-or-outdoor"))));
+  if (!hasEvening && dayIndex < input.numberOfDays - 1) replaceLowest(pick((flag) => flag.isEveningAnchor));
+  return replacements.slice(0, input.maxActivities);
 }
 
 export function buildDays(profile, input, constraints, scored, intelligence = null) {
@@ -296,14 +346,14 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const date = addDays(input.startDate, index);
     const themeRegions = themes[index % themes.length];
-    const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200);
-    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200);
+    const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
+    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
     const candidates = [...themeCandidates, ...fillCandidates.slice(0, Math.max(0, input.maxActivities - themeCandidates.length))];
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const activityCount = fullDay && input.maxActivities <= 2 ? 1 : Math.min(input.maxActivities, fullDay ? 1 : candidates.length);
-    const selected = (fullDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount);
+    const selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (fullDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input)), scheduled);
     selected.forEach((item) => scheduled.add(item.place.id));
-    const region = profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
+    const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
     const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage);
     const backups = buildBackups(profile, constraints, themeRegions, selected.map((item) => item.place), scheduled);
     const warnings = [];
@@ -314,8 +364,8 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
       id: uid("day"),
       dayNumber: index + 1,
       date,
-      title: `${region.name} day`,
-      theme: dayThemeLabel(themeRegions),
+      title: dayTitleFor(profile, input, intelligence, region, scheduleItems, index),
+      theme: dayThemeLabel(themeRegions, intelligence),
       region: region.name,
       summary: `A ${input.pace.toLowerCase()} day grouped around ${themeRegions.map((id) => regionName(profile, id)).join(" and ")} to reduce unnecessary cross-city travel.`,
       weatherPlanningNote: weatherNote(scheduleItems, date),
@@ -330,7 +380,18 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
   });
 }
 
+function isActivityCandidateForSchedule(item, profile, input) {
+  const classification = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+  if (classification.isOrdinaryBusiness || classification.isChildrenFocused) return false;
+  if (classification.isRestaurant || classification.isFoodHall || classification.isBar) return false;
+  if (classification.isDinnerShow) return false;
+  return true;
+}
+
 function destinationDayThemes(profile, input, intelligence = null) {
+  if (intelligence?.destinationArchetype?.primaryArchetype === "beach/coastal") {
+    return beachCoastalThemes(profile, input, intelligence);
+  }
   if (profile.id === "charlotte") {
     const themes = charlotteIntelligentThemes(input, intelligence);
     return rotate(themes, input.variationSeed).slice(0, input.numberOfDays);
@@ -364,6 +425,35 @@ function destinationDayThemes(profile, input, intelligence = null) {
     const anchor = profile.regions[(index + input.variationSeed) % profile.regions.length] || profile.regions[0];
     return [anchor.id, ...(anchor.neighboringRegionIds || [])].filter((regionId) => profileRegions.includes(regionId)).slice(0, input.pace === "Packed" ? 3 : 2);
   });
+}
+
+function beachCoastalThemes(profile, input, intelligence) {
+  const regionIds = profile.regions.map((region) => region.id);
+  const byFlag = (predicate) => (intelligence?.allCandidates || [])
+    .filter((item) => item.accepted && predicate(item.classification))
+    .map((item) => item.place.regionId)
+    .filter((id) => regionIds.includes(id));
+  const defaultRegion = profile.planningRules?.defaultHotelRegion || regionIds[0];
+  const beach = byFlag((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk);
+  const evening = byFlag((flag) => flag.isEveningAnchor);
+  const nature = (intelligence?.allCandidates || [])
+    .filter((item) => item.accepted)
+    .filter((item) => {
+      const flag = item.classification;
+      const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+      return flag.isPark && (/state park|garden|marsh|brookgreen|huntington|atalaya|coastal wildlife/.test(text) || (flag.isBeachOrWaterfront && !/central|boardwalk/.test(text)));
+    })
+    .map((item) => item.place.regionId)
+    .filter((id) => regionIds.includes(id));
+  const entertainment = byFlag((flag) => flag.isEveningAnchor || flag.isBoardwalk);
+  const unique = (values) => [...new Set(values.filter(Boolean))];
+  const themes = [
+    unique([defaultRegion, beach[0], evening[0]]),
+    unique([nature[0], evening[1], beach[1]]),
+    unique([beach[2], entertainment[0], defaultRegion]),
+    unique([entertainment[1], beach[3], nature[1]])
+  ].map((theme) => theme.filter((id) => regionIds.includes(id)).slice(0, input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
+  return rotate(themes.length ? themes : [[defaultRegion]], input.variationSeed).slice(0, input.numberOfDays);
 }
 
 function charlotteIntelligentThemes(input, intelligence) {
@@ -490,6 +580,8 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
 }
 
 function activityItem(place, start, constraints, index) {
+  const classification = classifyPlaceForPlanning(place);
+  const estimatedCost = costForPlace(place, classification);
   return {
     id: uid("item"),
     type: "activity",
@@ -505,7 +597,7 @@ function activityItem(place, start, constraints, index) {
     locationLabel: place.name,
     category: place.categories[0] || "activity",
     tags: place.tags,
-    estimatedCostPerPerson: { low: place.estimatedCostLow, high: place.estimatedCostHigh },
+    estimatedCostPerPerson: estimatedCost,
     travelFromPrevious: null,
     accessibilityNotes: accessibilityNote(place, constraints),
     dietaryNotes: "",
@@ -526,6 +618,8 @@ function activityItem(place, start, constraints, index) {
     source: "curated-local-data",
     replaceable: true,
     customItem: false
+    ,
+    ...(classification.isBeachOrWaterfront ? { beachExperience: beachExperienceFor(place, classification) } : {})
   };
 }
 
@@ -546,7 +640,16 @@ function addMeal(items, type, start, duration, title, recommendation, regionId, 
       secondaryOption: meal.secondary,
       primaryPlaceId: meal.primaryPlaceId || "",
       secondaryPlaceId: meal.secondaryPlaceId || "",
+      restaurantPlaceId: meal.primaryPlaceId || "",
+      restaurantName: meal.primary || "",
+      mealTypesServed: meal.mealTypesServed || [type],
       cuisine: meal.cuisine,
+      openingHours: meal.openingHours || "Hours not verified; confirm directly before relying on this meal.",
+      routeDetour: meal.routeDetour || "Placed near the day route area.",
+      priceLevel: meal.priceLevel || meal.price || "",
+      dietaryFit: meal.dietaryFit || constraints.dietarySummary,
+      reservationNeed: meal.reservationNeed || meal.reservation || "",
+      confidence: meal.confidence || (meal.primaryPlaceId ? "medium" : "low"),
       priceRange: meal.price,
       reservationGuidance: meal.reservation,
       hoursConfidence: "Unverified; confirm current hours before relying on this meal."
@@ -642,6 +745,7 @@ function isDepartureFriendly(place) {
 
 function isTimeSensitiveClosed(place, startMinutes) {
   const text = normalizeText(`${place.name} ${place.categories?.join(" ")} ${place.tags?.join(" ")}`);
+  if (/boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|oceanfront|beach walk|sunset/.test(text)) return false;
   const needsDaytime = /museum|visitor center|estate|gallery|garden|arboretum|nature center|ticket|tour/.test(text);
   return needsDaytime && startMinutes >= 17 * 60;
 }
@@ -697,6 +801,25 @@ function travelItem(fromLabel, toLabel, start, travel) {
 }
 
 function eveningItem(profile, input, constraints, regionId, start, dayIndex) {
+  const anchor = eveningAnchorPlace(profile, input, constraints, regionId);
+  if (anchor) {
+    const classification = classifyPlaceForPlanning(anchor, profile, input);
+    return {
+      ...simpleItem("evening", start, classification.isBar ? 105 : 90, anchor.name, eveningAnchorDescription(anchor, constraints)),
+      placeId: anchor.id,
+      regionId: anchor.regionId,
+      locationLabel: anchor.name,
+      category: anchor.categories?.[0] || "evening",
+      tags: [...(anchor.tags || []), "evening"],
+      estimatedCostPerPerson: costForPlace(anchor, classification),
+      weatherDependency: anchor.weatherDependency || (classification.isBeachOrWaterfront || classification.isBoardwalk ? "high" : "low"),
+      indoorOutdoor: anchor.indoorOutdoor || (classification.isBeachOrWaterfront || classification.isBoardwalk ? "outdoor" : "mixed"),
+      dietaryNotes: constraints.noAlcohol ? "No-alcohol preference applied." : "",
+      reservationRecommended: Boolean(anchor.reservationRecommended && !classification.isBoardwalk && !classification.isBeachOrWaterfront),
+      source: "local-evening-planner",
+      ...(classification.isBeachOrWaterfront ? { beachExperience: beachExperienceFor(anchor, classification) } : {})
+    };
+  }
   const quiet = (input.alcohol.preferences || []).some((item) => /quiet|walk|sunset|dessert/i.test(item)) || constraints.noAlcohol;
   const nightlife = (input.alcohol.preferences || []).some((item) => /nightlife|bar|brewery|live music/i.test(item)) && !constraints.noAlcohol;
   const title = quiet ? "Quiet evening option" : nightlife && dayIndex % 2 === 1 ? "Optional live-music evening" : "Low-key neighborhood evening";
@@ -715,6 +838,32 @@ function eveningItem(profile, input, constraints, regionId, start, dayIndex) {
     dietaryNotes: constraints.noAlcohol ? "No-alcohol preference applied." : "",
     reservationRecommended: nightlife
   };
+}
+
+function eveningAnchorPlace(profile, input, constraints, regionId) {
+  const candidates = profile.places
+    .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
+    .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
+    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow)
+    .sort((a, b) => {
+      const regionScoreA = a.place.regionId === regionId ? 0 : a.travel;
+      const regionScoreB = b.place.regionId === regionId ? 0 : b.travel;
+      return regionScoreA - regionScoreB || b.place.priorityScore - a.place.priorityScore;
+    });
+  return candidates[0]?.place || null;
+}
+
+function eveningAnchorDescription(place, constraints) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
+  if (/boardwalk|marshwalk|oceanfront|beach|sunset/.test(text)) {
+    return `${place.shortDescription || place.name} Keep this as a conservative outdoor evening block; confirm parking, weather, and any ticketed add-ons.`;
+  }
+  if (/skywheel|show|live music|landing|broadway/.test(text)) {
+    return `${place.shortDescription || place.name} Treat ticketed portions as conditional until current hours and tickets are confirmed; keep the surrounding public area as the backup.`;
+  }
+  return constraints.noAlcohol
+    ? `${place.shortDescription || place.name} Use this as a no-alcohol-compatible evening anchor and skip bar-led stops.`
+    : `${place.shortDescription || place.name} Confirm hours and live schedules before locking it in.`;
 }
 
 function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled) {
@@ -1284,6 +1433,15 @@ export function validateTripPlan(plan) {
   const internalLeak = internalOutputTerms().find((term) => publicText.toLowerCase().includes(term));
   if (internalLeak) blocking.push(advisory("internal-language", "blocking", "content", "Internal planning language leaked", "Generated itinerary includes internal provider or taxonomy wording.", "Regenerate with sanitized destination data."));
   if (plan.days.length !== plan.numberOfDays) blocking.push(advisory("day-count", "blocking", "dates", "Incorrect day count", "Generated day count does not match the inclusive trip length.", "Regenerate after fixing dates."));
+  if (plan.generationMetadata?.destinationArchetype?.primaryArchetype === "beach/coastal" && !userRejectedBeach(input)) {
+    const beachItems = plan.days.flatMap((day) => day.scheduleItems).filter((item) => item.beachExperience || /beach|boardwalk|oceanfront|waterfront|marshwalk/.test(normalizeText(`${item.title} ${item.category} ${(item.tags || []).join(" ")}`)));
+    if (!beachItems.length) {
+      blocking.push(advisory("beach-archetype-coverage", "blocking", "destination-fit", "Beach/coastal plan is missing beach or waterfront time", "A beach/coastal destination must include a real beach, waterfront, boardwalk, or coastal block unless the user rejected beach activities.", "Regenerate with a destination-defining beach or waterfront block."));
+    }
+  }
+  if (hasUniformGenericPricing(plan)) {
+    blocking.push(advisory("generic-pricing", "blocking", "budget", "Generic repeated pricing detected", "The itinerary uses repeated generic attraction price ranges instead of category-appropriate estimates.", "Regenerate with destination- and category-aware cost ranges."));
+  }
   plan.days.forEach((day) => {
     if (!day.date) blocking.push(advisory(`date-${day.id}`, "blocking", "dates", `Day ${day.dayNumber} missing date`, "Every generated day must have a date.", "Regenerate the trip."));
     validateDay(day).forEach((issue) => blocking.push(advisory(`day-${day.id}-${issue.code}`, "blocking", "schedule", `Day ${day.dayNumber} schedule issue`, issue.message, "Regenerate or move conflicting items.")));
@@ -1305,6 +1463,19 @@ export function validateTripPlan(plan) {
     });
   });
   return { blocking };
+}
+
+function userRejectedBeach(input) {
+  return /avoid beach|no beach|skip beach|not beach/.test(normalizeText(`${input.mustHavePlaces?.join(" ")} ${input.avoidPlaces?.join(" ")}`));
+}
+
+function hasUniformGenericPricing(plan) {
+  const ranges = plan.days
+    .flatMap((day) => day.scheduleItems)
+    .filter((item) => item.type === "activity")
+    .map((item) => moneyRange(item.estimatedCostPerPerson?.low || 0, item.estimatedCostPerPerson?.high || 0));
+  const generic = ranges.filter((range) => range === "$10-$50" || range === "$10-$45");
+  return ranges.length >= 4 && generic.length >= Math.ceil(ranges.length * 0.75);
 }
 
 function validateDay(day) {
@@ -1641,7 +1812,33 @@ function regionName(profile, id) {
   return profile.regions.find((region) => region.id === id)?.name || id;
 }
 
-function dayThemeLabel(regions) {
+function dayTitleFor(profile, input, intelligence, region, scheduleItems, index) {
+  const archetype = intelligence?.destinationArchetype?.primaryArchetype;
+  const activityTitles = scheduleItems.filter((item) => item.type === "activity" || item.type === "evening").map((item) => item.title);
+  if (index === 0 && scheduleItems.some((item) => item.title.startsWith("Travel to "))) {
+    const firstAnchor = activityTitles.find((title) => !/^Travel|Hotel|Reset/i.test(title));
+    return firstAnchor ? `Arrival and ${shortTitle(firstAnchor)}` : `Arrival in ${profile.canonicalName.split(",")[0]}`;
+  }
+  if (index === input.numberOfDays - 1 && scheduleItems.some((item) => item.title.startsWith("Depart "))) {
+    const firstAnchor = activityTitles[0];
+    return firstAnchor ? `${shortTitle(firstAnchor)} and departure` : `Final morning and departure`;
+  }
+  if (archetype === "beach/coastal") {
+    if (activityTitles.some((title) => /huntington|brookgreen|atalaya|marshwalk/i.test(title))) return "Coastal nature and MarshWalk";
+    if (activityTitles.some((title) => /boardwalk|skywheel|oceanfront/i.test(title))) return "Boardwalk, beach, and oceanfront evening";
+    if (activityTitles.some((title) => /barefoot|broadway/i.test(title))) return "Beach entertainment and waterfront dining";
+    if (activityTitles.some((title) => /cherry grove|north myrtle/i.test(title))) return "North Myrtle Beach and Cherry Grove";
+  }
+  const names = activityTitles.slice(0, 2).map(shortTitle).filter(Boolean);
+  return names.length ? names.join(" and ") : `${region.name} highlights`;
+}
+
+function shortTitle(value) {
+  return String(value || "").replace(/,.*$/, "").replace(/\s+and\s+.*$/, (match) => match.length > 34 ? "" : match).trim();
+}
+
+function dayThemeLabel(regions, intelligence = null) {
+  if (intelligence?.destinationArchetype?.primaryArchetype === "beach/coastal") return "Beach, waterfront, food, and evening anchors";
   if (regions.includes("santa-monica")) return "Coast, beach, and sunset";
   if (regions.includes("griffith-park")) return "Views, film history, and hillside scenery";
   if (regions.includes("downtown")) return "Culture, architecture, and food";
@@ -1709,6 +1906,8 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   const secondary = secondaryPlace?.name || secondaryFoodOption(profile, area, regionId);
   const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
   const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
+  const routeMinutes = primaryPlace ? estimateTravel(profile, regionId, primaryPlace.regionId).durationMinutes : 0;
+  const classification = primaryPlace ? classifyPlaceForPlanning(primaryPlace, profile, input) : null;
   return {
     primary,
     secondary,
@@ -1717,7 +1916,14 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     text: `${primary}. Backup: ${secondary}. Cuisine fit: ${titleCase(cuisine)} / local options. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
     cuisine: titleCase(cuisine),
     price,
-    reservation
+    reservation,
+    mealTypesServed: supportedMealTypes(classification),
+    openingHours: primaryPlace?.openingTimeGuidance || "Hours not verified; confirm directly before relying on this meal.",
+    routeDetour: primaryPlace ? `${routeMinutes <= 15 ? "Minimal" : `${routeMinutes} min`} detour from the current route cluster.` : "Placed by dining area, not a verified restaurant.",
+    priceLevel: price,
+    dietaryFit: "Restaurant must confirm dietary and allergy needs directly.",
+    reservationNeed: reservation,
+    confidence: primaryPlace ? classification?.confidence || "medium" : "low"
   };
 }
 
@@ -1740,11 +1946,21 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
 
 function isMealCandidate(place, mealType) {
   const classification = classifyPlaceForPlanning(place);
+  if (classification.isPier || classification.isMuseum || classification.isDinnerShow) return false;
   if (!classification.isRestaurant && !classification.isFoodHall && !(mealType === "dinner" && classification.isBar)) return false;
   if (classification.isEntertainmentCenter || classification.isChildrenFocused || classification.isOrdinaryBusiness) return false;
   if (mealType === "breakfast") return classification.servesBreakfast;
   if (mealType === "lunch") return classification.servesLunch;
   return classification.servesDinner;
+}
+
+function supportedMealTypes(classification) {
+  if (!classification) return [];
+  return [
+    classification.servesBreakfast ? "breakfast" : "",
+    classification.servesLunch ? "lunch" : "",
+    classification.servesDinner ? "dinner" : ""
+  ].filter(Boolean);
 }
 
 function specificFoodAreaLabel(profile, area, regionId, mealType) {
@@ -1783,6 +1999,39 @@ function estimateDayBudget(input, items) {
   const low = items.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.low || 0), 0) * input.travelers + 25;
   const high = items.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.high || 0), 0) * input.travelers + 55;
   return { currency: "USD", low: roundMoney(low), high: roundMoney(high), label: moneyRange(low, high) };
+}
+
+function costForPlace(place, classification = classifyPlaceForPlanning(place)) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  if (classification.isBeachOrWaterfront || classification.isBoardwalk || classification.isPier) {
+    const high = /skywheel|cruise|water sport|watersport|fishing charter|parasail/.test(text) ? 80 : /state park|huntington|brookgreen|atalaya/.test(text) ? 35 : 20;
+    return { low: Math.max(0, Number(place.estimatedCostLow || 0)), high: Math.max(Number(place.estimatedCostHigh || 0), high) };
+  }
+  if (classification.isWaterActivity) return { low: Math.max(35, Number(place.estimatedCostLow || 0)), high: Math.max(90, Number(place.estimatedCostHigh || 0)) };
+  if (/skywheel/.test(text)) return { low: Math.max(15, Number(place.estimatedCostLow || 0)), high: Math.max(30, Number(place.estimatedCostHigh || 0)) };
+  if (classification.isDinnerShow) return { low: Math.max(45, Number(place.estimatedCostLow || 0)), high: Math.max(95, Number(place.estimatedCostHigh || 0)) };
+  return { low: Number(place.estimatedCostLow || 0), high: Number(place.estimatedCostHigh || 0) };
+}
+
+function beachExperienceFor(place, classification = classifyPlaceForPlanning(place)) {
+  const name = place.name || "Beach or waterfront";
+  const text = normalizeText(`${name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
+  return {
+    beachName: name,
+    accessPoint: /state park|huntington/.test(text) ? "State-park beach access or visitor area" : /boardwalk|promenade/.test(text) ? "Boardwalk and adjacent public beach access" : /pier/.test(text) ? "Pier-adjacent public access" : "Public beach or waterfront access",
+    parking: /state park|huntington/.test(text) ? "Use official state-park parking; fees and capacity vary." : "Confirm public parking, meters, and garage options before arrival.",
+    expectedDuration: formatDuration(Number(place.typicalDurationMinutes || 90)),
+    sunriseFit: /sunrise|east|beach|oceanfront|pier/.test(text) ? "good" : "possible",
+    sunsetFit: /marshwalk|inlet|waterfront|landing|sunset/.test(text) ? "good" : "possible but not guaranteed on an east-facing beach",
+    swimmingSuitability: classification.isBeachOrWaterfront && !classification.isPier && !classification.isBoardwalk ? "possible when conditions allow" : "not the primary purpose of this block",
+    waterConditionsUnknown: true,
+    lifeguardConfidence: "unknown; verify season, beach rules, and staffed areas locally",
+    facilities: /state park|boardwalk|promenade|pier/.test(text) ? ["restrooms likely nearby", "parking or paid parking nearby"].join(", ") : "facilities vary by access point",
+    crowdLevelEstimate: /central|boardwalk|skywheel/.test(text) ? "higher during peak beach hours" : "moderate; varies by season and weather",
+    shadeAvailability: "limited on open sand; bring sun protection",
+    equipmentNeeded: "sunscreen, water, towel or light layer, and shoes for walking",
+    weatherBackup: "Shift to a nearby indoor dining, shopping, garden, or entertainment stop if rain, wind, or heat makes beach time unpleasant."
+  };
 }
 
 function sumCost(days, key) {

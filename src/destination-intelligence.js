@@ -66,6 +66,7 @@ export function buildDestinationIntelligence(profile, input, constraints = {}) {
   });
 
   const routeOptions = buildRouteOptions(profile, opportunities, input);
+  const destinationArchetype = buildDestinationArchetype(profile, input, opportunities);
   return {
     destinationIdentity: {
       id: profile.id,
@@ -73,6 +74,7 @@ export function buildDestinationIntelligence(profile, input, constraints = {}) {
       summary: profile.summary,
       baseRegionId
     },
+    destinationArchetype,
     ...Object.fromEntries(Object.entries(buckets).map(([key, value]) => [key, value.slice(0, 12)])),
     allCandidates: opportunities,
     routeOptions,
@@ -83,12 +85,65 @@ export function buildDestinationIntelligence(profile, input, constraints = {}) {
   };
 }
 
+export function buildDestinationArchetype(profile, input = {}, opportunities = []) {
+  const profileText = normalizeText([
+    profile.canonicalName,
+    profile.summary,
+    ...(profile.regions || []).map((region) => `${region.name} ${region.summary || ""} ${(region.tags || []).join(" ")}`),
+    ...(profile.places || []).map((place) => `${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`)
+  ].join(" "));
+  const placeFlags = opportunities.length
+    ? opportunities.map((item) => item.classification || classifyPlaceForPlanning(item.place, profile, input, item.routeFeasibility))
+    : (profile.places || []).map((place) => classifyPlaceForPlanning(place, profile, input));
+  const count = (predicate) => placeFlags.filter(predicate).length;
+  const nameText = normalizeText(`${profile.canonicalName} ${input.destination || ""}`);
+  const beachScore = count((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk || flag.isWaterActivity || flag.isPier) * 16
+    + (/beach|coast|ocean|shore|island|myrtle|sea|waterfront|boardwalk/.test(profileText + " " + nameText) ? 38 : 0);
+  const mountainScore = count((flag) => flag.isMountainOrTrail) * 15 + (/mountain|parkway|ridge|hike|trail|waterfall|national park/.test(profileText + " " + nameText) ? 28 : 0);
+  const cityScore = count((flag) => flag.isMuseum || flag.isNeighborhood) * 9 + (/downtown|museum|arts|architecture|historic|landmark|major city|capital/.test(profileText) ? 22 : 0);
+  const foodScore = count((flag) => flag.isRestaurant || flag.isFoodHall) * 8 + (/seafood|food|dining|restaurant|culinary|market/.test(profileText) ? 20 : 0);
+  const nightlifeScore = count((flag) => flag.isEveningAnchor || flag.isBar) * 12 + (/nightlife|live music|boardwalk|marshwalk|bars|evening/.test(profileText) ? 18 : 0);
+  const themeParkScore = count((flag) => flag.isFamilyFocused || flag.isEntertainmentCenter) * 8 + (/theme park|amusement|rides|family entertainment/.test(profileText) ? 16 : 0);
+  const resortScore = /resort|spa|all inclusive|beach club/.test(profileText) ? 42 : 0;
+  const scored = [
+    ["beach/coastal", beachScore],
+    ["mountain", mountainScore],
+    ["major city", cityScore],
+    ["food destination", foodScore],
+    ["nightlife destination", nightlifeScore],
+    ["theme-park destination", themeParkScore],
+    ["resort", resortScore]
+  ].sort((a, b) => b[1] - a[1]);
+  const primaryArchetype = scored[0]?.[1] > 0 ? scored[0][0] : "mixed urban/nature";
+  const secondaryArchetypes = scored
+    .filter(([name, score]) => name !== primaryArchetype && score >= Math.max(18, scored[0][1] * 0.18))
+    .map(([name]) => name)
+    .slice(0, 4);
+  const definingExperiences = destinationDefiningExperiences(profile, primaryArchetype, placeFlags);
+  const regionalExtensions = (profile.regions || [])
+    .filter((region) => /north|south|inlet|landing|state park|island|mountain|lake|day trip|regional|extension/i.test(`${region.name} ${region.summary || ""}`))
+    .map((region) => region.name)
+    .slice(0, 6);
+  return {
+    primaryArchetype,
+    secondaryArchetypes,
+    definingExperiences,
+    expectedCategoryMix: expectedCategoryMixFor(primaryArchetype, secondaryArchetypes),
+    weatherSensitiveCategories: weatherSensitiveCategoriesFor(primaryArchetype),
+    eveningStrength: nightlifeScore >= 36 || primaryArchetype === "nightlife destination" || (primaryArchetype === "beach/coastal" && nightlifeScore >= 20) ? "strong" : nightlifeScore >= 15 ? "moderate" : "light",
+    foodIdentity: foodIdentityFor(profileText, primaryArchetype),
+    regionalExtensions,
+    travelerFit: travelerFitForArchetype(input, primaryArchetype),
+    confidence: scored[0]?.[1] >= 70 ? "high" : scored[0]?.[1] >= 35 ? "medium" : "starter"
+  };
+}
+
 export function localSignificanceScore(place, profile) {
   const text = textFor(place);
   let score = Number(place.priorityScore || 60);
-  if (/signature|major|essential|famous|hall of fame|museum|landmark|national|whitewater|stockyards|biltmore|parkway/.test(text)) score += 18;
+  if (/signature|major|essential|famous|hall of fame|museum|landmark|national|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access/.test(text)) score += 18;
   if (/food hall|market|rooftop|local|neighborhood|arts district|live music/.test(text)) score += 10;
-  if (/day-trip|regional|mountain|lake|waterfall|state park|scenic/.test(text)) score += 12;
+  if (/day-trip|regional|mountain|lake|waterfall|state park|scenic|coastal|beach|waterfront|cruise|kayak|paddleboard|fishing/.test(text)) score += 12;
   if (/backup|generic|area$|walk$|candidate|starter planning/.test(text)) score -= 20;
   if (profile.id.startsWith("generic-")) score -= 10;
   return Math.max(0, Math.round(score));
@@ -207,24 +262,33 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const categories = new Set((place.categories || []).map(normalizeText).filter(Boolean));
   const has = (pattern) => pattern.test(text);
   const categoryHas = (pattern) => pattern.test(categoryText);
-  const isEntertainmentCenter = has(/\b(frankie|arcade|go kart|gokart|mini golf|laser tag|bowling|family entertainment|amusement center|trampoline|escape room|fun park)\b/);
-  const isChildrenFocused = has(/\b(children|childrens|kids|kid friendly|toddler|playground|marbles kids|children s museum|children museum)\b/);
+  const isPier = has(/\b(pier|fishing pier)\b/);
+  const isBoardwalk = has(/\b(boardwalk|promenade|marshwalk|riverwalk)\b/);
+  const isBeachOrWaterfront = has(/\b(beach|oceanfront|waterfront|coastal|shore|surfside|cherry grove|north myrtle|sand|sunrise|sunset walk)\b/) || isBoardwalk;
+  const isWaterActivity = has(/\b(cruise|dolphin|kayak|paddleboard|water sport|watersport|boat|fishing charter|sailing|parasail)\b/);
+  const isDinnerShow = has(/\b(dinner show|medieval times|dolly parton s stampede|pirates voyage|theatre dinner)\b/);
+  const isMountainOrTrail = has(/\b(mountain|ridge|parkway|hike|trail|waterfall|overlook)\b/);
+  const isEveningAnchor = has(/\b(skywheel|boardwalk|marshwalk|barefoot landing|broadway at the beach|live music|nightlife|sunset|evening|rooftop|waterfront dining)\b/);
+  const isEntertainmentCenter = has(/\b(frankie|arcade|go kart|gokart|mini golf|laser tag|bowling|family entertainment|amusement center|trampoline|escape room|fun park|wax museum|ripley|mirror maze)\b/);
+  const isChildrenFocused = has(/\b(children|childrens|kids|kid friendly|toddler|playground|marbles kids|children s museum|children museum|edventure)\b/);
   const isFamilyFocused = isChildrenFocused || has(/\b(family|zoo|aquarium|theme park|amusement|science center)\b/);
   const isFoodHall = has(/\b(food hall|public market|market hall|marketplace|transfer co|food court)\b/);
   const isBar = has(/\b(bar|brewery|brewhouse|beer garden|taproom|cocktail|distillery|winery|wine bar)\b/);
   const restaurantWords = /\b(restaurant|cafe|cafes|coffee|bakery|brunch|breakfast|diner|bistro|grill|taqueria|pizzeria|pizza|bbq|barbecue|ramen|sushi|tavern|kitchen|eatery|deli|sandwich|seafood|steakhouse|noodle|burger|tacos|dumpling|dessert|ice cream)\b/;
-  const attractionOnlyFood = /\b(museum|park|garden|trail|greenway|lake|mountain|viewpoint|monument|memorial|stadium|arena|science center|children|playground|amusement|go kart|arcade)\b/;
+  const attractionOnlyFood = /\b(museum|park|garden|trail|greenway|lake|mountain|viewpoint|monument|memorial|stadium|arena|science center|children|playground|amusement|go kart|arcade|pier|boardwalk|promenade|skywheel|theater|theatre|show)\b/;
   const isRestaurant = (restaurantWords.test(text) || categoryHas(/\b(food|restaurant|cafe|bakery|bar)\b/) || isFoodHall)
     && !isEntertainmentCenter
+    && !isPier
+    && !isDinnerShow
     && (!attractionOnlyFood.test(categoryText) || isFoodHall || restaurantWords.test(name));
   const isMuseum = has(/\b(museum|gallery|science center|history center|historic house|presidential library|art institute)\b/);
-  const isPark = has(/\b(park|garden|arboretum|greenway|trail|lake|preserve|nature|waterfall|beach|overlook|viewpoint)\b/);
+  const isPark = has(/\b(park|garden|arboretum|greenway|trail|lake|preserve|nature|waterfall|beach|overlook|viewpoint|state park)\b/);
   const isNeighborhood = has(/\b(neighborhood|district|downtown|uptown|market district|arts district|warehouse district|city market|riverwalk|village|old town)\b/);
   const isCity = categories.has("city") || has(/\b(city of|downtown [a-z]+|nearby city|university town|college town)\b/);
   const isHotel = has(/\b(hotel|motel|inn|suites|lodging|resort|accommodation)\b/);
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const routeScope = routeScopeFrom(feasibility, text);
-  const servesBreakfast = isRestaurant && (has(/\b(breakfast|brunch|cafe|coffee|bakery|diner)\b/) || !isBar && !has(/\b(cocktail|nightclub|brewery)\b/));
+  const servesBreakfast = isRestaurant && !isDinnerShow && (has(/\b(breakfast|brunch|cafe|coffee|bakery|diner)\b/) || !isBar && !has(/\b(cocktail|nightclub|brewery|seafood|steakhouse|dinner)\b/));
   const servesLunch = isRestaurant && !has(/\b(cocktail lounge|nightclub)\b/);
   const servesDinner = isRestaurant && (has(/\b(dinner|restaurant|bistro|grill|tavern|bar|brewery|food hall|kitchen|pizzeria|bbq|barbecue|seafood|steakhouse)\b/) || !has(/\b(breakfast only)\b/));
   const travelerFit = travelerFitFor(place, input, { isChildrenFocused, isFamilyFocused, isEntertainmentCenter, isBar, isPark });
@@ -234,6 +298,13 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isFoodHall ? "food-hall" : "",
     isRestaurant ? "restaurant" : "",
     isBar ? "bar-or-brewery" : "",
+    isPier ? "pier" : "",
+    isBoardwalk ? "boardwalk-or-promenade" : "",
+    isBeachOrWaterfront ? "beach-or-waterfront" : "",
+    isWaterActivity ? "water-activity" : "",
+    isDinnerShow ? "dinner-show" : "",
+    isEveningAnchor ? "evening-anchor" : "",
+    isMountainOrTrail ? "mountain-or-trail" : "",
     isEntertainmentCenter ? "entertainment-center" : "",
     isChildrenFocused ? "children-focused" : "",
     isFamilyFocused ? "family-focused" : "",
@@ -248,6 +319,13 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isRestaurant,
     isFoodHall,
     isBar,
+    isPier,
+    isBoardwalk,
+    isBeachOrWaterfront,
+    isWaterActivity,
+    isDinnerShow,
+    isMountainOrTrail,
+    isEveningAnchor,
     isEntertainmentCenter,
     isChildrenFocused,
     isFamilyFocused,
@@ -261,7 +339,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isOvernightExtension: routeScope === "overnight-recommended",
     isHotel,
     isOrdinaryBusiness,
-    isBackupCompatible: !isOrdinaryBusiness && !isChildrenFocused && !isEntertainmentCenter && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
+    isBackupCompatible: !isOrdinaryBusiness && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
     servesBreakfast,
     servesLunch,
     servesDinner,
@@ -277,20 +355,20 @@ function classifyPlace(place, feasibility, classification = classifyPlaceForPlan
   const nameText = normalizeText(place.name);
   const categoryText = normalizeText((place.categories || []).join(" "));
   const categories = new Set();
-  if (!classification.isOrdinaryBusiness && !classification.isChildrenFocused && (/signature|hall of fame|speedway|discovery|mint|bechtler|sixth floor|stockyards/.test(nameText) || /museum|landmark|motorsports|science/.test(categoryText))) categories.add("signatureExperiences");
+  if (!classification.isOrdinaryBusiness && !classification.isChildrenFocused && (/signature|hall of fame|speedway|discovery|mint|bechtler|sixth floor|stockyards|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|broadway at the beach|barefoot landing/.test(nameText) || /museum|landmark|motorsports|science|beach|waterfront/.test(categoryText))) categories.add("signatureExperiences");
   if (/local|arts district|neighborhood|rail trail|noda|plaza|south end|camp north|bishop|deep ellum/.test(text)) categories.add("localFavorites");
   if (/neighborhood|district|rail trail|noda|plaza|south end|camp north|bishop|deep ellum|davidson/.test(text)) categories.add("neighborhoods");
-  if (/nature|park|mountain|hike|garden|greenway|lake|waterfall|whitewater|arboretum|parkway|outdoor/.test(text)) categories.add("natureAnchors");
-  if (/lake|river|water|whitewater|waterfall/.test(text)) categories.add("waterExperiences");
+  if (/nature|park|mountain|hike|garden|greenway|lake|waterfall|whitewater|arboretum|parkway|outdoor|beach|coastal|marsh|state park|brookgreen/.test(text)) categories.add("natureAnchors");
+  if (/lake|river|water|whitewater|waterfall|beach|oceanfront|coastal|boardwalk|pier|cruise|kayak|paddleboard|fishing/.test(text)) categories.add("waterExperiences");
   if (/family|theme park|science|carowinds|aquarium|zoo/.test(text)) categories.add("familyAttractions");
-  if (!classification.isChildrenFocused && /entertainment|live music|nightlife|theme park|sports|event|brewery|bars|speedway/.test(text)) categories.add("entertainmentAnchors");
+  if (!classification.isChildrenFocused && /entertainment|live music|nightlife|theme park|sports|event|brewery|bars|speedway|skywheel|boardwalk|marshwalk|barefoot landing|broadway at the beach|sunset/.test(text)) categories.add("entertainmentAnchors");
   const foodCandidateText = `${nameText} ${categoryText} ${normalizeText((place.tags || []).join(" "))}`;
   if (classification.isFoodHall && /food hall|market|optimist|camp north|farmers market/.test(foodCandidateText)) categories.add("foodHalls");
   if (classification.servesBreakfast) categories.add("breakfastCandidates");
   if (classification.servesLunch) categories.add("lunchCandidates");
   if (classification.servesDinner) categories.add("dinnerCandidates");
   if (/rooftop|skyline|fahrenheit/.test(foodCandidateText)) categories.add("rooftopDining");
-  if (/bar|brewery|nightlife|live music|evening/.test(foodCandidateText)) categories.add("barsAndNightlife");
+  if (/bar|brewery|nightlife|live music|evening|marshwalk|boardwalk|skywheel|barefoot landing|broadway at the beach/.test(foodCandidateText)) categories.add("barsAndNightlife");
   if (/scenic|drive|parkway|viewpoint|mountain|lake/.test(text)) categories.add("scenicDrives");
   if (["easy-day-trip", "long-day-trip"].includes(feasibility.classification) || /day-trip|nearby|regional/.test(text)) categories.add("nearbyDayTrips");
   if (feasibility.classification === "overnight-recommended" || /overnight|extension|asheville|smoky|boone|blowing rock|grandfather/.test(text)) categories.add("regionalOvernightExtensions");
@@ -330,18 +408,72 @@ function destinationSignificanceFor(place, profile, flags) {
   const text = textFor(place);
   let score = 0;
   const reasons = [];
-  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|historic|presidential|art museum|natural sciences|history museum|botanical|university|warehouse district|city market|stockyards|sixth floor|duke|unc/.test(text)) {
+  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|historic|presidential|art museum|natural sciences|history museum|botanical|university|warehouse district|city market|stockyards|sixth floor|duke|unc|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|barefoot landing|broadway at the beach|oceanfront|beach access|cherry grove/.test(text)) {
     score += 26;
     reasons.push("Recognized as a destination-significant anchor.");
   }
+  if (flags.isBeachOrWaterfront || flags.isWaterActivity) score += 24;
+  if (flags.isEveningAnchor) score += 14;
   if (flags.isMuseum || flags.isPark || flags.isNeighborhood) score += 8;
   if (flags.isRestaurant && !flags.isNeighborhood) score -= 4;
   if (flags.isEntertainmentCenter) score -= 25;
+  if (flags.isDinnerShow) score -= 20;
   if (flags.isOrdinaryBusiness) score -= 80;
   if (["long-day-trip", "overnight-recommended", "impractical"].includes(flags.routeScope)) score -= 12;
   if (/generic|candidate|starter planning|area only|verify and replace/.test(text)) score -= 22;
   if (profile.id?.startsWith("generic-")) score -= 8;
   return { score, reasons: reasons.length ? reasons : ["Standard destination candidate."] };
+}
+
+function destinationDefiningExperiences(profile, primaryArchetype, placeFlags) {
+  if (primaryArchetype === "beach/coastal") {
+    return [
+      "beach or oceanfront time",
+      "boardwalk or waterfront walk",
+      "coastal nature or garden",
+      "seafood or waterfront dining",
+      "evening entertainment or sunset"
+    ];
+  }
+  if (primaryArchetype === "mountain" || primaryArchetype === "national park") return ["scenic viewpoints", "trails or easy nature walks", "regional drives", "weather-aware outdoor blocks"];
+  if (primaryArchetype === "food destination") return ["signature dining", "local markets", "neighborhood food walks", "reservation-worthy dinners"];
+  if (placeFlags.some((flag) => flag.isMuseum)) return ["signature museums", "walkable districts", "local dining", "evening neighborhoods"];
+  return ["signature attractions", "local neighborhoods", "food and evening anchors", "outdoor or scenic option"];
+}
+
+function expectedCategoryMixFor(primaryArchetype, secondaryArchetypes) {
+  if (primaryArchetype === "beach/coastal") {
+    return {
+      beachWaterfront: "required",
+      signatureEntertainment: "high",
+      coastalNature: "high",
+      foodEvening: "high",
+      museumsCulture: secondaryArchetypes.includes("major city") ? "moderate" : "low"
+    };
+  }
+  if (primaryArchetype === "mountain" || primaryArchetype === "national park") return { outdoorNature: "required", scenicRoutes: "high", foodEvening: "moderate", indoorCulture: "backup" };
+  if (primaryArchetype === "major city") return { signatureCulture: "high", neighborhoods: "high", foodEvening: "high", nature: "moderate" };
+  return { signature: "high", localFood: "moderate", outdoors: "moderate", evening: "moderate" };
+}
+
+function weatherSensitiveCategoriesFor(primaryArchetype) {
+  if (primaryArchetype === "beach/coastal") return ["beach", "water sports", "boat cruises", "piers", "outdoor boardwalks"];
+  if (primaryArchetype === "mountain" || primaryArchetype === "national park") return ["hikes", "viewpoints", "scenic drives", "waterfalls"];
+  return ["outdoor neighborhoods", "parks", "seasonal events"];
+}
+
+function foodIdentityFor(text, primaryArchetype) {
+  if (/seafood|oceanfront|marshwalk|coastal/.test(text) || primaryArchetype === "beach/coastal") return "seafood, waterfront dining, casual beach lunches, and local breakfast spots";
+  if (/barbecue|bbq/.test(text)) return "regional barbecue and casual local restaurants";
+  if (/market|food hall|culinary|restaurant/.test(text)) return "local restaurants, markets, and reservation-worthy dinners";
+  return "local restaurants and route-compatible meals";
+}
+
+function travelerFitForArchetype(input, primaryArchetype) {
+  const soloAdult = childFreeAdultTrip(input);
+  if (primaryArchetype === "beach/coastal" && soloAdult) return "Strong fit for beach, coastal nature, seafood, boardwalk, and flexible evening experiences; child-only attractions should be optional.";
+  if (soloAdult) return "Solo adult trip; suppress child-focused anchors unless explicitly requested.";
+  return "Use group composition and individual restrictions to filter activity intensity and meal choices.";
 }
 
 function routeScopeFrom(feasibility, text) {
