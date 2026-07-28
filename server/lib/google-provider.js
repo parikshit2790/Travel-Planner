@@ -93,10 +93,10 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
     state: destinationLocation.stateOrProvince || "",
     timezone: "",
     currency: "USD",
-    summary: `${destinationName} profile generated from Google Places tourism and food candidates.`,
+    summary: `${destinationName} profile generated from live destination and food research.`,
     seasonalNotes: ["Verify current hours, timed tickets, closures, crowd conditions, and weather before booking."],
     generalAdvisories: [
-      "Google place data helps identify candidates, but hours, prices, availability, accessibility, and dietary safety still need direct verification.",
+      "Live place data helps identify options, but hours, prices, availability, accessibility, and dietary safety still need direct verification.",
       "Nearby excursions may require route and traffic verification before final scheduling."
     ],
     planningRules: {
@@ -370,10 +370,11 @@ async function resolveRouteCoordinates(value, config) {
 }
 
 function buildGoogleRegions(destinationLocation, places) {
+  const city = destinationLocation.canonicalName.split(",")[0].trim() || "Destination";
   const center = {
     id: "central-area",
-    name: "Central area",
-    summary: `Central planning area around ${destinationLocation.canonicalName}.`,
+    name: `${city} core area`,
+    summary: `Primary orientation area around ${destinationLocation.canonicalName}.`,
     centerCoordinates: { lat: destinationLocation.latitude, lng: destinationLocation.longitude },
     tags: ["central", "orientation"],
     neighboringRegionIds: ["culture-area", "food-area", "nearby-excursions"],
@@ -385,9 +386,9 @@ function buildGoogleRegions(destinationLocation, places) {
   const nearbyPlace = places.find((place) => distanceMiles(destinationLocation, placeLocation(place)) >= 18) || places[3] || places[0];
   return [
     center,
-    regionFromGooglePlace("culture-area", "Culture and landmarks", culturePlace, ["culture", "landmark"], ["central-area", "food-area"]),
-    regionFromGooglePlace("nature-area", "Parks and viewpoints", naturePlace, ["nature", "viewpoint"], ["central-area", "culture-area"]),
-    regionFromGooglePlace("food-area", "Food and evening area", foodPlace, ["food", "evening"], ["central-area", "culture-area"]),
+    regionFromGooglePlace("culture-area", `${city} museums and historic sights`, culturePlace, ["culture", "landmark"], ["central-area", "food-area"]),
+    regionFromGooglePlace("nature-area", `${city} parks and outdoor stops`, naturePlace, ["nature", "viewpoint"], ["central-area", "culture-area"]),
+    regionFromGooglePlace("food-area", `${city} dining and evening area`, foodPlace, ["food", "evening"], ["central-area", "culture-area"]),
     regionFromGooglePlace("nearby-excursions", "Nearby excursions", nearbyPlace, ["nearby", "day-trip", "scenic"], ["central-area", "nature-area"])
   ];
 }
@@ -397,7 +398,7 @@ function regionFromGooglePlace(id, name, place, tags, neighboringRegionIds) {
   return {
     id,
     name,
-    summary: `${name} grouped from Google Places candidates. Verify exact hours, tickets, access, and travel time before finalizing.`,
+    summary: `${name} grouped from nearby visitor stops. Verify exact hours, tickets, access, and travel time before finalizing.`,
     centerCoordinates: location,
     tags,
     neighboringRegionIds,
@@ -408,19 +409,21 @@ function regionFromGooglePlace(id, name, place, tags, neighboringRegionIds) {
 function profilePlaceFromGooglePlace(place, region, destinationName, index) {
   const name = displayText(place.displayName) || place.formattedAddress || `Place ${index + 1}`;
   const category = googleCategory(place);
+  const duration = durationForGoogleCategory(category, place, index);
+  const cost = costForGoogleCategory(category, place, index);
   return {
     id: place.id || `google-place-${index}`,
     name,
     regionId: region.id,
     shortDescription: googleDescription(place, destinationName, category),
     categories: [category, ...(place.types || []).slice(0, 4)],
-    tags: [titleCase(category), "Google Places candidate", "Verify before travel"],
+    tags: [titleCase(category), "Visitor stop", "Verify before travel"],
     suitableFor: ["solo", "couple", "family", "senior"],
-    typicalDurationMinutes: durationForGoogleCategory(category),
-    minimumDurationMinutes: 45,
-    maximumDurationMinutes: category === "nearby-excursion" ? 300 : 210,
-    estimatedCostLow: category === "nature" ? 0 : 10,
-    estimatedCostHigh: category === "food" ? 55 : 45,
+    typicalDurationMinutes: duration,
+    minimumDurationMinutes: Math.max(30, duration - 45),
+    maximumDurationMinutes: category === "nearby-excursion" ? 300 : duration + 75,
+    estimatedCostLow: cost.low,
+    estimatedCostHigh: cost.high,
     indoorOutdoor: category === "nature" ? "outdoor" : category === "museum" ? "indoor" : "mixed",
     weatherDependency: category === "nature" ? "high" : category === "museum" ? "low" : "medium",
     accessibility: "moderate",
@@ -469,14 +472,14 @@ function buildGoogleFoodAreas(foodCandidates, regions, destinationName) {
     budgetLevels: ["moderate"],
     dietarySupport: ["Confirm menus directly"],
     eveningSuitability: ["quiet", "casual", "social"],
-    shortDescription: `${displayText(place.displayName)} is a Google Places food candidate. Verify menus, reservations, and dietary fit.`
+    shortDescription: `${displayText(place.displayName)} can work as a meal stop for ${destinationName}. Verify menus, reservations, and dietary fit.`
   }));
 }
 
 function buildGoogleScenicRoutes(regions) {
   return regions.slice(1).map((region, index) => ({
     id: `google-route-${region.id}`,
-    name: `Central area to ${region.name}`,
+    name: `${regions[0]?.name || "Primary area"} to ${region.name}`,
     originRegionId: "central-area",
     destinationRegionId: region.id,
     estimatedDriveMinutes: 15 + index * 10,
@@ -500,12 +503,13 @@ function isTourismPlace(place) {
   const name = `${displayText(place?.displayName)} ${place?.formattedAddress || ""}`.toLowerCase();
   const types = new Set(place?.types || []);
   if ([...types].some((type) => REJECTED_TYPES.has(type))) return false;
+  if (isRawProviderPlaceName(displayText(place?.displayName))) return false;
   if (/\b(insurance|hampton inn|hotel|motel|school|bank|medical|doctor|dentist|apartment|parking|gas station)\b/i.test(name)) return false;
   return [...types].some((type) => TOURISM_TYPES.has(type));
 }
 
 function isFoodPlace(place) {
-  return hasAnyType(place, ["restaurant", "cafe", "bakery", "bar", "meal_takeaway", "food"]);
+  return !isRawProviderPlaceName(displayText(place?.displayName)) && hasAnyType(place, ["restaurant", "cafe", "bakery", "bar", "meal_takeaway", "food"]);
 }
 
 function googlePlaceScore(place) {
@@ -518,7 +522,7 @@ function googlePlaceScore(place) {
 function googleDescription(place, destinationName, category) {
   const editorial = place?.editorialSummary?.text;
   if (editorial) return `${editorial} Verify current hours, tickets, and access before travel.`;
-  return `${displayText(place.displayName)} is a Google Places ${category} candidate for ${destinationName}. Verify current hours, tickets, access, and availability before travel.`;
+  return `${displayText(place.displayName)} is a ${titleCase(category)} stop to consider for ${destinationName}. Verify current hours, tickets, access, and availability before travel.`;
 }
 
 function googleCategory(place) {
@@ -535,12 +539,34 @@ function hasAnyType(place, types) {
   return types.some((type) => all.has(type));
 }
 
-function durationForGoogleCategory(category) {
-  if (category === "food") return 75;
-  if (category === "nature") return 120;
-  if (category === "museum") return 150;
-  if (category === "entertainment") return 150;
-  return 105;
+function durationForGoogleCategory(category, place = {}, index = 0) {
+  const text = `${displayText(place.displayName)} ${(place.types || []).join(" ")}`.toLowerCase();
+  const bump = (stableNumber(place.id || displayText(place.displayName) || index) % 3) * 15;
+  if (category === "food") return 60 + bump;
+  if (/garden|botanical|state park|national park|zoo|aquarium|estate/.test(text)) return 135 + bump;
+  if (category === "nature") return 90 + bump;
+  if (category === "museum") return 105 + bump;
+  if (category === "entertainment") return 120 + bump;
+  return 75 + bump;
+}
+
+function costForGoogleCategory(category, place = {}, index = 0) {
+  const text = `${displayText(place.displayName)} ${(place.types || []).join(" ")}`.toLowerCase();
+  const bump = (stableNumber(place.id || displayText(place.displayName) || index) % 3) * 5;
+  if (/beach|park|riverwalk|trail|memorial|monument|viewpoint/.test(text) || category === "nature") return { low: 0, high: 10 + bump };
+  if (/garden|estate|aquarium|zoo/.test(text)) return { low: 15, high: 35 + bump };
+  if (category === "museum") return { low: 12, high: 28 + bump };
+  if (category === "entertainment") return { low: 20, high: 55 + bump };
+  if (category === "food") return { low: 12, high: 35 + bump };
+  return { low: 0, high: 20 + bump };
+}
+
+function isRawProviderPlaceName(value) {
+  return /^(access\s*\d*|entrance\s*\d*|parking\s*\d*|trailhead\s*\d*|gate\s*\d*|pier access|beach access|map point|unnamed road)$/i.test(String(value || "").trim());
+}
+
+function stableNumber(value) {
+  return String(value || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
 function placeFieldMask() {

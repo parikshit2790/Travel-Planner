@@ -40,7 +40,7 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
     state: destinationLocation.stateOrProvince || "",
     timezone: "",
     currency: "USD",
-    summary: `${destinationName} profile generated from openrouteservice geocoding and point-of-interest data.`,
+    summary: `${destinationName} profile generated from live geocoding and point-of-interest data.`,
     seasonalNotes: ["Check current weather, closures, opening hours, and operating conditions before travel."],
     generalAdvisories: [
       "Attractions, restaurants, accessibility, prices, and opening hours should be verified directly before travel.",
@@ -317,15 +317,16 @@ function placeFromPoiFeature(feature, region, destinationName, index, center) {
   const distanceMiles = featureDistanceMiles(center, feature);
   const isNearby = region.id === "nearby-excursions" || distanceMiles >= 18;
   const isStarter = Boolean(props.routeMosaicStarter);
-  const duration = isNearby ? Math.max(150, durationFor(category)) : durationFor(category);
+  const duration = isNearby ? Math.max(150, durationFor(category, feature, index)) : durationFor(category, feature, index);
+  const cost = costFor(category, feature, index);
   return {
     id: String(props.osm_id || feature.id || `ors-place-${index}`).replace(/[^a-zA-Z0-9_-]/g, "-"),
     name,
     regionId: region.id,
     shortDescription: isStarter
-      ? `${name} is a starter planning anchor for ${destinationName} because live place data was thin. Use it as a category to verify and replace with a specific local stop before travel.`
+      ? `${name} is a starter planning anchor for ${destinationName} because live place data was thin. Verify and replace it with a specific local stop before travel.`
       : isNearby
-      ? `${name} is a nearby option for ${destinationName}, best treated as a half-day or day-trip candidate after verifying hours, access, and travel time.`
+      ? `${name} is a nearby option for ${destinationName}, best treated as a half-day or day-trip idea after verifying hours, access, and travel time.`
       : `${name} is a ${titleCase(category)} option for ${destinationName}. Confirm hours, access, and availability before travel.`,
     categories: [category, isStarter ? "starter-anchor" : "", isNearby ? "nearby-excursion" : "", props.category_group || props.category || "point-of-interest"].filter(Boolean),
     tags: [titleCase(category), isStarter ? "Starter planning anchor" : isNearby ? "Nearby option" : "Locally relevant option", "Verify before travel"],
@@ -333,8 +334,8 @@ function placeFromPoiFeature(feature, region, destinationName, index, center) {
     typicalDurationMinutes: duration,
     minimumDurationMinutes: 45,
     maximumDurationMinutes: isNearby ? 300 : 180,
-    estimatedCostLow: category === "nature" ? 0 : 10,
-    estimatedCostHigh: category === "food" ? 40 : 35,
+    estimatedCostLow: cost.low,
+    estimatedCostHigh: cost.high,
     indoorOutdoor: indoorOutdoorFor(category),
     weatherDependency: category === "nature" ? "high" : category === "museum" ? "low" : "medium",
     accessibility: "moderate",
@@ -510,6 +511,7 @@ function isTravelWorthyPoi(feature) {
   const props = feature.properties || {};
   const layer = String(props.layer || "").toLowerCase();
   const text = poiSearchText(feature);
+  if (isRawProviderPlaceName(name)) return false;
   if (["locality", "localadmin", "county", "region", "country", "address", "street"].includes(layer)) return false;
   if (/\b(town of|city of|county of|municipality|township|borough|village of)\b/.test(name)) return false;
   if (/\b(hotel|motel|inn|suites|lodging|apartment|apartments|condo|realty|realtor|insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto|tires|gas station|fuel|parking|garage|warehouse|storage|school|academy|elementary|middle school|high school|church|cemetery|funeral|police|fire station|post office|courthouse)\b/.test(name)) return false;
@@ -521,6 +523,7 @@ function isFoodWorthyPoi(feature) {
   if (!hasPoiName(feature) || !feature?.geometry?.coordinates) return false;
   const name = poiName(feature).toLowerCase();
   const text = poiSearchText(feature);
+  if (isRawProviderPlaceName(name)) return false;
   if (/\b(hotel|motel|inn|school|insurance|bank|office|pharmacy|gas station|parking)\b/.test(name)) return false;
   return /\b(restaurant|cafe|coffee|bakery|bar|brewery|food|market|dining|sustenance)\b/.test(text) || poiCategory(feature) === "food";
 }
@@ -635,11 +638,34 @@ function titleCase(value) {
   return String(value || "").replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function durationFor(category) {
-  if (category === "museum") return 130;
-  if (category === "nature") return 100;
-  if (category === "food") return 75;
-  return 90;
+function durationFor(category, feature = {}, index = 0) {
+  const text = poiSearchText(feature);
+  const bump = (stableNumber(feature?.properties?.osm_id || feature?.id || poiName(feature) || index) % 3) * 15;
+  if (/garden|botanical|estate|aquarium|zoo|national park|state park/.test(text)) return 135 + bump;
+  if (category === "museum") return 105 + bump;
+  if (category === "nature") return 90 + bump;
+  if (category === "food") return 60 + bump;
+  if (category === "entertainment") return 120 + bump;
+  return 75 + bump;
+}
+
+function costFor(category, feature = {}, index = 0) {
+  const text = poiSearchText(feature);
+  const bump = (stableNumber(feature?.properties?.osm_id || feature?.id || poiName(feature) || index) % 3) * 5;
+  if (/beach|park|riverwalk|trail|memorial|monument|viewpoint/.test(text) || category === "nature") return { low: 0, high: 10 + bump };
+  if (/garden|estate|aquarium|zoo/.test(text)) return { low: 15, high: 35 + bump };
+  if (category === "museum" || category === "history") return { low: 10, high: 25 + bump };
+  if (category === "entertainment") return { low: 20, high: 55 + bump };
+  if (category === "food") return { low: 12, high: 35 + bump };
+  return { low: 0, high: 20 + bump };
+}
+
+function isRawProviderPlaceName(value) {
+  return /^(access\s*\d*|entrance\s*\d*|parking\s*\d*|trailhead\s*\d*|gate\s*\d*|pier access|beach access|map point|unnamed road)$/i.test(String(value || "").trim());
+}
+
+function stableNumber(value) {
+  return String(value || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
 function indoorOutdoorFor(category) {

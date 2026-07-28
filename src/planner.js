@@ -55,6 +55,9 @@ const mealDefaults = {
   dinner: "6:30 PM"
 };
 
+const RAW_PLACE_LABEL_PATTERN = /^(access\s*\d*|entrance\s*\d*|parking\s*\d*|trailhead\s*\d*|gate\s*\d*|pier access|beach access|map point|unnamed road)$/i;
+const INTERNAL_PUBLIC_LANGUAGE_PATTERN = /(google places|openrouteservice point-of-interest candidate|provider-found|provider-retrieved|culture-area|central-area|food-area|nature-area|parks and viewpoints|culture and landmarks|central area)/i;
+
 export function normalizePlanningInput(trip, variationSeed = 0) {
   const numberOfDays = normalizeDayCount(trip);
   const startDate = trip.startDate || "";
@@ -267,6 +270,11 @@ export function scoreCandidates(profile, input, constraints, intelligence = buil
     const reasons = [];
     let score = intelligenceItem ? intelligenceItem.score * 2 : place.priorityScore * planningWeights.priority;
     const placeText = normalizeText(`${place.name} ${place.categories.join(" ")} ${place.tags.join(" ")}`);
+    const publicText = `${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`;
+    if (isRawPlaceLabel(place.name) || INTERNAL_PUBLIC_LANGUAGE_PATTERN.test(publicText)) {
+      score += planningWeights.hardExclusion;
+      reasons.push("Rejected because the source returned a raw/internal label rather than a visitor-ready stop.");
+    }
     if (intelligenceItem?.reason) reasons.push(intelligenceItem.reason);
     if (selectedLabels.some((label) => label && placeText.includes(label))) {
       score += planningWeights.preferenceMatch;
@@ -370,6 +378,7 @@ function isCoastalNaturePlace(place, classification = classifyPlaceForPlanning(p
 export function buildDays(profile, input, constraints, scored, intelligence = null) {
   const scheduled = new Set();
   const mealUsage = new Map();
+  const backupUsage = new Map();
   const themes = destinationDayThemes(profile, input, intelligence);
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const date = addDays(input.startDate, index);
@@ -383,7 +392,8 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     selected.forEach((item) => scheduled.add(item.place.id));
     const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
     const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage);
-    const backups = buildBackups(profile, constraints, themeRegions, selected.map((item) => item.place), scheduled);
+    const backups = buildBackups(profile, constraints, themeRegions, selected.map((item) => item.place), scheduled, backupUsage);
+    backups.forEach((backup) => backupUsage.set(backup.placeId, (backupUsage.get(backup.placeId) || 0) + 1));
     const warnings = [];
     const dailyDriveMinutes = scheduleItems.filter((item) => item.type === "travel").reduce((sum, item) => sum + item.durationMinutes, 0);
     if (dailyDriveMinutes > input.maxDrivingMinutes) warnings.push(`Estimated driving exceeds your ${Math.round(input.maxDrivingMinutes / 60)} hour daily preference.`);
@@ -423,13 +433,11 @@ function destinationDayThemes(profile, input, intelligence = null) {
   const profileRegions = profile.regions.map((region) => region.id);
   const hasDefaultThemes = dayThemes.flat().some((regionId) => profileRegions.includes(regionId));
   if (hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
-  return Array.from({ length: input.numberOfDays }, (_, index) => {
-    const anchor = profile.regions[(index + input.variationSeed) % profile.regions.length] || profile.regions[0];
-    return [anchor.id, ...(anchor.neighboringRegionIds || [])].filter((regionId) => profileRegions.includes(regionId)).slice(0, input.pace === "Packed" ? 3 : 2);
-  });
+  return coordinateClusterThemes(profile, input);
 }
 
 function beachCoastalThemes(profile, input, intelligence) {
+  const clustered = coordinateClusterThemes(profile, input);
   const regionIds = profile.regions.map((region) => region.id);
   const byFlag = (predicate) => (intelligence?.allCandidates || [])
     .filter((item) => item.accepted && predicate(item.classification))
@@ -452,10 +460,32 @@ function beachCoastalThemes(profile, input, intelligence) {
   const themes = [
     unique([defaultRegion, beach[0], evening[0]]),
     unique([nature[0], evening[1], beach[1]]),
-    unique([beach[2], entertainment[0], defaultRegion]),
+    unique([beach[2], entertainment[0]]),
     unique([entertainment[1], beach[3], nature[1]])
-  ].map((theme) => theme.filter((id) => regionIds.includes(id)).slice(0, input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
-  return rotate(themes.length ? themes : [[defaultRegion]], input.variationSeed).slice(0, input.numberOfDays);
+  ].map((theme) => keepNearbyThemeRegions(profile, theme.filter((id) => regionIds.includes(id)), input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
+  return rotate(themes.length ? themes : clustered.length ? clustered : [[defaultRegion]], input.variationSeed).slice(0, input.numberOfDays);
+}
+
+function coordinateClusterThemes(profile, input) {
+  const regions = (profile.regions || []).filter((region) => region?.id);
+  if (!regions.length) return [[]];
+  const ordered = rotate(regions, input.variationSeed);
+  const limit = input.pace === "Packed" ? 3 : 2;
+  return Array.from({ length: input.numberOfDays }, (_, index) => {
+    const anchor = ordered[index % ordered.length];
+    return keepNearbyThemeRegions(profile, [anchor.id, ...(anchor.neighboringRegionIds || [])], limit);
+  });
+}
+
+function keepNearbyThemeRegions(profile, regionIds, limit) {
+  const uniqueIds = [...new Set(regionIds.filter(Boolean))];
+  const anchor = profile.regions.find((region) => region.id === uniqueIds[0]) || profile.regions[0];
+  return uniqueIds
+    .map((id) => ({ id, minutes: estimateTravel(profile, anchor?.id, id).durationMinutes }))
+    .filter((item) => item.id === anchor?.id || item.minutes <= 45)
+    .sort((a, b) => a.minutes - b.minutes)
+    .map((item) => item.id)
+    .slice(0, limit);
 }
 
 function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map()) {
@@ -485,24 +515,24 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   }
   let cursor = activityStart;
   const dayPlaces = isDepartureDay ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1) : places;
+  let previousScheduledPlace = null;
   dayPlaces.forEach((place, index) => {
     if (isTimeSensitiveClosed(place, cursor)) {
-      items.push(simpleItem("note", cursor, 20, `Verify hours for ${place.name}`, `${place.name} is not scheduled as a late activity because opening hours are not verified for this time window.`));
-      cursor += 30;
       return;
     }
-    if (index > 0) {
-      const previous = dayPlaces[index - 1];
-      const travel = estimateTravel(profile, previous, place);
-      items.push(travelItem(previous.name, place.name, cursor, travel));
+    if (previousScheduledPlace) {
+      const travel = estimateTravel(profile, previousScheduledPlace, place);
+      items.push(travelItem(previousScheduledPlace.name, place.name, cursor, travel));
       cursor += travel.durationMinutes + buffers;
     }
     if (index === 1 && cursor > constraints.lunchMinutes - 30) {
       addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), mealRecommendation(profile, input, place.regionId, "lunch", mealUsage), place.regionId, input, constraints, mealUsage);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
     }
-    items.push(activityItem(place, cursor, constraints, index));
-    cursor += place.typicalDurationMinutes + buffers;
+    const scheduledActivity = activityItem(place, cursor, constraints, index);
+    items.push(scheduledActivity);
+    cursor += scheduledActivity.durationMinutes + buffers;
+    previousScheduledPlace = place;
   });
   if (!items.some((item) => item.type === "lunch")) {
     const lunchRegion = places[0]?.regionId || firstRegion;
@@ -528,7 +558,8 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   } else {
     addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage), dinnerRegion, input, constraints, mealUsage);
     const eveningStart = constraints.dinnerMinutes + (input.pace === "Relaxed" ? 105 : 90);
-    const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex);
+    const usedActivityIds = new Set(dayPlaces.map((place) => place.id));
+    const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds);
     if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
     else items.push(simpleItem("note", eveningStart, 20, "Early return", "Skipped a late evening activity to respect the preferred return time."));
   }
@@ -538,12 +569,13 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
 function activityItem(place, start, constraints, index) {
   const classification = classifyPlaceForPlanning(place);
   const estimatedCost = costForPlace(place, classification);
+  const durationMinutes = scheduledDurationForPlace(place, classification, index);
   return {
     id: uid("item"),
     type: "activity",
     startTimeMinutes: start,
-    endTimeMinutes: start + place.typicalDurationMinutes,
-    durationMinutes: place.typicalDurationMinutes,
+    endTimeMinutes: start + durationMinutes,
+    durationMinutes,
     title: place.name,
     description: place.shortDescription,
     placeId: place.id,
@@ -577,6 +609,20 @@ function activityItem(place, start, constraints, index) {
     ,
     ...(classification.isBeachOrWaterfront ? { beachExperience: beachExperienceFor(place, classification) } : {})
   };
+}
+
+function scheduledDurationForPlace(place, classification = classifyPlaceForPlanning(place), index = 0) {
+  const base = Number(place.typicalDurationMinutes || 90);
+  const source = place.sourceMetadata?.provider || "";
+  if (source === "curated" || base >= 210) return base;
+  const text = normalizeText(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  const seed = stableNumber(`${place.id || place.name}-${index}`);
+  let adjusted = base;
+  if (/short stop|viewpoint|landmark|capitol|market/.test(text)) adjusted = Math.min(adjusted, 75);
+  if (classification.isMuseum) adjusted = Math.max(90, adjusted);
+  if (classification.isPark || classification.isBeachOrWaterfront) adjusted = Math.max(70, adjusted);
+  adjusted += ((seed % 3) - 1) * 10;
+  return Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
 }
 
 function addMeal(items, type, start, duration, title, recommendation, regionId, input, constraints, mealUsage = null) {
@@ -753,8 +799,8 @@ function travelItem(fromLabel, toLabel, start, travel) {
   };
 }
 
-function eveningItem(profile, input, constraints, regionId, start, dayIndex) {
-  const anchor = eveningAnchorPlace(profile, input, constraints, regionId);
+function eveningItem(profile, input, constraints, regionId, start, dayIndex, usedActivityIds = new Set()) {
+  const anchor = eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds, start);
   if (anchor) {
     const classification = classifyPlaceForPlanning(anchor, profile, input);
     return {
@@ -793,11 +839,12 @@ function eveningItem(profile, input, constraints, regionId, start, dayIndex) {
   };
 }
 
-function eveningAnchorPlace(profile, input, constraints, regionId) {
+function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds = new Set(), start = 19 * 60) {
   const candidates = profile.places
     .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
     .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
     .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow)
+    .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
     .sort((a, b) => {
       const regionScoreA = a.place.regionId === regionId ? 0 : a.travel;
       const regionScoreB = b.place.regionId === regionId ? 0 : b.travel;
@@ -819,11 +866,12 @@ function eveningAnchorDescription(place, constraints) {
     : `${place.shortDescription || place.name} Confirm hours and live schedules before locking it in.`;
 }
 
-function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled) {
+function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled, backupUsage = new Map()) {
   const primaryIds = new Set(primaryPlaces.map((place) => place.id));
   const anchorRegion = regionIds[0] || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
   return profile.places
     .filter((place) => !primaryIds.has(place.id))
+    .filter((place) => (backupUsage.get(place.id) || 0) < 2)
     .filter((place) => !constraints.minimalWalking || place.accessibility !== "limited")
     .map((place) => {
       const travel = estimateTravel(profile, anchorRegion, place.regionId);
@@ -835,7 +883,7 @@ function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled)
       if (!regionIds.includes(place.regionId) && travel.durationMinutes > 45) return false;
       return true;
     })
-    .sort((a, b) => (b.place.indoorOutdoor === "indoor") - (a.place.indoorOutdoor === "indoor") || b.place.priorityScore - a.place.priorityScore)
+    .sort((a, b) => (backupUsage.get(a.place.id) || 0) - (backupUsage.get(b.place.id) || 0) || (b.place.indoorOutdoor === "indoor") - (a.place.indoorOutdoor === "indoor") || b.place.priorityScore - a.place.priorityScore)
     .map(({ place, travel }) => ({
       id: uid("backup"),
       title: place.name,
@@ -1395,6 +1443,19 @@ export function validateTripPlan(plan) {
   if (hasUniformGenericPricing(plan)) {
     blocking.push(advisory("generic-pricing", "blocking", "budget", "Generic repeated pricing detected", "The itinerary uses repeated generic attraction price ranges instead of category-appropriate estimates.", "Regenerate with destination- and category-aware cost ranges."));
   }
+  if (hasRepeatedDurationPattern(plan)) {
+    blocking.push(advisory("generic-duration", "blocking", "schedule", "Repeated generic durations detected", "The itinerary repeats the same duration across unrelated primary activities.", "Regenerate with place-specific duration estimates."));
+  }
+  if (isProviderGeneratedPlan(plan) && hasRepeatedMealPattern(plan)) {
+    blocking.push(advisory("meal-repetition", "blocking", "food", "Repeated restaurant pattern detected", "The itinerary repeats the same meal venue or relies on generic dining labels too often.", "Regenerate with route-specific restaurants for each meal."));
+  }
+  if (hasDuplicateDaytimeEvening(plan)) {
+    blocking.push(advisory("duplicated-evening", "blocking", "evening", "Evening repeats daytime activity", "A daytime activity is reused as evening filler on the same day.", "Regenerate with distinct verified evening options."));
+  }
+  const rawLabel = plan.days.flatMap((day) => day.scheduleItems).find((item) => item.placeId && isRawPlaceLabel(item.title));
+  if (rawLabel) {
+    blocking.push(advisory("raw-place-label", "blocking", "destination-fit", "Raw map label reached the itinerary", `${rawLabel.title} is not a visitor-ready attraction name.`, "Regenerate with meaningful canonical place names only."));
+  }
   const coverageFailures = plan.generationMetadata?.opportunityCoverageValidation?.hardFailures || [];
   coverageFailures.forEach((failure) => {
     blocking.push(advisory(`opportunity-coverage-${failure}`, "blocking", "destination-fit", "Destination opportunity coverage is incomplete", `The planner could not prove required destination candidate coverage: ${failure}.`, "Regenerate after destination research returns stronger candidates."));
@@ -1437,6 +1498,38 @@ function hasUniformGenericPricing(plan) {
     .map((item) => moneyRange(item.estimatedCostPerPerson?.low || 0, item.estimatedCostPerPerson?.high || 0));
   const generic = ranges.filter((range) => range === "$10-$50" || range === "$10-$45");
   return ranges.length >= 4 && generic.length >= Math.ceil(ranges.length * 0.75);
+}
+
+function hasRepeatedDurationPattern(plan) {
+  const durations = plan.days.flatMap((day) => day.scheduleItems).filter((item) => item.type === "activity").map((item) => item.durationMinutes);
+  if (durations.length < 5) return false;
+  if (maxShare(frequency(durations)) > 0.4) return true;
+  for (let index = 2; index < durations.length; index += 1) {
+    if (durations[index] === durations[index - 1] && durations[index] === durations[index - 2]) return true;
+  }
+  return false;
+}
+
+function hasRepeatedMealPattern(plan) {
+  const meals = plan.days.flatMap((day) => day.scheduleItems).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const names = meals.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "")).filter(Boolean);
+  const concrete = meals.filter((item) => item.mealDetails?.primaryPlaceId).length;
+  if (meals.length >= 4 && concrete < Math.ceil(meals.length * 0.6)) return true;
+  return names.length >= 4 && mostCommonCount(names) > Math.max(3, Math.ceil(names.length * 0.35));
+}
+
+function hasDuplicateDaytimeEvening(plan) {
+  return plan.days.some((day) => {
+    const activities = new Set(day.scheduleItems.filter((item) => item.type === "activity" && item.placeId).map((item) => item.placeId));
+    return day.scheduleItems.some((item) => item.type === "evening" && item.placeId && activities.has(item.placeId));
+  });
+}
+
+function isProviderGeneratedPlan(plan) {
+  const provider = plan?.generationMetadata?.destinationProfileSnapshot?.sourceMetadata?.provider
+    || plan?.generationMetadata?.sourceDiagnostics?.destinationResearchSource
+    || "";
+  return /^(google|openrouteservice|openai|generated-provider|test-live)$/i.test(provider);
 }
 
 function validateDay(day) {
@@ -1774,8 +1867,9 @@ function regionName(profile, id) {
 }
 
 function dayTitleFor(profile, input, intelligence, region, scheduleItems, index) {
-  const archetype = intelligence?.destinationArchetype?.primaryArchetype;
-  const activityTitles = scheduleItems.filter((item) => item.type === "activity" || item.type === "evening").map((item) => item.title);
+  const activityItems = scheduleItems.filter((item) => item.type === "activity");
+  const eveningItems = scheduleItems.filter((item) => item.type === "evening");
+  const activityTitles = [...activityItems, ...eveningItems].map((item) => item.title);
   if (index === 0 && scheduleItems.some((item) => item.title.startsWith("Travel to "))) {
     const firstAnchor = activityTitles.find((title) => !/^Travel|Hotel|Reset/i.test(title));
     return firstAnchor ? `Arrival and ${shortTitle(firstAnchor)}` : `Arrival in ${profile.canonicalName.split(",")[0]}`;
@@ -1784,13 +1878,40 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
     const firstAnchor = activityTitles[0];
     return firstAnchor ? `${shortTitle(firstAnchor)} and departure` : `Final morning and departure`;
   }
-  if (archetype === "beach/coastal") {
-    if (activityTitles.some((title) => /garden|preserve|nature|marsh|state park|wildlife/i.test(title))) return "Coastal nature and scenic water";
-    if (activityTitles.some((title) => /boardwalk|pier|oceanfront|waterfront|beach/i.test(title))) return "Beach, boardwalk, and oceanfront evening";
-    if (activityTitles.some((title) => /entertainment|music|show|market|district/i.test(title))) return "Beach entertainment and waterfront dining";
+  const counts = categoryCountsForTitle(activityItems);
+  const dominantRegion = dominantRegionName(profile, activityItems) || region.name;
+  if ((counts.beach + counts.waterfront) >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
+    return `${dominantRegion} beach and waterfront`;
+  }
+  if (counts.nature >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
+    return `${dominantRegion} parks and scenery`;
+  }
+  if (counts.culture >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
+    return `${dominantRegion} museums and history`;
+  }
+  if (counts.entertainment >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
+    return `${dominantRegion} entertainment and local flavor`;
   }
   const names = activityTitles.slice(0, 2).map(shortTitle).filter(Boolean);
   return names.length ? names.join(" and ") : `${region.name} highlights`;
+}
+
+function categoryCountsForTitle(items) {
+  return items.reduce((counts, item) => {
+    const text = normalizeText(`${item.title} ${item.category} ${(item.tags || []).join(" ")}`);
+    if (/beach|pier|oceanfront|boardwalk/.test(text)) counts.beach += 1;
+    if (/riverwalk|waterfront|harbor|marina|lake|water/.test(text)) counts.waterfront += 1;
+    if (/park|garden|trail|preserve|marsh|nature|viewpoint|overlook/.test(text)) counts.nature += 1;
+    if (/museum|historic|history|gallery|culture|landmark|mansion|house/.test(text)) counts.culture += 1;
+    if (/music|show|theater|theatre|market|district|brewery|nightlife/.test(text)) counts.entertainment += 1;
+    return counts;
+  }, { beach: 0, waterfront: 0, nature: 0, culture: 0, entertainment: 0 });
+}
+
+function dominantRegionName(profile, items) {
+  const counts = frequency(items.map((item) => item.regionId).filter(Boolean));
+  const [regionId] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  return regionId ? regionName(profile, regionId) : "";
 }
 
 function shortTitle(value) {
@@ -1857,7 +1978,7 @@ function mealTitle(profile, regionId, mealType) {
 function mealRecommendation(profile, input, regionId, mealType, mealUsage = new Map()) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
   const cuisine = (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item)))) || (input.food.cuisine || [])[0] || "local";
-  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage);
+  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true);
   const excluded = new Set([primaryPlace?.id].filter(Boolean));
   const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true);
   const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
@@ -2093,6 +2214,36 @@ function internalOutputTerms() {
     "food-area",
     "raw slug"
   ];
+}
+
+function isRawPlaceLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (RAW_PLACE_LABEL_PATTERN.test(text)) return true;
+  return /^(access|entrance|parking|trailhead|gate)\s+\d+$/i.test(text);
+}
+
+function mostCommonCount(values) {
+  return Math.max(0, ...Object.values(frequency(values)));
+}
+
+function frequency(values) {
+  return values.reduce((counts, value) => {
+    const key = String(value || "");
+    if (!key) return counts;
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function maxShare(counts) {
+  const values = Object.values(counts);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return total ? Math.max(...values) / total : 0;
+}
+
+function stableNumber(value) {
+  return String(value || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
 function advisory(id, severity, category, title, message, resolutionSuggestion, relatedDayId = "", relatedScheduleItemId = "") {

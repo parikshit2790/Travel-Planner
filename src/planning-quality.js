@@ -228,7 +228,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
     tripGuide: plan.tripGuide
   }).toLowerCase();
 
-  if (/(google places|openrouteservice|provider-found|provider-retrieved|culture-area|central area day)/.test(publicText)) {
+  if (/(google places|openrouteservice point-of-interest candidate|provider-found|provider-retrieved|culture-area|central-area|food-area|nature-area|central area day|google places .* candidate)/.test(publicText)) {
     hardFailures.push("internal-or-template-language");
   }
   if ((plan.days || []).length !== Number(plan.numberOfDays || 0)) hardFailures.push("day-count-mismatch");
@@ -239,6 +239,9 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   else if (mealNames.length >= 4 && repeatedMeal > Math.ceil(mealNames.length * 0.45)) issues.push("restaurant-repetition-risk");
   if (hasFixedDurationDominance(allItems)) issues.push("fixed-duration-dominance");
   if (hasFixedCostDominance(allItems)) issues.push("fixed-cost-dominance");
+  if (hasRepeatedDaytimeEvening(plan)) hardFailures.push("duplicated-daytime-evening");
+  if (hasRawPlaceLabel(allItems)) hardFailures.push("raw-place-label");
+  if (isProviderGeneratedPlan(plan) && hasUnverifiedMealDominance(mealItems)) hardFailures.push("meal-research-insufficient");
   if ((plan.days || []).some((day) => genericDayTitle(day.title))) issues.push("generic-day-title");
   if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
   if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
@@ -247,9 +250,9 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   const subScores = {
     destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, issues.includes("generic-day-title") ? 8 : 0),
     routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
-    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
-    scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 10 : 0),
-    costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 10 : 0),
+    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
+    scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0),
+    costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
     languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0)
   };
   const score = Math.round(Object.values(subScores).reduce((sum, value) => sum + value, 0) / Object.values(subScores).length);
@@ -473,19 +476,48 @@ function childFreeAdultTrip(input) {
 }
 
 function genericDayTitle(value) {
-  return /^(regional highlights|central area day|culture and landmarks day|parks and viewpoints day)$/i.test(String(value || "").trim());
+  return /^(regional highlights|central area day|culture and landmarks day|parks and viewpoints day|beach, boardwalk, and oceanfront evening|coastal nature and scenic water)$/i.test(String(value || "").trim());
 }
 
 function hasFixedDurationDominance(items) {
   const activityDurations = items.filter((item) => item.type === "activity").map((item) => item.durationMinutes);
-  return activityDurations.length >= 5 && maxShare(frequency(activityDurations)) > 0.75;
+  if (activityDurations.length < 5) return false;
+  if (maxShare(frequency(activityDurations)) > 0.4) return true;
+  for (let index = 2; index < activityDurations.length; index += 1) {
+    if (activityDurations[index] === activityDurations[index - 1] && activityDurations[index] === activityDurations[index - 2]) return true;
+  }
+  return false;
 }
 
 function hasFixedCostDominance(items) {
   const costs = items
     .filter((item) => item.type === "activity")
     .map((item) => `${item.estimatedCostPerPerson?.low || 0}-${item.estimatedCostPerPerson?.high || 0}`);
-  return costs.length >= 5 && maxShare(frequency(costs)) > 0.75;
+  return costs.length >= 5 && maxShare(frequency(costs)) > 0.45;
+}
+
+function hasRepeatedDaytimeEvening(plan) {
+  return (plan.days || []).some((day) => {
+    const activityIds = new Set((day.scheduleItems || []).filter((item) => item.type === "activity" && item.placeId).map((item) => item.placeId));
+    return (day.scheduleItems || []).some((item) => item.type === "evening" && item.placeId && activityIds.has(item.placeId));
+  });
+}
+
+function hasRawPlaceLabel(items) {
+  return items.some((item) => /^(access\s*\d*|entrance\s*\d*|parking\s*\d*|trailhead\s*\d*|gate\s*\d*|pier access|beach access|map point|unnamed road)$/i.test(String(item.title || "").trim()));
+}
+
+function hasUnverifiedMealDominance(mealItems) {
+  if (mealItems.length < 4) return false;
+  const backed = mealItems.filter((item) => item.mealDetails?.primaryPlaceId).length;
+  return backed < Math.ceil(mealItems.length * 0.6);
+}
+
+function isProviderGeneratedPlan(plan) {
+  const provider = plan?.generationMetadata?.destinationProfileSnapshot?.sourceMetadata?.provider
+    || plan?.generationMetadata?.sourceDiagnostics?.destinationResearchSource
+    || "";
+  return /^(google|openrouteservice|openai|generated-provider|test-live)$/i.test(provider);
 }
 
 function mostCommonCount(values) {
