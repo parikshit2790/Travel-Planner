@@ -154,6 +154,12 @@ function destinationPrompt(destinationName, trip) {
     "Create a destination profile that a vacation planner can schedule directly.",
     "Include 8-12 regions/neighborhoods, 20-32 places, 6-10 food areas, and 5-10 routes or nearby excursions.",
     "Places must include iconic must-dos, local neighborhoods, weather backups, food/market anchors, scenic/outdoor options, and nearby day trips when appropriate.",
+    "Evaluate the broader metro and region, not only city-limits POIs. Include destination-worthy nearby towns, university districts, food neighborhoods, parks, and day trips when they genuinely improve the trip.",
+    "Classify child-focused attractions, family entertainment centers, ordinary businesses, restaurants, food halls, bars, parks, museums, neighborhoods, easy day trips, long day trips, and overnight extensions clearly in categories/tags.",
+    "Do not use family entertainment centers, children-focused museums, ordinary businesses, hotels, schools, offices, parking, or generic search results as must-see stops unless the traveler explicitly requested them.",
+    "Food candidates must be actual restaurants, cafes, bakeries, food halls, bars/breweries, or dining venues. Do not list attractions as meal options merely because food exists onsite.",
+    "Regional attractions over about 90 minutes each way should be route options with tradeoffs, not simple same-day backups.",
+    "Never include internal provider wording such as candidate, Google Places, openrouteservice, category slug, central-area, culture-area, food-area, or raw taxonomy labels in names or descriptions.",
     "For Paris, for example, this should include major first-time anchors, neighborhoods, Seine/walkable moments, food districts, and nearby Versailles/Giverny-style excursions when appropriate."
   ].join("\n");
 }
@@ -187,7 +193,7 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
     state: clean(raw.state),
     timezone: clean(raw.timezone),
     currency: clean(raw.currency) || "USD",
-    summary: clean(raw.summary) || `${canonicalName} destination profile generated from live destination research.`,
+    summary: cleanPublicPlanningText(raw.summary) || `${canonicalName} destination profile generated from destination research.`,
     seasonalNotes: strings(raw.seasonalNotes, 5),
     generalAdvisories: [
       ...strings(raw.generalAdvisories, 5),
@@ -217,8 +223,8 @@ function normalizeRegions(value, canonicalName) {
   const list = Array.isArray(value) ? value : [];
   return list.filter((item) => item?.name).slice(0, 12).map((item, index) => ({
     id: slug(item.id || item.name || `region-${index + 1}`),
-    name: clean(item.name),
-    summary: clean(item.summary) || `Planning area in ${canonicalName}.`,
+    name: cleanPublicPlanningText(item.name),
+    summary: cleanPublicPlanningText(item.summary) || `Planning area in ${canonicalName}.`,
     centerCoordinates: coordinates(item.centerCoordinates),
     tags: strings(item.tags, 8),
     neighboringRegionIds: strings(item.neighboringRegionIds, 8).map(slug),
@@ -233,9 +239,9 @@ function normalizePlaces(value, regions) {
     const categories = strings(item.categories, 8);
     return {
       id: slug(item.id || item.name || `place-${index + 1}`),
-      name: clean(item.name),
+      name: cleanPublicPlanningText(item.name),
       regionId,
-      shortDescription: clean(item.shortDescription) || "Destination-research candidate. Verify details before travel.",
+      shortDescription: cleanPublicPlanningText(item.shortDescription) || "Destination research stop. Verify details before travel.",
       categories: categories.length ? categories : ["culture"],
       tags: strings(item.tags, 10),
       suitableFor: strings(item.suitableFor, 6).length ? strings(item.suitableFor, 6) : ["solo", "couple", "family", "senior"],
@@ -248,7 +254,7 @@ function normalizePlaces(value, regions) {
       weatherDependency: clean(item.weatherDependency) || "medium",
       accessibility: clean(item.accessibility) || "moderate",
       dietaryRelevance: strings(item.dietaryRelevance, 6),
-      openingTimeGuidance: clean(item.openingTimeGuidance) || "Confirm current opening hours before travel.",
+      openingTimeGuidance: cleanPublicPlanningText(item.openingTimeGuidance) || "Confirm current opening hours before travel.",
       bestTimeOfDay: clean(item.bestTimeOfDay) || (categories.includes("food") ? "lunch" : "afternoon"),
       reservationRecommended: Boolean(item.reservationRecommended),
       seasonalNotes: strings(item.seasonalNotes, 4),
@@ -259,7 +265,7 @@ function normalizePlaces(value, regions) {
       sourceMetadata: {
         provider: "openai",
         providerPlaceId: slug(item.id || item.name || `place-${index + 1}`),
-        retrievedName: clean(item.name),
+        retrievedName: cleanPublicPlanningText(item.name),
         retrievedAt: new Date().toISOString(),
         sourceUrl: OPENAI_SOURCE_URL,
         dataConfidence: "ai-assisted",
@@ -273,14 +279,14 @@ function normalizeFoodAreas(value, regions) {
   const list = Array.isArray(value) ? value : [];
   return list.filter((item) => item?.name).slice(0, 12).map((item, index) => ({
     id: slug(item.id || item.name || `food-${index + 1}`),
-    name: clean(item.name),
+    name: cleanPublicPlanningText(item.name),
     regionId: regionIdFor(item.regionId, regions, index),
     cuisines: strings(item.cuisines, 10),
     mealTypes: strings(item.mealTypes, 5),
     budgetLevels: strings(item.budgetLevels, 5),
     dietarySupport: strings(item.dietarySupport, 10),
     eveningSuitability: strings(item.eveningSuitability, 6),
-    shortDescription: clean(item.shortDescription) || "Food area from destination research; verify menus directly."
+    shortDescription: cleanPublicPlanningText(item.shortDescription) || "Food area from destination research; verify menus directly."
   }));
 }
 
@@ -288,14 +294,14 @@ function normalizeRoutes(value, regions) {
   const list = Array.isArray(value) ? value : [];
   return list.filter((item) => item?.name).slice(0, 12).map((item, index) => ({
     id: slug(item.id || item.name || `route-${index + 1}`),
-    name: clean(item.name),
+    name: cleanPublicPlanningText(item.name),
     originRegionId: regionIdFor(item.originRegionId, regions, index),
     destinationRegionId: regionIdFor(item.destinationRegionId, regions, index + 1),
     estimatedDriveMinutes: clampNumber(item.estimatedDriveMinutes, 5, 360, 25),
     estimatedDistanceMiles: clampNumber(item.estimatedDistanceMiles, 1, 250, 8),
     tags: strings(item.tags, 8),
     bestTimeOfDay: clean(item.bestTimeOfDay) || "afternoon",
-    notes: clean(item.notes) || "Verify current route conditions before departure."
+    notes: cleanPublicPlanningText(item.notes) || "Verify current route conditions before departure."
   }));
 }
 
@@ -352,6 +358,22 @@ function clampNumber(value, min, max, fallback) {
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function cleanPublicPlanningText(value) {
+  return clean(value)
+    .replace(/\bGoogle Places\s+\w+\s+candidate\b/ig, "destination research stop")
+    .replace(/\bGoogle Places candidate\b/ig, "destination research stop")
+    .replace(/\bopenrouteservice point-of-interest candidate\b/ig, "destination research stop")
+    .replace(/\bprovider[- ]?(found|retrieved)\b/ig, "researched")
+    .replace(/\bcentral-area\b/ig, "downtown area")
+    .replace(/\bculture-area\b/ig, "museum and landmark area")
+    .replace(/\bnature-area\b/ig, "outdoor area")
+    .replace(/\bfood-area\b/ig, "restaurant area")
+    .replace(/\bCentral area\b/g, "Downtown area")
+    .replace(/\bCulture and landmarks\b/g, "Museums and landmarks")
+    .replace(/\bFood and evening area\b/g, "Restaurant and evening area")
+    .replace(/\braw slug\b/ig, "planning label");
 }
 
 function slug(value) {

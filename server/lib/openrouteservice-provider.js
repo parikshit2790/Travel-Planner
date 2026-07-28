@@ -283,17 +283,17 @@ function buildRegions(destinationLocation, poiFeatures) {
   const centerCoordinates = [destinationLocation.longitude, destinationLocation.latitude];
   const center = {
     id: "downtown-core",
-    name: "Downtown core",
+    name: "Downtown and nearby core",
     summary: `Central planning area around ${destinationLocation.canonicalName}.`,
     centerCoordinates: { lat: destinationLocation.latitude, lng: destinationLocation.longitude },
     tags: ["central", "orientation"],
     neighboringRegionIds: ["arts-landmarks", "dining-evenings"],
     typicalTravelMinutesToRegions: {}
   };
-  const culture = regionFromFeature("arts-landmarks", "Arts, museums, and landmarks", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["downtown-core", "dining-evenings"]);
-  const nature = regionFromFeature("parks-viewpoints", "Parks, gardens, and viewpoints", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["downtown-core", "arts-landmarks"]);
-  const food = regionFromFeature("dining-evenings", "Dining and evening neighborhoods", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["downtown-core", "arts-landmarks"]);
-  const nearby = regionFromFeature("nearby-excursions", "Nearby excursions", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["downtown-core", "parks-viewpoints"]);
+  const culture = regionFromFeature("arts-landmarks", "Museums and landmark district", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["downtown-core", "dining-evenings"]);
+  const nature = regionFromFeature("parks-outdoors", "Parks, gardens, and outdoor routes", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["downtown-core", "arts-landmarks"]);
+  const food = regionFromFeature("dining-evenings", "Restaurant and evening neighborhoods", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["downtown-core", "arts-landmarks"]);
+  const nearby = regionFromFeature("nearby-excursions", "Nearby regional options", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["downtown-core", "parks-outdoors"]);
   return [center, culture, nature, food, nearby];
 }
 
@@ -363,10 +363,10 @@ function regionForFeature(feature, regions, center) {
   const category = poiCategory(feature);
   const distanceMiles = featureDistanceMiles(center, feature);
   if (distanceMiles >= 18) return regions.find((region) => region.id === "nearby-excursions") || regions[0];
-  if (category === "food") return regions.find((region) => region.id === "food-area") || regions[0];
-  if (category === "nature") return regions.find((region) => region.id === "nature-area") || regions[0];
-  if (["museum", "history", "landmark", "entertainment"].includes(category)) return regions.find((region) => region.id === "culture-area") || regions[0];
-  return regions.find((region) => region.id === "central-area") || regions[0];
+  if (category === "food") return regions.find((region) => region.id === "dining-evenings") || regions[0];
+  if (category === "nature") return regions.find((region) => region.id === "parks-outdoors") || regions[0];
+  if (["museum", "history", "landmark", "entertainment"].includes(category)) return regions.find((region) => region.id === "arts-landmarks") || regions[0];
+  return regions.find((region) => region.id === "downtown-core") || regions[0];
 }
 
 function buildFoodAreas(foodFeatures, regions, destinationName) {
@@ -389,7 +389,7 @@ function buildFoodAreas(foodFeatures, regions, destinationName) {
     const region = regions[areas.length % regions.length];
     areas.push({
       id: `ors-food-area-${areas.length}`,
-      name: `${region.name} dining area`,
+      name: `${region.name} restaurants`,
       regionId: region.id,
       cuisines: ["Local cuisine", "Casual dining", "Cafes"],
       mealTypes: ["breakfast", "lunch", "dinner"],
