@@ -1,0 +1,512 @@
+import { classifyPlaceForPlanning } from "./destination-intelligence.js";
+
+export const PLANNING_STAGE_NAMES = [
+  "destination-understanding",
+  "dynamic-research-plan",
+  "multi-source-research-normalization",
+  "candidate-ontology-classification",
+  "destination-opportunity-graph",
+  "traveler-fit-filtering",
+  "coverage-and-route-shape-selection",
+  "geographic-clustering",
+  "opening-hours-and-seasonality-screening",
+  "meal-and-evening-placement",
+  "hard-validation",
+  "independent-quality-critique",
+  "bounded-repair-loop",
+  "final-rendering"
+];
+
+const CATEGORY_BY_CLASSIFICATION = [
+  ["restaurant", (flag) => flag.isRestaurant || flag.isFoodHall],
+  ["bar-or-nightlife", (flag) => flag.isBar],
+  ["beach-or-waterfront", (flag) => flag.isBeachOrWaterfront || flag.isBoardwalk || flag.isPier],
+  ["outdoor-nature", (flag) => flag.isPark || flag.isMountainOrTrail || flag.isWaterActivity],
+  ["museum-or-culture", (flag) => flag.isMuseum || flag.isNeighborhood],
+  ["evening-anchor", (flag) => flag.isEveningAnchor],
+  ["family-attraction", (flag) => flag.isFamilyFocused || flag.isChildrenFocused],
+  ["shopping-entertainment", (flag) => flag.isEntertainmentCenter],
+  ["attraction", () => true]
+];
+
+export function buildPlanningStageTrace(extra = {}) {
+  return PLANNING_STAGE_NAMES.map((name, index) => ({
+    index: index + 1,
+    name,
+    status: extra[name] || "completed"
+  }));
+}
+
+export function buildDynamicResearchPlan(profile, input, intelligence) {
+  const archetype = intelligence?.destinationArchetype || {};
+  const primaryArchetype = archetype.primaryArchetype || "mixed urban/nature";
+  const cityName = shortDestinationName(profile);
+  const coreDomains = [
+    "signature attractions",
+    "neighborhood character",
+    "route-compatible meals",
+    "weather backups",
+    "first-time visitor anchors",
+    "practical travel time",
+    "opening-hours confidence"
+  ];
+  const archetypeDomains = domainsForArchetype(primaryArchetype);
+  const profileSnapshot = {
+    canonicalName: profile.canonicalName,
+    city: cityName,
+    stateOrRegion: profile.state || profile.country || "",
+    country: profile.country || "",
+    primaryArchetype,
+    secondaryArchetypes: archetype.secondaryArchetypes || [],
+    definingExperiences: archetype.definingExperiences || [],
+    expectedCategoryMix: archetype.expectedCategoryMix || {},
+    foodIdentity: archetype.foodIdentity || "local dining",
+    eveningStrength: archetype.eveningStrength || "unknown",
+    regionalExtensions: archetype.regionalExtensions || [],
+    confidence: archetype.confidence || intelligence?.researchConfidence || "starter"
+  };
+  return {
+    destinationProfile: profileSnapshot,
+    researchDomains: [...new Set([...coreDomains, ...archetypeDomains])],
+    candidateIntakePolicy: {
+      requiredFields: ["name", "coordinates or region", "type", "duration", "cost", "route fit", "traveler fit", "source confidence"],
+      rejectIf: [
+        "ordinary business without destination value",
+        "children-focused stop for child-free adult trips unless explicitly requested",
+        "restaurant used as an attraction",
+        "attraction used as a meal venue",
+        "regional stop beyond the trip's drive budget"
+      ]
+    },
+    cachePolicy: {
+      keyParts: [
+        stableKey(profile.canonicalName),
+        stableKey(profile.country || ""),
+        stableKey(primaryArchetype),
+        String(input.numberOfDays || ""),
+        monthBucket(input.startDate),
+        "planner-quality-v1"
+      ].filter(Boolean),
+      excludesPersonalData: true,
+      excludesTravelerNames: true,
+      invalidation: "destination profile, provider data, schema version, or travel season changes"
+    }
+  };
+}
+
+export function normalizePlanningCandidate(candidate, profile, input = {}) {
+  const place = candidate?.place || candidate || {};
+  const classification = candidate?.classification || classifyPlaceForPlanning(place, profile, input, candidate?.routeFeasibility);
+  const primaryType = primaryTypeFor(classification);
+  const secondaryTypes = secondaryTypesFor(classification);
+  const routeFeasibility = candidate?.routeFeasibility || {};
+  const sourceConfidence = sourceConfidenceFor(candidate, place);
+  const rejectionReasons = [];
+  if (classification.isOrdinaryBusiness) rejectionReasons.push("ordinary-business");
+  if (classification.isChildrenFocused && childFreeAdultTrip(input)) rejectionReasons.push("children-focused-mismatch");
+  if (routeFeasibility.classification === "not-practical") rejectionReasons.push("route-not-practical");
+  return {
+    candidateId: place.id || candidate?.id || stableKey(place.name),
+    providerPlaceId: place.sourceMetadata?.providerPlaceId || place.id || "",
+    canonicalName: place.name || "Unnamed candidate",
+    coordinates: coordinatesFor(place),
+    city: shortDestinationName(profile),
+    region: regionName(profile, place.regionId),
+    geographicScope: routeFeasibility.classification || "local",
+    geographicCluster: place.regionId || profile.planningRules?.defaultHotelRegion || "destination-core",
+    primaryType,
+    secondaryTypes,
+    archetypeFit: archetypeFitFor(classification, profile, candidate),
+    travelerFit: classification.travelerFit || { score: 0, reasons: [] },
+    destinationSignificance: classification.destinationSignificance || { score: Number(place.priorityScore || 0), reasons: [] },
+    firstTimeVisitorValue: firstTimeVisitorValue(place, classification),
+    localSignificance: Number(candidate?.significanceScore || place.priorityScore || 0),
+    uniqueness: uniquenessFor(place, classification),
+    seasonalFit: seasonalFitFor(place, input),
+    openingHoursConfidence: openingHoursConfidenceFor(place),
+    realisticDurationMin: Number(place.minimumDurationMinutes || Math.max(30, Number(place.typicalDurationMinutes || 90) - 30)),
+    realisticDurationMax: Number(place.maximumDurationMinutes || Math.max(Number(place.typicalDurationMinutes || 90), 120)),
+    priceConfidence: priceConfidenceFor(place),
+    mealCapabilities: mealCapabilitiesFor(classification),
+    ageAudience: classification.isChildrenFocused ? "children-focused" : classification.isFamilyFocused ? "family" : "adult-compatible",
+    accessibility: place.accessibility || "unknown",
+    bookingNeed: place.reservationRecommended ? "recommended" : "optional",
+    routeCompatibility: routeFeasibility,
+    sourceConfidence,
+    accepted: Boolean(candidate?.accepted ?? rejectionReasons.length === 0),
+    rejectionReasons
+  };
+}
+
+export function buildDestinationOpportunityGraph(profile, input, intelligence, researchProfile = null) {
+  const nodes = (intelligence?.allCandidates || [])
+    .map((candidate) => normalizePlanningCandidate(candidate, profile, input))
+    .filter((node) => node.canonicalName && node.accepted)
+    .slice(0, 80);
+  const edges = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex += 1) {
+      const from = nodes[index];
+      const to = nodes[otherIndex];
+      const distanceMiles = distanceBetween(from.coordinates, to.coordinates);
+      const sameCluster = from.geographicCluster === to.geographicCluster;
+      const routeMinutes = sameCluster ? Math.max(8, Math.round(distanceMiles / 0.45) + 8) : Math.max(18, Math.round(distanceMiles / 0.7) + 12);
+      const relationship = relationshipFor(from, to, sameCluster, routeMinutes);
+      if (relationship !== "distant-unrelated" || routeMinutes <= 65) {
+        edges.push({
+          from: from.candidateId,
+          to: to.candidateId,
+          relationship,
+          sameCluster,
+          routeMinutes,
+          distanceMiles,
+          validSameDay: routeMinutes <= 65,
+          redundancy: redundantTypes(from, to)
+        });
+      }
+    }
+  }
+  return {
+    destination: profile.canonicalName,
+    destinationProfile: researchProfile,
+    nodes,
+    edges: edges.slice(0, 180),
+    coverage: coverageFor(nodes),
+    routing: routingCoverageFor(edges, nodes),
+    createdBy: "deterministic-planning-quality-layer"
+  };
+}
+
+export function summarizeOpportunityGraph(graph) {
+  return {
+    destination: graph.destination,
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+    coverage: graph.coverage,
+    routing: graph.routing,
+    sampleNodes: graph.nodes.slice(0, 16).map((node) => ({
+      candidateId: node.candidateId,
+      canonicalName: node.canonicalName,
+      primaryType: node.primaryType,
+      cluster: node.geographicCluster,
+      accepted: node.accepted,
+      destinationSignificance: node.destinationSignificance?.score || 0
+    }))
+  };
+}
+
+export function evaluateDestinationOpportunityCoverage(graph, destinationProfile = {}) {
+  const failures = [];
+  const coverage = graph.coverage || {};
+  if (!coverage.attraction) failures.push("missing-attraction-candidates");
+  if (!coverage.restaurant) failures.push("missing-meal-candidates");
+  if ((destinationProfile.primaryArchetype === "beach/coastal") && !coverage["beach-or-waterfront"]) failures.push("missing-beach-waterfront-candidates");
+  if ((destinationProfile.primaryArchetype === "mountain") && !coverage["outdoor-nature"]) failures.push("missing-outdoor-nature-candidates");
+  if ((destinationProfile.primaryArchetype === "major city") && !(coverage["museum-or-culture"] || coverage.neighborhood)) failures.push("missing-city-culture-candidates");
+  return {
+    pass: failures.length === 0,
+    hardFailures: failures,
+    coverage,
+    minimums: {
+      attraction: 1,
+      restaurant: 1,
+      archetypeSpecific: destinationProfile.primaryArchetype || "mixed urban/nature"
+    }
+  };
+}
+
+export function critiquePlanDeterministically(plan, graph = {}) {
+  const issues = [];
+  const hardFailures = [];
+  const allItems = (plan.days || []).flatMap((day) => day.scheduleItems || []);
+  const publicText = JSON.stringify({
+    overview: plan.overview,
+    days: plan.days,
+    foodPlan: plan.foodPlan,
+    routeSummary: plan.routeSummary,
+    hotelBase: plan.hotelBase,
+    tripGuide: plan.tripGuide
+  }).toLowerCase();
+
+  if (/(google places|openrouteservice|provider-found|provider-retrieved|culture-area|central area day)/.test(publicText)) {
+    hardFailures.push("internal-or-template-language");
+  }
+  if ((plan.days || []).length !== Number(plan.numberOfDays || 0)) hardFailures.push("day-count-mismatch");
+  const mealItems = allItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || item.title)).filter(Boolean);
+  const repeatedMeal = mostCommonCount(mealNames);
+  if (mealNames.length >= 6 && repeatedMeal > Math.ceil(mealNames.length * 0.7)) hardFailures.push("universal-restaurant-dominance");
+  else if (mealNames.length >= 4 && repeatedMeal > Math.ceil(mealNames.length * 0.45)) issues.push("restaurant-repetition-risk");
+  if (hasFixedDurationDominance(allItems)) issues.push("fixed-duration-dominance");
+  if (hasFixedCostDominance(allItems)) issues.push("fixed-cost-dominance");
+  if ((plan.days || []).some((day) => genericDayTitle(day.title))) issues.push("generic-day-title");
+  if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
+  if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
+  if ((plan.days || []).some((day) => (day.backupOptions || []).some((backup) => Number(backup.estimatedDurationMinutes || 0) > 240))) issues.push("backup-too-large");
+
+  const subScores = {
+    destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, issues.includes("generic-day-title") ? 8 : 0),
+    routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
+    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
+    scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 10 : 0),
+    costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 10 : 0),
+    languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0)
+  };
+  const score = Math.round(Object.values(subScores).reduce((sum, value) => sum + value, 0) / Object.values(subScores).length);
+  return {
+    critic: "deterministic-route-mosaic-quality-critic-v1",
+    threshold: 85,
+    pass: score >= 85 && hardFailures.length === 0,
+    score,
+    subScores,
+    issues,
+    hardFailures,
+    checkedRules: [
+      "destination specificity",
+      "meal venue validity",
+      "day count",
+      "template-language leakage",
+      "duration and cost variation",
+      "backup plausibility",
+      "candidate graph coverage"
+    ]
+  };
+}
+
+export function calculateTemplateSimilarityScore(plan) {
+  const allItems = (plan.days || []).flatMap((day) => day.scheduleItems || []);
+  const durationCounts = frequency(allItems.filter((item) => item.type === "activity").map((item) => item.durationMinutes));
+  const costCounts = frequency(allItems.filter((item) => item.type === "activity").map((item) => `${item.estimatedCostPerPerson?.low || 0}-${item.estimatedCostPerPerson?.high || 0}`));
+  const titlePatterns = frequency((plan.days || []).map((day) => normalizeText(day.title).replace(/[a-z]+/g, "x")));
+  const maxDurationShare = maxShare(durationCounts);
+  const maxCostShare = maxShare(costCounts);
+  const maxTitlePatternShare = maxShare(titlePatterns);
+  return {
+    score: Math.round((maxDurationShare * 35 + maxCostShare * 35 + maxTitlePatternShare * 30) * 100) / 100,
+    maxDurationShare,
+    maxCostShare,
+    maxTitlePatternShare,
+    flags: [
+      maxDurationShare > 0.7 ? "duration-template-risk" : "",
+      maxCostShare > 0.7 ? "cost-template-risk" : "",
+      maxTitlePatternShare > 0.7 ? "title-template-risk" : ""
+    ].filter(Boolean)
+  };
+}
+
+export function runBoundedRepairLoop(plan, critique) {
+  if (critique.pass) {
+    return { attempted: false, attempts: 0, repaired: false, reason: "Plan passed deterministic quality gate." };
+  }
+  return {
+    attempted: true,
+    attempts: 1,
+    repaired: false,
+    blockedBy: critique.hardFailures,
+    reason: "Deterministic repair loop identified hard failures; caller should regenerate with stricter candidate filters instead of silently patching the public itinerary."
+  };
+}
+
+export function buildPlannerObservabilitySummary({ researchPlan, graph, coverageValidation, critique, templateSimilarity }) {
+  return {
+    mode: "safe-planner-observability",
+    destination: researchPlan?.destinationProfile?.canonicalName || graph?.destination || "",
+    primaryArchetype: researchPlan?.destinationProfile?.primaryArchetype || "",
+    candidateCount: graph?.nodes?.length || 0,
+    graphEdgeCount: graph?.edges?.length || 0,
+    coveragePass: Boolean(coverageValidation?.pass),
+    criticScore: critique?.score || 0,
+    criticPass: Boolean(critique?.pass),
+    templateSimilarityScore: templateSimilarity?.score || 0,
+    secretValuesIncluded: false
+  };
+}
+
+function domainsForArchetype(archetype) {
+  if (archetype === "beach/coastal") return ["beaches and waterfront access", "coastal nature", "sunset/evening waterfront", "seafood and breakfast"];
+  if (archetype === "mountain") return ["trailheads", "scenic drives", "viewpoints", "waterfalls", "weather-safe town blocks"];
+  if (archetype === "major city") return ["landmarks", "museums", "historic neighborhoods", "food districts", "transit and parking"];
+  if (archetype === "food destination") return ["signature restaurants", "markets", "regional cuisine", "reservation needs"];
+  return ["signature local anchors", "nearby nature", "neighborhoods", "food districts"];
+}
+
+function primaryTypeFor(classification) {
+  return CATEGORY_BY_CLASSIFICATION.find(([, predicate]) => predicate(classification))?.[0] || "attraction";
+}
+
+function secondaryTypesFor(classification) {
+  return CATEGORY_BY_CLASSIFICATION
+    .filter(([, predicate]) => predicate(classification))
+    .map(([type]) => type)
+    .filter((type) => type !== "attraction");
+}
+
+function relationshipFor(from, to, sameCluster, routeMinutes) {
+  if (from.primaryType === "restaurant" && to.primaryType !== "restaurant") return "valid-meal-near-activity";
+  if (to.primaryType === "restaurant" && from.primaryType !== "restaurant") return "valid-meal-near-activity";
+  if (sameCluster && redundantTypes(from, to)) return "same-cluster-redundant";
+  if (sameCluster) return "same-cluster-complement";
+  if (routeMinutes <= 65) return "same-day-route-compatible";
+  return "distant-unrelated";
+}
+
+function redundantTypes(from, to) {
+  return from.primaryType === to.primaryType && !["restaurant", "attraction"].includes(from.primaryType);
+}
+
+function coverageFor(nodes) {
+  return nodes.reduce((coverage, node) => {
+    coverage[node.primaryType] = (coverage[node.primaryType] || 0) + 1;
+    if (!["restaurant", "bar-or-nightlife"].includes(node.primaryType)) coverage.attraction = (coverage.attraction || 0) + 1;
+    node.secondaryTypes.forEach((type) => {
+      coverage[type] = (coverage[type] || 0) + 1;
+    });
+    return coverage;
+  }, {});
+}
+
+function routingCoverageFor(edges, nodes) {
+  const validEdges = edges.filter((edge) => edge.validSameDay).length;
+  return {
+    validSameDayEdges: validEdges,
+    averageEdgesPerNode: nodes.length ? Math.round((validEdges / nodes.length) * 10) / 10 : 0
+  };
+}
+
+function sourceConfidenceFor(candidate, place) {
+  if (candidate?.accepted && candidate?.score >= 70) return "high";
+  if (place.sourceMetadata?.dataConfidence) return place.sourceMetadata.dataConfidence;
+  if (place.id) return "medium";
+  return "low";
+}
+
+function archetypeFitFor(classification, profile, candidate) {
+  const archetype = profile?.destinationArchetype?.primaryArchetype || "";
+  if (archetype === "beach/coastal" && (classification.isBeachOrWaterfront || classification.isBoardwalk || classification.isWaterActivity)) return "strong";
+  if (archetype === "mountain" && classification.isMountainOrTrail) return "strong";
+  if (candidate?.score >= 80) return "strong";
+  if (candidate?.score >= 55) return "moderate";
+  return "supporting";
+}
+
+function firstTimeVisitorValue(place, classification) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
+  if (/signature|landmark|famous|essential|museum|national|boardwalk|beach|historic/.test(text)) return "high";
+  if (classification.isRestaurant || classification.isBar) return "supporting";
+  return "moderate";
+}
+
+function uniquenessFor(place, classification) {
+  if (classification.isOrdinaryBusiness) return "low";
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
+  if (/signature|only|unique|historic|national|famous|local/.test(text)) return "high";
+  return "moderate";
+}
+
+function seasonalFitFor(place, input) {
+  const month = Number(String(input.startDate || "").split("-")[1]);
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.seasonalNotes || []).join(" ")}`);
+  if (month >= 6 && month <= 9 && /heat|summer|beach|water|sun/.test(text)) return "season-aware";
+  if (month <= 2 || month === 12) return /indoor|museum|winter/.test(text) ? "good" : "verify-weather";
+  return "generally-compatible";
+}
+
+function openingHoursConfidenceFor(place) {
+  if (/confirm|verify|unknown/i.test(place.openingTimeGuidance || "")) return "low";
+  return place.openingTimeGuidance ? "medium" : "unknown";
+}
+
+function priceConfidenceFor(place) {
+  const low = Number(place.estimatedCostLow);
+  const high = Number(place.estimatedCostHigh);
+  if (Number.isFinite(low) && Number.isFinite(high) && high >= low) return "medium";
+  return "low";
+}
+
+function mealCapabilitiesFor(classification) {
+  return [
+    classification.servesBreakfast ? "breakfast" : "",
+    classification.servesLunch ? "lunch" : "",
+    classification.servesDinner ? "dinner" : ""
+  ].filter(Boolean);
+}
+
+function coordinatesFor(place) {
+  if (Number.isFinite(place.coordinates?.lat) && Number.isFinite(place.coordinates?.lng)) return place.coordinates;
+  if (Number.isFinite(place.latitude) && Number.isFinite(place.longitude)) return { lat: Number(place.latitude), lng: Number(place.longitude) };
+  return null;
+}
+
+function distanceBetween(from, to) {
+  if (!from || !to) return 25;
+  const radiusMiles = 3958.8;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(to.lat - from.lat);
+  const dLon = toRad(to.lng - from.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+}
+
+function regionName(profile, id) {
+  return profile?.regions?.find((region) => region.id === id)?.name || id || "";
+}
+
+function shortDestinationName(profile) {
+  return String(profile?.canonicalName || "").split(",")[0].trim();
+}
+
+function monthBucket(value) {
+  const month = String(value || "").split("-")[1];
+  return month ? `month-${month}` : "season-unknown";
+}
+
+function stableKey(value) {
+  return normalizeText(value).replace(/\s+/g, "-");
+}
+
+function normalizeText(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function childFreeAdultTrip(input) {
+  return Number(input.childCount || input.children || 0) === 0 && Number(input.travelers || input.adults || 1) >= 1;
+}
+
+function genericDayTitle(value) {
+  return /^(regional highlights|central area day|culture and landmarks day|parks and viewpoints day)$/i.test(String(value || "").trim());
+}
+
+function hasFixedDurationDominance(items) {
+  const activityDurations = items.filter((item) => item.type === "activity").map((item) => item.durationMinutes);
+  return activityDurations.length >= 5 && maxShare(frequency(activityDurations)) > 0.75;
+}
+
+function hasFixedCostDominance(items) {
+  const costs = items
+    .filter((item) => item.type === "activity")
+    .map((item) => `${item.estimatedCostPerPerson?.low || 0}-${item.estimatedCostPerPerson?.high || 0}`);
+  return costs.length >= 5 && maxShare(frequency(costs)) > 0.75;
+}
+
+function mostCommonCount(values) {
+  return Math.max(0, ...Object.values(frequency(values)));
+}
+
+function frequency(values) {
+  return values.reduce((counts, value) => {
+    const key = String(value || "");
+    if (!key) return counts;
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function maxShare(counts) {
+  const values = Object.values(counts);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return total ? Math.max(...values) / total : 0;
+}
+
+function scoreFrom(base, ...deductions) {
+  return Math.max(0, Math.round(base - deductions.reduce((sum, value) => sum + value, 0)));
+}

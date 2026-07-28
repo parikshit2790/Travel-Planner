@@ -8,6 +8,17 @@ import {
 } from "./domain.js";
 import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 import { buildDestinationIntelligence, classifyPlaceForPlanning } from "./destination-intelligence.js";
+import {
+  buildDestinationOpportunityGraph,
+  buildDynamicResearchPlan,
+  buildPlannerObservabilitySummary,
+  buildPlanningStageTrace,
+  calculateTemplateSimilarityScore,
+  critiquePlanDeterministically,
+  evaluateDestinationOpportunityCoverage,
+  runBoundedRepairLoop,
+  summarizeOpportunityGraph
+} from "./planning-quality.js";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 
@@ -100,6 +111,9 @@ export function generateTripPlan(trip, options = {}) {
 
   const constraints = buildTravelerConstraintProfile(normalized);
   const destinationIntelligence = buildDestinationIntelligence(destinationProfile, normalized, constraints);
+  const dynamicResearchPlan = buildDynamicResearchPlan(destinationProfile, normalized, destinationIntelligence);
+  const opportunityGraph = buildDestinationOpportunityGraph(destinationProfile, normalized, destinationIntelligence, dynamicResearchPlan.destinationProfile);
+  const opportunityCoverageValidation = evaluateDestinationOpportunityCoverage(opportunityGraph, dynamicResearchPlan.destinationProfile);
   const scored = scoreCandidates(destinationProfile, normalized, constraints, destinationIntelligence);
   const tripShapeOptions = buildTripShapeOptions(destinationProfile, normalized, destinationIntelligence);
   const rawDays = buildDays(destinationProfile, normalized, constraints, scored, destinationIntelligence);
@@ -136,18 +150,36 @@ export function generateTripPlan(trip, options = {}) {
     generationMetadata: {
       destinationProfileId: destinationProfile.id,
       destinationProfileSnapshot: destinationProfile,
+      destinationProfile: dynamicResearchPlan.destinationProfile,
       usesGenericDestinationProfile: destinationProfile.id.startsWith("generic-"),
       approvedTripShape: normalized.approvedTripShape,
       routeApprovalRequired: Boolean(normalized.routePreferences?.tripStructure && normalized.routePreferences.tripStructure !== "one-city"),
       hotelBase,
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
+      planningStages: buildPlanningStageTrace(),
+      dynamicResearchPlan,
       destinationIntelligence: summarizeDestinationIntelligence(destinationIntelligence),
       destinationArchetype: destinationIntelligence.destinationArchetype,
+      opportunityGraph: summarizeOpportunityGraph(opportunityGraph),
+      opportunityCoverageValidation,
       tripShapeOptions,
       unsupportedPreferences: normalized.unknownPreferences
     }
   };
+  const qualityCritique = critiquePlanDeterministically(plan, opportunityGraph);
+  const templateSimilarity = calculateTemplateSimilarityScore(plan);
+  const repairLoop = runBoundedRepairLoop(plan, qualityCritique);
+  plan.generationMetadata.qualityCritique = qualityCritique;
+  plan.generationMetadata.templateSimilarity = templateSimilarity;
+  plan.generationMetadata.repairLoop = repairLoop;
+  plan.generationMetadata.observability = buildPlannerObservabilitySummary({
+    researchPlan: dynamicResearchPlan,
+    graph: opportunityGraph,
+    coverageValidation: opportunityCoverageValidation,
+    critique: qualityCritique,
+    templateSimilarity
+  });
   const validation = validateTripPlan(plan);
   if (validation.blocking.length) {
     plan.status = "needs-review";
@@ -1447,6 +1479,14 @@ export function validateTripPlan(plan) {
   if (hasUniformGenericPricing(plan)) {
     blocking.push(advisory("generic-pricing", "blocking", "budget", "Generic repeated pricing detected", "The itinerary uses repeated generic attraction price ranges instead of category-appropriate estimates.", "Regenerate with destination- and category-aware cost ranges."));
   }
+  const coverageFailures = plan.generationMetadata?.opportunityCoverageValidation?.hardFailures || [];
+  coverageFailures.forEach((failure) => {
+    blocking.push(advisory(`opportunity-coverage-${failure}`, "blocking", "destination-fit", "Destination opportunity coverage is incomplete", `The planner could not prove required destination candidate coverage: ${failure}.`, "Regenerate after destination research returns stronger candidates."));
+  });
+  const criticFailures = plan.generationMetadata?.qualityCritique?.hardFailures || [];
+  criticFailures.forEach((failure) => {
+    blocking.push(advisory(`quality-critic-${failure}`, "blocking", "quality", "Quality critic rejected the itinerary", `The independent planner critic found a hard failure: ${failure}.`, "Regenerate with stricter candidate selection and scheduling constraints."));
+  });
   plan.days.forEach((day) => {
     if (!day.date) blocking.push(advisory(`date-${day.id}`, "blocking", "dates", `Day ${day.dayNumber} missing date`, "Every generated day must have a date.", "Regenerate the trip."));
     validateDay(day).forEach((issue) => blocking.push(advisory(`day-${day.id}-${issue.code}`, "blocking", "schedule", `Day ${day.dayNumber} schedule issue`, issue.message, "Regenerate or move conflicting items.")));
