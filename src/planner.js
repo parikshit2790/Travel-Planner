@@ -7,6 +7,7 @@ import {
   uid
 } from "./domain.js";
 import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
+import { buildDestinationIntelligence } from "./destination-intelligence.js";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 
@@ -98,8 +99,9 @@ export function generateTripPlan(trip, options = {}) {
   if (!destinationProfile) return { status: "invalid", errors: [{ severity: "blocking", issue: "Destination is required before generating a plan.", action: "Edit Trip Basics" }], normalized };
 
   const constraints = buildTravelerConstraintProfile(normalized);
-  const scored = scoreCandidates(destinationProfile, normalized, constraints);
-  const days = buildDays(destinationProfile, normalized, constraints, scored);
+  const destinationIntelligence = buildDestinationIntelligence(destinationProfile, normalized, constraints);
+  const scored = scoreCandidates(destinationProfile, normalized, constraints, destinationIntelligence);
+  const days = buildDays(destinationProfile, normalized, constraints, scored, destinationIntelligence);
   const hotelBase = buildHotelBase(destinationProfile, normalized, days);
   const foodPlan = buildFoodPlan(destinationProfile, normalized, constraints, days);
   const routeSummary = buildRouteSummary(destinationProfile, days);
@@ -135,6 +137,7 @@ export function generateTripPlan(trip, options = {}) {
       hotelBase,
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
+      destinationIntelligence: summarizeDestinationIntelligence(destinationIntelligence),
       unsupportedPreferences: normalized.unknownPreferences
     }
   };
@@ -176,6 +179,27 @@ function buildHotelBase(profile, input, days) {
   };
 }
 
+function summarizeDestinationIntelligence(intelligence) {
+  const candidate = (item) => ({
+    name: item.place.name,
+    categories: item.categories,
+    score: item.score,
+    accepted: item.accepted,
+    reason: item.reason,
+    routeTime: item.routeFeasibility
+  });
+  return {
+    destinationIdentity: intelligence.destinationIdentity,
+    categoryCoverage: intelligence.categoryCoverage,
+    experienceGaps: intelligence.experienceGaps,
+    routeOptions: intelligence.routeOptions,
+    researchConfidence: intelligence.researchConfidence,
+    sourceFreshness: intelligence.sourceFreshness,
+    consideredCandidates: (intelligence.allCandidates || []).slice(0, 40).map(candidate),
+    rejectedCandidates: (intelligence.allCandidates || []).filter((item) => !item.accepted).slice(0, 12).map(candidate)
+  };
+}
+
 export function buildTravelerConstraintProfile(input) {
   const restrictionText = input.travelersDetail.flatMap((traveler) => traveler.restrictions || []).join(" ").toLowerCase();
   const foodText = [...(input.food.diet || []), ...(input.food.restrictions || []), restrictionText].join(" ").toLowerCase();
@@ -198,7 +222,7 @@ export function buildTravelerConstraintProfile(input) {
   };
 }
 
-export function scoreCandidates(profile, input, constraints) {
+export function scoreCandidates(profile, input, constraints, intelligence = buildDestinationIntelligence(profile, input, constraints)) {
   const selectedLabels = [
     ...input.preferences.map((pref) => pref.label),
     ...(input.food.cuisine || []),
@@ -206,10 +230,13 @@ export function scoreCandidates(profile, input, constraints) {
   ].map(normalizeText);
   const avoid = new Set(input.avoidPlaces.map(normalizeText));
   const must = input.mustHavePlaces.map(normalizeText);
+  const intelligenceById = new Map((intelligence.allCandidates || []).map((item) => [item.place.id, item]));
   return profile.places.map((place) => {
+    const intelligenceItem = intelligenceById.get(place.id);
     const reasons = [];
-    let score = place.priorityScore * planningWeights.priority;
+    let score = intelligenceItem ? intelligenceItem.score * 2 : place.priorityScore * planningWeights.priority;
     const placeText = normalizeText(`${place.name} ${place.categories.join(" ")} ${place.tags.join(" ")}`);
+    if (intelligenceItem?.reason) reasons.push(intelligenceItem.reason);
     if (selectedLabels.some((label) => label && placeText.includes(label))) {
       score += planningWeights.preferenceMatch;
       reasons.push("Matches selected trip interests.");
@@ -231,13 +258,18 @@ export function scoreCandidates(profile, input, constraints) {
     }
     if (budgetBand(input) === "budget" && place.estimatedCostHigh <= 35) score += planningWeights.budgetFit;
     if (place.weatherDependency === "low") score += planningWeights.weatherBalance;
-    return { place, score, reasons };
+    if (intelligenceItem?.routeFeasibility?.classification === "overnight-recommended") {
+      score -= input.numberOfDays >= 5 ? 18 : 65;
+      reasons.push("Better as an optional regional extension than a casual in-city stop.");
+    }
+    if (intelligenceItem?.routeFeasibility?.classification === "not-practical") score += planningWeights.hardExclusion;
+    return { place, score, reasons, intelligence: intelligenceItem };
   }).sort((a, b) => b.score - a.score || a.place.name.localeCompare(b.place.name));
 }
 
-export function buildDays(profile, input, constraints, scored) {
+export function buildDays(profile, input, constraints, scored, intelligence = null) {
   const scheduled = new Set();
-  const themes = destinationDayThemes(profile, input);
+  const themes = destinationDayThemes(profile, input, intelligence);
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const date = addDays(input.startDate, index);
     const themeRegions = themes[index % themes.length];
@@ -275,17 +307,10 @@ export function buildDays(profile, input, constraints, scored) {
   });
 }
 
-function destinationDayThemes(profile, input) {
+function destinationDayThemes(profile, input, intelligence = null) {
   if (profile.id === "charlotte") {
-    return rotate([
-      ["uptown", "south-end"],
-      ["freedom-park", "south-end", "plaza-midwood"],
-      ["noda", "camp-north-end", "plaza-midwood"],
-      ["whitewater-center"],
-      ["lake-norman"],
-      ["carowinds"],
-      ["concord", "uptown"]
-    ], input.variationSeed).slice(0, input.numberOfDays);
+    const themes = charlotteIntelligentThemes(input, intelligence);
+    return rotate(themes, input.variationSeed).slice(0, input.numberOfDays);
   }
   if (profile.id === "dallas") {
     return rotate([
@@ -316,6 +341,52 @@ function destinationDayThemes(profile, input) {
     const anchor = profile.regions[(index + input.variationSeed) % profile.regions.length] || profile.regions[0];
     return [anchor.id, ...(anchor.neighboringRegionIds || [])].filter((regionId) => profileRegions.includes(regionId)).slice(0, input.pace === "Packed" ? 3 : 2);
   });
+}
+
+function charlotteIntelligentThemes(input, intelligence) {
+  const selected = normalizeText([
+    input.hiking,
+    input.walkingLimit,
+    ...(input.preferences || []).map((pref) => pref.label),
+    ...(input.food?.cuisine || []),
+    ...(input.alcohol?.preferences || []),
+    ...(input.mustHavePlaces || [])
+  ].join(" "));
+  const wantsNature = /nature|outdoor|hike|scenic|water|lake|waterfall|mountain/.test(selected);
+  const wantsFood = /food|cuisine|dining|restaurant|nightlife|bar|brewery|live music/.test(selected);
+  const regional = intelligence?.nearbyDayTrips?.find((item) => item.routeFeasibility.classification !== "overnight-recommended")?.place.regionId || "whitewater-center";
+  const overnight = intelligence?.regionalOvernightExtensions?.[0]?.place.regionId || "asheville-blue-ridge";
+  if (wantsNature) {
+    return [
+      ["uptown"],
+      [regional],
+      ["crowders-mountain", "lake-wylie"],
+      ["south-end", "noda", "plaza-midwood"],
+      ["lake-norman"],
+      [overnight],
+      ["camp-north-end", "uptown"]
+    ];
+  }
+  if (wantsFood) {
+    return [
+      ["uptown"],
+      ["south-end", "plaza-midwood"],
+      ["noda", "camp-north-end"],
+      ["ballantyne", "south-end"],
+      [regional],
+      ["lake-norman"],
+      ["uptown", "south-end"]
+    ];
+  }
+  return [
+    ["uptown"],
+    ["whitewater-center", "lake-wylie"],
+    ["south-end", "noda"],
+    ["camp-north-end", "plaza-midwood"],
+    ["lake-norman"],
+    ["crowders-mountain"],
+    ["concord", "uptown"]
+  ];
 }
 
 function scheduleDay(profile, input, constraints, places, dayIndex) {
@@ -1127,8 +1198,10 @@ function mealTitle(profile, regionId, mealType) {
 function mealRecommendation(profile, input, regionId, mealType) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
   const cuisine = (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item)))) || (input.food.cuisine || [])[0] || "local";
-  const primary = area?.name || `${regionName(profile, regionId)} dining area`;
-  const secondary = secondaryFoodOption(profile, area, regionId);
+  const primaryPlace = mealCandidatePlace(profile, regionId, mealType);
+  const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, primaryPlace?.id) || mealCandidatePlace(profile, area?.regionId, mealType, primaryPlace?.id);
+  const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
+  const secondary = secondaryPlace?.name || secondaryFoodOption(profile, area, regionId);
   const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
   const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
   return {
@@ -1141,10 +1214,42 @@ function mealRecommendation(profile, input, regionId, mealType) {
   };
 }
 
+function mealCandidatePlace(profile, regionId, mealType, excludedId = "") {
+  const regionMatches = profile.places
+    .filter((place) => place.regionId === regionId && place.id !== excludedId)
+    .filter((place) => isMealCandidate(place, mealType))
+    .sort((a, b) => b.priorityScore - a.priorityScore);
+  if (regionMatches.length) return regionMatches[0];
+  return profile.places
+    .filter((place) => place.id !== excludedId)
+    .filter((place) => isMealCandidate(place, mealType))
+    .sort((a, b) => b.priorityScore - a.priorityScore)[0] || null;
+}
+
+function isMealCandidate(place, mealType) {
+  const text = normalizeText(`${place.name} ${place.categories.join(" ")} ${place.tags.join(" ")}`);
+  if (!/food|dining|restaurant|market|food hall|cafe|bakery|breakfast|brunch|rooftop|brewery|bar|dessert/.test(text)) return false;
+  if (/museum|hall of fame|park|walk|trail|greenway|mountain|lake|theme park|speedway|science|aviation|garden/.test(normalizeText(place.categories.join(" ")))) return false;
+  if (mealType === "breakfast") return /breakfast|brunch|cafe|bakery|food/.test(text);
+  if (mealType === "lunch") return /lunch|food|market|food hall|cafe|casual|dining/.test(text);
+  return /dinner|food|dining|rooftop|restaurant|evening|brewery|bar/.test(text);
+}
+
+function specificFoodAreaLabel(profile, area, regionId, mealType) {
+  if (!area?.name) return `${regionName(profile, regionId)} ${mealType}`;
+  return area.name
+    .replace(/restaurants and food halls/i, "verified dining candidates")
+    .replace(/dining and breweries/i, "dinner candidates")
+    .replace(/cafes, breweries, and casual food/i, "cafe and dinner candidates")
+    .replace(/neighborhood dining/i, "restaurant candidates")
+    .replace(/food and events/i, "food vendors and event-night dining")
+    .replace(/waterfront dining/i, "waterfront restaurant candidates");
+}
+
 function secondaryFoodOption(profile, area, regionId) {
   const sameRegion = profile.foodAreas.find((candidate) => candidate.id !== area?.id && candidate.regionId === regionId);
   const other = profile.foodAreas.find((candidate) => candidate.id !== area?.id);
-  return sameRegion?.name || other?.name || `${regionName(profile, regionId)} local restaurant backup`;
+  return specificFoodAreaLabel(profile, sameRegion || other, regionId, "backup") || `${regionName(profile, regionId)} local restaurant backup`;
 }
 
 function mealCost(input, mealType) {
