@@ -619,6 +619,17 @@ function planOverviewSection() {
         <p><strong>${state.providerStatus?.mode === "mock" ? "Sample planning data, not live availability." : "Planning estimates—not live availability."}</strong> Verify current hours, availability, accessibility, menus, prices, weather, and travel conditions before booking or traveling. <a href="/travel-disclaimer">Read the travel disclaimer.</a></p>
         <div class="highlight-list">${plan.overview.planningHighlights.map((item) => `<span>${esc(item)}</span>`).join("")}</div>
       </article>
+      ${plan.tripGuide ? `<article class="plan-payoff-card wide">
+        <h3>Recommended Trip Shape</h3>
+        ${tripShapeOptionCard(plan.tripGuide.tripShapeOptions?.[0])}
+      </article>` : ""}
+      ${plan.tripGuide ? `<article class="plan-payoff-card wide">
+        <h3>Quick Reference</h3>
+        <div class="guide-table quick-reference-table">
+          <div><strong>Day</strong><strong>Route / Location</strong><strong>Sleep</strong><strong>Don’t Miss</strong><strong>Spend</strong></div>
+          ${plan.tripGuide.quickReference.map((row) => `<div><span>${esc(`Day ${row.dayNumber}`)}<small>${esc(row.date)}</small></span><span>${esc(row.routeOrLocation)}</span><span>${esc(row.hotelOrBase)}</span><span>${esc(row.dontMiss)}</span><span>${esc(row.expectedSpend)}</span></div>`).join("")}
+        </div>
+      </article>` : ""}
       <article class="plan-payoff-card"><h3>Activities</h3><strong>${plan.overview.totalScheduledActivities}</strong><p>${esc(formatMinutes(plan.overview.totalEstimatedActivityMinutes))} scheduled activity time</p></article>
       <article class="plan-payoff-card"><h3>Driving</h3><strong>${esc(formatMinutes(plan.overview.totalEstimatedDriveMinutes))}</strong><p>Estimated local driving across the trip</p></article>
       <article class="plan-payoff-card"><h3>Budget</h3><strong>${esc(plan.overview.estimatedTotalCost)}</strong><p>${esc(plan.overview.estimatedCostPerPerson)} per person estimate</p></article>
@@ -634,9 +645,33 @@ function planOverviewSection() {
         <p><strong>Alternatives:</strong> ${esc(plan.hotelBase.alternatives.join(", "))}</p>
         <p><strong>Tradeoff:</strong> ${esc(plan.hotelBase.tradeoffs)} ${esc(plan.hotelBase.splitStaySuggestion)}</p>
       </article>
+      ${plan.tripGuide ? `<article class="plan-payoff-card wide">
+        <h3>Reservations, Offline Maps, and Packing</h3>
+        <div class="guide-action-grid">
+          <div><h4>Must Confirm</h4>${plan.tripGuide.reservationsToComplete.slice(0, 5).map((item) => `<p><strong>${esc(item.item)}</strong><small>${esc(item.timing)} · ${esc(item.priority)}</small></p>`).join("")}</div>
+          <div><h4>Download Offline</h4>${plan.tripGuide.offlineMaps.slice(0, 5).map((item) => `<p><strong>${esc(item.region)}</strong><small>${esc(item.reason)}</small></p>`).join("")}</div>
+          <div><h4>Pack</h4>${plan.tripGuide.packingList.slice(0, 4).map((group) => `<p><strong>${esc(group.category)}</strong><small>${esc(group.items.join(", "))}</small></p>`).join("")}</div>
+        </div>
+      </article>` : ""}
     </div>
     <div class="day-preview-grid">${plan.days.map((day) => `<button class="day-preview-card" data-action="jumpToDay:${day.id}"><span>Day ${day.dayNumber}</span><strong>${esc(day.title)}</strong><small>${esc(day.theme)} · ${esc(day.dailyBudget.label)}</small></button>`).join("")}</div>
   </section>`;
+}
+
+function tripShapeOptionCard(option) {
+  if (!option) return `<p>No trip-shape option is available for this plan.</p>`;
+  return `<div class="trip-shape-card">
+    <div>
+      <span class="badge">${esc(option.structureType)}</span>
+      <p><strong>Route:</strong> ${esc(option.routeSequence.join(" → "))}</p>
+      <p><strong>Sleep:</strong> ${esc(option.overnightBases.map((base) => `${base.base} (${base.nights} night${base.nights === 1 ? "" : "s"})`).join(", "))}</p>
+    </div>
+    <div>
+      <p><strong>Hotel changes:</strong> ${esc(String(option.hotelChanges))}</p>
+      <p><strong>Longest drive:</strong> ${esc(option.longestDrivingDay)}</p>
+      <p><strong>Fit:</strong> ${esc(option.whyItFitsUser)}</p>
+    </div>
+  </div>`;
 }
 
 function planAccessibilitySummary() {
@@ -658,16 +693,49 @@ function dayCard(day) {
       <div class="day-actions">
         <span class="badge">${esc(day.dailyBudget.label)}</span>
         <span class="badge">${esc(formatMinutes(day.dailyDriveMinutes))} drive</span>
+        ${day.dayArchetype ? `<span class="badge">${esc(day.dayArchetype)}</span>` : ""}
         <button data-action="toggleDayLock:${esc(day.id)}">${day.locked ? "Unlock Day" : "Lock Day"}</button>
         <button data-action="regenerateDay:${esc(day.id)}" ${day.locked ? "disabled" : ""}>Regenerate Day</button>
       </div>
     </div>
+    ${day.todaysTopFive ? `<div class="top-five"><strong>Today’s Top 5</strong><span>${esc(day.todaysTopFive)}</span></div>` : ""}
     <div class="weather-note"><strong>Weather note:</strong> ${esc(day.weatherPlanningNote)}</div>
+    ${day.prioritySections ? priorityGuide(day) : ""}
     ${day.warnings.length ? `<div class="warning-list">${day.warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
     <ol class="timeline">${day.scheduleItems.map((item) => timelineItem(item)).join("")}</ol>
+    ${day.dailyFoodPlan ? dailyFoodGuide(day) : ""}
+    ${day.expectedSpending ? dailyExecutionGuide(day) : ""}
     <div class="backup-options"><h4>Backup options</h4>${day.backupOptions.length ? day.backupOptions.map((backup) => `<article><strong>${esc(backup.title)}</strong><p>${esc(backup.reason)}</p><small>${esc(formatMinutes(backup.estimatedDurationMinutes))} · ${esc(backup.indoorOutdoor)} · ${esc(backup.accessibilityNotes)}</small></article>`).join("") : `<p>No same-region backup is available for this day.</p>`}</div>
     <p class="reasoning-summary">${esc(day.generationReasoningSummary)}</p>
   </article>`;
+}
+
+function priorityGuide(day) {
+  return `<div class="priority-guide-grid">
+    ${priorityColumn("Don’t Miss", day.prioritySections.dontMiss)}
+    ${priorityColumn("Worth Doing", day.prioritySections.worthDoing)}
+    ${priorityColumn("Bonus Stops", day.prioritySections.bonusStops)}
+  </div>`;
+}
+
+function priorityColumn(title, rows) {
+  return `<section class="priority-column"><h4>${esc(title)}</h4>${rows.length ? rows.map((row) => `<article><strong>${esc(row.activity)}</strong><span>${esc(row.preferredTime)} · ${esc(row.duration)} · ${esc(row.cost)}</span><small>${esc(row.routeRelevance)} ${row.bookingRequired === "Yes" ? "Book/confirm." : ""} ${row.offlineMapRequired === "Yes" ? "Download map." : ""}</small></article>`).join("") : `<p>No items in this tier.</p>`}</section>`;
+}
+
+function dailyFoodGuide(day) {
+  return `<section class="daily-guide-panel"><h4>Food</h4><div class="guide-table meal-guide-table">
+    <div><strong>Meal</strong><strong>Primary</strong><strong>Backup</strong><strong>Cost</strong><strong>Notes</strong></div>
+    ${day.dailyFoodPlan.map((meal) => `<div><span>${esc(meal.meal)}<small>${esc(meal.time)}</small></span><span>${esc(meal.primaryOption)}</span><span>${esc(meal.backupOption)}</span><span>${esc(meal.cost)}</span><span>${esc(meal.reservationGuidance)}</span></div>`).join("")}
+  </div></section>`;
+}
+
+function dailyExecutionGuide(day) {
+  return `<section class="daily-guide-panel execution-guide">
+    <div><h4>Expected Spending</h4><p>${esc(day.expectedSpending.totalRange)}</p><small>Food ${esc(day.expectedSpending.food)} · Activities ${esc(day.expectedSpending.activities)} · Transit ${esc(day.expectedSpending.transit)}</small></div>
+    <div><h4>Quick Tips</h4>${day.quickTips.map((tip) => `<p>${esc(tip)}</p>`).join("")}</div>
+    <div><h4>Tomorrow Prep</h4>${day.tomorrowPrep.map((tip) => `<p>${esc(tip)}</p>`).join("")}</div>
+    <div><h4>Delay Strategy</h4><p><strong>Keep:</strong> ${esc(day.delayStrategy.keep)}</p><p><strong>Cut first:</strong> ${esc(day.delayStrategy.cutFirst)}</p><p>${esc(day.delayStrategy.backupTrigger)}</p></div>
+  </section>`;
 }
 
 function timelineItem(item) {
@@ -716,6 +784,8 @@ function planRouteSection() {
     <div class="plan-section-head"><div><h2>Route Overview</h2><p>${esc(route.routeLogicExplanation)}</p></div><span class="badge">${esc(formatMinutes(route.totalEstimatedDriveMinutes))} estimated drive</span></div>
     <div class="route-schematic">${route.mapPlaceholderData.map((day) => `<article><span>Day ${day.dayNumber}</span><strong>${esc(day.region)}</strong><small>${esc(day.stops.slice(0, 3).join(" → "))}</small></article>`).join("")}</div>
     <article class="plan-payoff-card wide"><h3>Major Stop Sequence</h3><p>${esc(route.orderedStops.join(" → "))}</p><p>${esc(route.trafficDisclaimer)}</p><p>Estimated distance: ${route.totalEstimatedDistanceMiles} miles.</p></article>
+    ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Trip Shape Options Considered</h3><div class="shape-options-list">${state.plan.tripGuide.tripShapeOptions.map((option) => tripShapeOptionCard(option)).join("")}</div></article>` : ""}
+    ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Lodging Logic</h3><p><strong>${esc(state.plan.tripGuide.lodgingPlan.recommendedBase)}</strong> · ${esc(String(state.plan.tripGuide.lodgingPlan.nights))} nights</p><div class="lodging-night-grid">${state.plan.tripGuide.lodgingPlan.nightlyPlan.map((night) => `<span><strong>${esc(`Night ${night.night}`)}</strong><small>${esc(night.sleepArea)} · ${esc(night.whyThisBase)}</small></span>`).join("")}</div></article>` : ""}
   </section>`;
 }
 

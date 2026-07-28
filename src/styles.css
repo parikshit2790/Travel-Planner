@@ -848,6 +848,21 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .plan-payoff-card > strong { display: block; font-size: 2rem; color: var(--accent); margin: 4px 0; }
 .highlight-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .highlight-list span { padding: 8px 10px; border-radius: 999px; background: #eefaf5; color: #167b4a; border: 1px solid #c8ead8; font-weight: 800; }
+.trip-shape-card { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; padding: 14px; border-radius: 14px; border: 1px solid #d9eafa; background: linear-gradient(135deg, #f8fcff, #fffaf3); }
+.trip-shape-card p { margin: 8px 0 0; color: #25405f; }
+.guide-table { overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.guide-table > div { display: grid; gap: 0; align-items: stretch; border-top: 1px solid var(--line-soft); }
+.guide-table > div:first-child { border-top: 0; background: #edf7ff; color: var(--navy); }
+.guide-table > div > * { min-width: 0; padding: 10px 12px; border-left: 1px solid var(--line-soft); }
+.guide-table > div > *:first-child { border-left: 0; }
+.guide-table span, .guide-table strong { display: block; overflow-wrap: anywhere; }
+.guide-table small { display: block; margin-top: 3px; color: var(--muted); font-weight: 700; }
+.quick-reference-table > div { grid-template-columns: 0.8fr 1.2fr 1fr 1.7fr 0.8fr; }
+.guide-action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.guide-action-grid > div { padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: #fff; }
+.guide-action-grid h4 { margin: 0 0 10px; color: var(--navy); }
+.guide-action-grid p { margin: 10px 0 0; }
+.guide-action-grid small { display: block; margin-top: 2px; color: var(--muted); }
 .day-preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 .day-preview-card { text-align: left; display: grid; gap: 5px; min-height: 116px; padding: 15px; border-radius: 16px; border: 1px solid #cfe4f2; background: linear-gradient(135deg, #ffffff, #eff9ff); }
 .day-preview-card span { color: var(--blue); font-weight: 900; }
@@ -858,6 +873,20 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .day-card-head p { margin: 0; color: var(--muted); max-width: 780px; }
 .day-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .weather-note { margin: 14px 0; padding: 12px 14px; border-radius: 12px; background: #eefaff; border: 1px solid #ccecf8; color: #154766; }
+.top-five { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: #fff7ea; border: 1px solid #ffe0ad; color: #714008; }
+.top-five strong { color: #a34600; }
+.top-five span { overflow-wrap: anywhere; }
+.priority-guide-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.priority-column { padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: #fff; }
+.priority-column:nth-child(1) { background: #f5fff9; border-color: #cbeedb; }
+.priority-column:nth-child(2) { background: #f7fbff; border-color: #cfe4f2; }
+.priority-column:nth-child(3) { background: #fffaf1; border-color: #ffe0ad; }
+.priority-column h4 { margin: 0 0 10px; color: var(--navy); }
+.priority-column article { padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.priority-column article:first-of-type { border-top: 0; }
+.priority-column strong, .priority-column span, .priority-column small { display: block; }
+.priority-column span { margin-top: 4px; color: #25405f; font-weight: 800; }
+.priority-column small { margin-top: 4px; color: var(--muted); }
 .timeline { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 12px; }
 .timeline-item { display: grid; grid-template-columns: 86px 34px 1fr; gap: 12px; align-items: start; }
 .timeline-time { display: grid; gap: 4px; color: var(--navy); font-weight: 900; padding-top: 8px; }
@@ -884,6 +913,13 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .backup-options article { padding: 10px 0; border-top: 1px solid rgb(204 133 42 / 0.18); }
 .backup-options article:first-of-type { border-top: 0; }
 .reasoning-summary { margin: 12px 0 0; color: var(--muted); font-size: 0.92rem; }
+.daily-guide-panel { margin: 14px 0; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: #fff; }
+.daily-guide-panel h4 { margin: 0 0 10px; color: var(--navy); }
+.meal-guide-table > div { grid-template-columns: 0.72fr 1.2fr 1.2fr 0.7fr 1.5fr; }
+.execution-guide { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; background: linear-gradient(135deg, #fff, #f6fbff); }
+.execution-guide > div { min-width: 0; padding: 12px; border-radius: 12px; background: rgb(255 255 255 / 0.82); border: 1px solid var(--line-soft); }
+.execution-guide p { margin: 7px 0 0; color: #25405f; }
+.execution-guide small { display: block; margin-top: 7px; color: var(--muted); }
 .meal-day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 .meal-day { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
 .meal-day h3 { margin: 0 0 8px; }
@@ -894,6 +930,11 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .route-schematic article::after { content: ""; position: absolute; right: 18px; top: 20px; width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #ff8b1a, #21b6c7); opacity: 0.24; }
 .route-schematic span { color: var(--blue); font-weight: 900; }
 .route-schematic strong, .route-schematic small { display: block; margin-top: 8px; }
+.shape-options-list { display: grid; gap: 12px; }
+.lodging-night-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 12px; }
+.lodging-night-grid span { padding: 12px; border-radius: 12px; background: #f7fbff; border: 1px solid #d9eafa; }
+.lodging-night-grid strong, .lodging-night-grid small { display: block; }
+.lodging-night-grid small { margin-top: 4px; color: var(--muted); }
 .budget-bars { display: grid; gap: 12px; }
 .budget-bars article { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
 .budget-bars article div { display: flex; justify-content: space-between; gap: 10px; }

@@ -101,12 +101,15 @@ export function generateTripPlan(trip, options = {}) {
   const constraints = buildTravelerConstraintProfile(normalized);
   const destinationIntelligence = buildDestinationIntelligence(destinationProfile, normalized, constraints);
   const scored = scoreCandidates(destinationProfile, normalized, constraints, destinationIntelligence);
-  const days = buildDays(destinationProfile, normalized, constraints, scored, destinationIntelligence);
-  const hotelBase = buildHotelBase(destinationProfile, normalized, days);
+  const tripShapeOptions = buildTripShapeOptions(destinationProfile, normalized, destinationIntelligence);
+  const rawDays = buildDays(destinationProfile, normalized, constraints, scored, destinationIntelligence);
+  const hotelBase = buildHotelBase(destinationProfile, normalized, rawDays);
+  const days = buildDetailedTripDays(destinationProfile, normalized, constraints, rawDays, hotelBase);
   const foodPlan = buildFoodPlan(destinationProfile, normalized, constraints, days);
   const routeSummary = buildRouteSummary(destinationProfile, days);
   const budgetSummary = buildBudgetSummary(normalized, days);
   const advisories = buildAdvisories(destinationProfile, normalized, constraints, days, budgetSummary);
+  const tripGuide = buildDetailedTripGuide(destinationProfile, normalized, constraints, days, hotelBase, routeSummary, budgetSummary, tripShapeOptions);
   const plan = {
     id: uid("plan"),
     sourceTripId: normalized.sourceTripId,
@@ -126,6 +129,7 @@ export function generateTripPlan(trip, options = {}) {
     foodPlan,
     routeSummary,
     budgetSummary,
+    tripGuide,
     advisories,
     unresolvedConflicts: advisories.filter((item) => item.severity === "conflict" || item.severity === "blocking"),
     generationMetadata: {
@@ -138,6 +142,7 @@ export function generateTripPlan(trip, options = {}) {
       variationSeed: normalized.variationSeed,
       scoringWeights: planningWeights,
       destinationIntelligence: summarizeDestinationIntelligence(destinationIntelligence),
+      tripShapeOptions,
       unsupportedPreferences: normalized.unknownPreferences
     }
   };
@@ -862,10 +867,17 @@ function recalculateDay(day, input, profile) {
 }
 
 function refreshPlanTotals(plan, profile) {
+  const constraints = buildTravelerConstraintProfile(plan.preferencesSnapshot);
+  const hotelBase = buildHotelBase(profile, plan.preferencesSnapshot, plan.days);
+  plan.hotelBase = hotelBase;
+  plan.days = buildDetailedTripDays(profile, plan.preferencesSnapshot, constraints, plan.days, hotelBase);
   plan.routeSummary = buildRouteSummary(profile, plan.days);
   plan.budgetSummary = buildBudgetSummary(plan.preferencesSnapshot, plan.days);
-  plan.foodPlan = buildFoodPlan(profile, plan.preferencesSnapshot, buildTravelerConstraintProfile(plan.preferencesSnapshot), plan.days);
-  plan.advisories = buildAdvisories(profile, plan.preferencesSnapshot, buildTravelerConstraintProfile(plan.preferencesSnapshot), plan.days, plan.budgetSummary);
+  plan.foodPlan = buildFoodPlan(profile, plan.preferencesSnapshot, constraints, plan.days);
+  plan.advisories = buildAdvisories(profile, plan.preferencesSnapshot, constraints, plan.days, plan.budgetSummary);
+  const intelligence = buildDestinationIntelligence(profile, plan.preferencesSnapshot, constraints);
+  const tripShapeOptions = plan.generationMetadata?.tripShapeOptions || buildTripShapeOptions(profile, plan.preferencesSnapshot, intelligence);
+  plan.tripGuide = buildDetailedTripGuide(profile, plan.preferencesSnapshot, constraints, plan.days, hotelBase, plan.routeSummary, plan.budgetSummary, tripShapeOptions);
   plan.overview = buildOverview(profile, plan.preferencesSnapshot, plan.days, plan.budgetSummary, plan.routeSummary);
 }
 
@@ -988,6 +1000,182 @@ function buildOverview(profile, input, days, budget, route) {
   };
 }
 
+function buildTripShapeOptions(profile, input, intelligence) {
+  const coreRegions = profile.regions.slice(0, Math.min(3, profile.regions.length)).map((region) => region.name);
+  const dayTrips = (intelligence?.nearbyDayTrips || []).slice(0, 3);
+  const overnight = (intelligence?.regionalOvernightExtensions || [])[0];
+  const base = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
+  const maxSightseeingDays = Math.max(1, input.numberOfDays - (input.transportation && !sameAreaTrip(input, profile) ? 2 : 0));
+  const options = [
+    {
+      id: "shape-single-base",
+      structureType: dayTrips.length ? "One base plus local day trips" : "Single-city depth",
+      routeSequence: [profile.canonicalName, ...dayTrips.map((item) => item.place.name)],
+      overnightBases: [{ base: base?.name || profile.canonicalName, nights: Math.max(0, calculateTripNights(input.numberOfDays)) }],
+      hotelChanges: 0,
+      majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
+      totalEstimatedDriving: `${Math.round((dayTrips.reduce((sum, item) => sum + item.routeFeasibility.estimatedDriveMinutesRoundTrip, 0) + input.numberOfDays * 25) / 60)}-${Math.round((dayTrips.reduce((sum, item) => sum + item.routeFeasibility.estimatedDriveMinutesRoundTrip, 0) + input.numberOfDays * 45) / 60)} hours`,
+      longestDrivingDay: dayTrips[0] ? `${dayTrips[0].place.name} day, about ${formatDuration(dayTrips[0].routeFeasibility.estimatedDriveMinutesRoundTrip)}` : "Local days only",
+      fullSightseeingDays: maxSightseeingDays,
+      arrivalAssumptions: "Keep first day lighter until arrival, car pickup, luggage, and check-in are complete.",
+      departureAssumptions: "Protect departure buffers and avoid deep visits after checkout.",
+      experienceMix: experienceMixSummary(profile, dayTrips),
+      advantages: ["Least lodging friction", "Easy to understand", "Keeps optional regional ideas controllable"],
+      tradeoffs: dayTrips.length ? ["Some longer out-and-back days", "Distant extensions may be better as a split stay"] : ["Less regional variety"],
+      costImpact: "Lowest lodging-change cost; day-trip fuel or transit may increase.",
+      whyItFitsUser: `${input.pace} pace with ${input.travelers} traveler${input.travelers === 1 ? "" : "s"} favors a reliable base before adding optional distance.`,
+      confidence: dayTrips.length || profile.places.length >= input.numberOfDays * 2 ? "high" : "medium"
+    }
+  ];
+  if (overnight && input.numberOfDays >= 4) {
+    options.push({
+      id: "shape-regional-extension",
+      structureType: "One base plus one overnight extension",
+      routeSequence: [profile.canonicalName, overnight.place.name, profile.canonicalName],
+      overnightBases: [
+        { base: base?.name || profile.canonicalName, nights: Math.max(1, calculateTripNights(input.numberOfDays) - 1) },
+        { base: overnight.place.name, nights: 1 }
+      ],
+      hotelChanges: 2,
+      majorTransferDays: [`Transfer to ${overnight.place.name}`, `Return from ${overnight.place.name}`],
+      totalEstimatedDriving: `${formatDuration(overnight.routeFeasibility.estimatedDriveMinutesRoundTrip + 90)} plus local driving`,
+      longestDrivingDay: `${overnight.place.name}, about ${formatDuration(overnight.routeFeasibility.estimatedDriveMinutesRoundTrip)}`,
+      fullSightseeingDays: Math.max(1, maxSightseeingDays - 1),
+      arrivalAssumptions: "Primary destination first, then extension after the trip has momentum.",
+      departureAssumptions: "Return to the departure base before the final travel day unless open-jaw travel is confirmed.",
+      experienceMix: `City anchors plus ${overnight.place.categories?.[0] || "regional"} extension.`,
+      advantages: ["More memorable regional variety", "Reduces one very long out-and-back day"],
+      tradeoffs: ["Adds packing and hotel-change overhead", "Needs explicit approval before booking"],
+      costImpact: "Higher lodging and transit friction; may be worth it for longer vacations.",
+      whyItFitsUser: "Useful only if the traveler values regional nature or a distinct second base more than simplicity.",
+      confidence: overnight.routeFeasibility.classification === "overnight-recommended" ? "high" : "medium"
+    });
+  }
+  if (coreRegions.length >= 2) {
+    options.push({
+      id: "shape-core-depth",
+      structureType: "Single-city depth",
+      routeSequence: coreRegions,
+      overnightBases: [{ base: base?.name || profile.canonicalName, nights: Math.max(0, calculateTripNights(input.numberOfDays)) }],
+      hotelChanges: 0,
+      majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
+      totalEstimatedDriving: `${formatDuration(input.numberOfDays * 30)}-${formatDuration(input.numberOfDays * 55)} local movement`,
+      longestDrivingDay: "No intentional long regional drive",
+      fullSightseeingDays: maxSightseeingDays,
+      arrivalAssumptions: "Arrival is handled as logistics first, then a light evening.",
+      departureAssumptions: "Departure day remains short and flexible.",
+      experienceMix: `Deeper focus on ${coreRegions.slice(0, 3).join(", ")}.`,
+      advantages: ["More time in each area", "Lower risk of exhaustion", "Simpler meal and lodging planning"],
+      tradeoffs: ["May miss signature nearby experiences"],
+      costImpact: "Predictable local cost range.",
+      whyItFitsUser: "Best if the traveler prefers certainty, lower driving, and fewer hotel changes.",
+      confidence: "medium"
+    });
+  }
+  return options.slice(0, 3);
+}
+
+function buildDetailedTripDays(profile, input, constraints, days, hotelBase) {
+  return days.map((day, index) => {
+    const archetype = dayArchetype(day, input, index);
+    const activities = day.scheduleItems.filter((item) => item.type === "activity");
+    const priorityCandidates = activities.length ? activities : day.scheduleItems.filter((item) => ["travel", "lodging", "dinner", "evening"].includes(item.type));
+    const meals = day.scheduleItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+    const dontMissItems = priorityRows(day, priorityCandidates.slice(0, Math.max(1, Math.min(2, priorityCandidates.length))), "dontMiss");
+    const worthDoingItems = priorityRows(day, priorityCandidates.slice(dontMissItems.length, dontMissItems.length + 2), "worthDoing");
+    const bonusItems = [
+      ...priorityRows(day, priorityCandidates.slice(dontMissItems.length + worthDoingItems.length), "bonus"),
+      ...day.backupOptions.slice(0, Math.max(0, 2 - Math.max(0, activities.length - 2))).map((backup) => ({
+        activity: backup.title,
+        preferredTime: "If timing allows",
+        startEndWindow: "Flexible",
+        duration: formatDuration(backup.estimatedDurationMinutes),
+        cost: moneyRange(backup.estimatedCostPerPerson.low, backup.estimatedCostPerPerson.high),
+        bookingRequired: "No",
+        offlineMapRequired: backup.indoorOutdoor === "outdoor" ? "Yes" : "No",
+        location: backup.title,
+        routeRelevance: backup.reason,
+        whyItMatters: backup.description || backup.reason,
+        scheduleItemId: "",
+        placeId: backup.placeId
+      }))
+    ].slice(0, 3);
+    const expectedSpending = dailySpendingBreakdown(day, input);
+    return {
+      ...day,
+      routeOrLocation: dayRouteLabel(profile, day, input, index),
+      startingBase: index === 0 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : hotelBase.primary,
+      endingBase: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : hotelBase.primary,
+      hotel: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? "Departure / home base" : hotelBase.primary,
+      totalExpectedDriving: formatDuration(day.dailyDriveMinutes),
+      dayArchetype: archetype,
+      todaysTopFive: topFiveForDay(day, archetype),
+      prioritySections: {
+        dontMiss: dontMissItems,
+        worthDoing: worthDoingItems,
+        bonusStops: bonusItems
+      },
+      dailyFoodPlan: meals.map((meal) => mealGuideRow(meal)),
+      eveningPlan: eveningPlanForDay(day, archetype, constraints),
+      expectedSpending,
+      quickTips: quickTipsForDay(day, archetype, input),
+      tomorrowPrep: tomorrowPrepForDay(days[index + 1], day, input),
+      delayStrategy: delayStrategyForDay(day, archetype)
+    };
+  });
+}
+
+function buildDetailedTripGuide(profile, input, constraints, days, hotelBase, routeSummary, budgetSummary, tripShapeOptions) {
+  return {
+    planningStages: [
+      { stage: "Destination Intelligence", status: "complete", summary: `${profile.places.length} candidate places, ${profile.foodAreas.length} food areas, and ${profile.regions.length} route regions were considered.` },
+      { stage: "Trip Shape", status: "complete", summary: `${tripShapeOptions.length} trip-shape option${tripShapeOptions.length === 1 ? "" : "s"} evaluated before day planning.` },
+      { stage: "Daily Route and Priority Design", status: "complete", summary: "Days are organized by archetype, route grouping, and priority tier." },
+      { stage: "Detailed Trip Guide", status: "complete", summary: "Output includes meals, costs, offline maps, reservations, prep, and delay strategy." }
+    ],
+    tripShapeOptions,
+    quickReference: days.map((day) => ({
+      dayNumber: day.dayNumber,
+      date: formatDisplayDate(day.date),
+      routeOrLocation: day.routeOrLocation,
+      hotelOrBase: day.hotel,
+      dontMiss: day.prioritySections.dontMiss.map((item) => item.activity).join(" · ") || day.todaysTopFive,
+      dinnerIdea: day.dailyFoodPlan.find((meal) => meal.meal === "Dinner")?.primaryOption || "Verify a dinner near the final activity",
+      expectedSpend: day.expectedSpending.totalRange,
+      bookingAlert: day.prioritySections.dontMiss.some((item) => item.bookingRequired === "Yes") ? "Book or confirm" : "No major booking flagged"
+    })),
+    lodgingPlan: buildLodgingPlan(input, days, hotelBase),
+    reservationsToComplete: buildReservationList(days),
+    offlineMaps: buildOfflineMapList(profile, input, days),
+    packingList: buildPackingList(profile, input, constraints, days),
+    budgetWorkbook: {
+      currency: budgetSummary.currency,
+      categories: budgetSummary.categories,
+      totalRange: moneyRange(budgetSummary.totalLow, budgetSummary.totalHigh),
+      perPersonRange: moneyRange(budgetSummary.perPersonLow, budgetSummary.perPersonHigh)
+    },
+    assumptions: [
+      "Plans use provider and curated destination data, but hours, traffic, ticket prices, menus, and availability still require direct verification.",
+      "Mandatory traveler restrictions and allergies override general group preferences.",
+      "Bonus Stops are the first items to cut when timing gets tight."
+    ],
+    sourceFreshness: profile.sourceMetadata?.freshness || profile.sourceMetadata?.retrievedAt || "Planning data snapshot; verify official sources before travel.",
+    practicalStandardChecks: {
+      answersBestRoute: Boolean(routeSummary.orderedRegions.length),
+      answersSleepEachNight: Boolean(hotelBase.primary),
+      answersTruePriorities: days.every((day) => day.prioritySections.dontMiss.length),
+      answersOptionalCuts: days.every((day) => day.prioritySections.bonusStops.length || day.delayStrategy.cutFirst),
+      answersBookings: true,
+      answersOfflineMaps: true,
+      answersFood: days.every((day) => day.dailyFoodPlan.length),
+      answersDailyCost: days.every((day) => day.expectedSpending.totalRange),
+      answersTomorrowPrep: days.every((day) => day.tomorrowPrep.length),
+      answersRisks: true,
+      answersMemorableSpecifics: days.some((day) => day.prioritySections.dontMiss.some((item) => item.placeId))
+    }
+  };
+}
+
 export function validateTripPlan(plan) {
   const blocking = [];
   const publicText = JSON.stringify({
@@ -995,7 +1183,8 @@ export function validateTripPlan(plan) {
     days: plan.days,
     foodPlan: plan.foodPlan,
     routeSummary: plan.routeSummary,
-    hotelBase: plan.hotelBase
+    hotelBase: plan.hotelBase,
+    tripGuide: plan.tripGuide
   });
   const internalLeak = internalOutputTerms().find((term) => publicText.toLowerCase().includes(term));
   if (internalLeak) blocking.push(advisory("internal-language", "blocking", "content", "Internal planning language leaked", "Generated itinerary includes internal provider or taxonomy wording.", "Regenerate with sanitized destination data."));
@@ -1052,6 +1241,213 @@ function normalizeDayCount(trip) {
   const inclusive = start && end ? calculateInclusiveTripDays(start, end) : null;
   if (inclusive && inclusive > 0) return inclusive;
   return Number(trip.days || 0);
+}
+
+function sameAreaTrip(input, profile) {
+  const origin = normalizeText(input.origin);
+  const destination = normalizeText(input.destination || profile.canonicalName);
+  return Boolean(origin && destination && (origin === destination || origin.includes(destination) || destination.includes(origin)));
+}
+
+function experienceMixSummary(profile, dayTrips) {
+  const categories = new Set(profile.places.flatMap((place) => place.categories || []).slice(0, 18));
+  const mix = [
+    categories.has("museum") || categories.has("history") ? "culture" : "",
+    categories.has("nature") || categories.has("park") || dayTrips.length ? "outdoors" : "",
+    categories.has("food") || profile.foodAreas.length ? "food" : "",
+    dayTrips.length ? "nearby excursions" : ""
+  ].filter(Boolean);
+  return mix.length ? titleCase(mix.join(", ")) : "Balanced local highlights";
+}
+
+function dayArchetype(day, input, index) {
+  const text = normalizeText(`${day.title} ${day.theme} ${day.region} ${day.scheduleItems.map((item) => `${item.title} ${item.category} ${(item.tags || []).join(" ")}`).join(" ")}`);
+  if (index === 0 && day.scheduleItems.some((item) => item.title.startsWith("Travel to "))) return "Arrival day";
+  if (index === input.numberOfDays - 1 && day.scheduleItems.some((item) => item.title.startsWith("Depart "))) return "Departure day";
+  if (/resort|beach|pool|spa/.test(text)) return "Resort day";
+  if (/scenic drive|road trip|parkway|viewpoint|overlook/.test(text) && day.dailyDriveMinutes >= 90) return "Scenic drive day";
+  if (/waterfall|mountain|hike|trail|lake|nature|garden|park|whitewater/.test(text)) return "Nature day";
+  if (/ferry|excursion|island|cruise|day trip/.test(text)) return "Excursion day";
+  if (/food|restaurant|market|brewery|neighborhood|district|downtown|arts/.test(text)) return "Neighborhood and food day";
+  if (day.scheduleItems.filter((item) => item.type === "travel").length >= 2 || day.dailyDriveMinutes >= 120) return "Transfer day";
+  if (day.scheduleItems.some((item) => item.reservationRecommended)) return "Signature attraction day";
+  return "Full destination day";
+}
+
+function dayRouteLabel(profile, day, input, index) {
+  if (index === 0 && day.scheduleItems.some((item) => item.title.startsWith("Travel to "))) return `${input.origin || "Origin"} -> ${profile.canonicalName}`;
+  if (index === input.numberOfDays - 1 && day.scheduleItems.some((item) => item.title.startsWith("Depart "))) return `${profile.canonicalName} -> ${input.origin || "Origin"}`;
+  const activityRegions = [...new Set(day.scheduleItems.filter((item) => item.regionId).map((item) => regionName(profile, item.regionId)))].slice(0, 3);
+  return activityRegions.length ? activityRegions.join(" -> ") : day.region;
+}
+
+function topFiveForDay(day, archetype) {
+  const important = day.scheduleItems
+    .filter((item) => item.type === "travel" || item.type === "lodging" || item.type === "activity" || item.type === "dinner" || item.type === "evening")
+    .map((item) => item.type === "dinner" ? "Dinner" : item.title)
+    .slice(0, 5);
+  while (important.length < 5) {
+    important.push(archetype.includes("Departure") ? "Protect departure buffer" : important.length === 4 ? "Rest buffer" : "Flexible backup");
+  }
+  return important.slice(0, 5).join(" - ");
+}
+
+function priorityRows(day, items, priority) {
+  return items.map((item) => ({
+    activity: item.title,
+    preferredTime: item.startTime || "Flexible",
+    startEndWindow: item.startTime && item.endTime ? `${item.startTime}-${item.endTime}` : "Flexible",
+    duration: formatDuration(item.durationMinutes || 0),
+    cost: item.estimatedCostPerPerson ? moneyRange(item.estimatedCostPerPerson.low, item.estimatedCostPerPerson.high) : "$0-$0",
+    bookingRequired: item.reservationRecommended ? "Yes" : "No",
+    offlineMapRequired: item.indoorOutdoor === "outdoor" || item.weatherDependency === "high" ? "Yes" : "No",
+    location: item.locationLabel || item.title,
+    routeRelevance: priority === "dontMiss" ? "Defines the day; protect this before optional stops." : priority === "worthDoing" ? "Good fit if the main timing holds." : "Cut first if late.",
+    whyItMatters: item.description,
+    scheduleItemId: item.id,
+    placeId: item.placeId || ""
+  }));
+}
+
+function mealGuideRow(meal) {
+  const details = meal.mealDetails || {};
+  return {
+    meal: titleCase(meal.type),
+    time: meal.startTime || "",
+    actualRestaurantOrLocation: details.primaryOption || meal.locationLabel || meal.title,
+    primaryOption: details.primaryOption || meal.title,
+    backupOption: details.secondaryOption || "Pick a nearby verified backup with matching dietary support",
+    suggestedCuisineOrDish: details.cuisine || "Local option",
+    dietaryCompatibility: meal.dietaryNotes || "Confirm dietary needs directly.",
+    cost: meal.estimatedCostPerPerson ? moneyRange(meal.estimatedCostPerPerson.low, meal.estimatedCostPerPerson.high) : "$0-$0",
+    reservationGuidance: details.reservationGuidance || "Verify hours and reserve if this is a must-do meal.",
+    openingHoursConfidence: details.hoursConfidence || "Unverified; confirm current hours.",
+    distanceFromRoute: meal.locationLabel ? "Placed near the day route area." : "Confirm exact distance from route.",
+    placeIdOrSource: meal.placeId || meal.source || "local-meal-planner"
+  };
+}
+
+function eveningPlanForDay(day, archetype, constraints) {
+  const evening = day.scheduleItems.find((item) => item.type === "evening");
+  if (archetype === "Departure day") return "No late evening plan. Protect departure logistics and rest.";
+  if (!evening) return "Conditional quiet evening only; skip it if dinner or driving runs late.";
+  const status = constraints.noAlcohol ? "primary no-alcohol-compatible option" : evening.reservationRecommended ? "optional nightlife option" : "primary relaxed option";
+  return `${evening.title}: ${evening.description} Treat this as a ${status}; cut it before any Don’t Miss item.`;
+}
+
+function dailySpendingBreakdown(day, input) {
+  const travelers = input.travelers || 1;
+  const mealItems = day.scheduleItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const activityItems = day.scheduleItems.filter((item) => item.type === "activity");
+  const travelMinutes = day.scheduleItems.filter((item) => item.type === "travel").reduce((sum, item) => sum + item.durationMinutes, 0);
+  const foodLow = mealItems.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.low || 0), 0) * travelers;
+  const foodHigh = mealItems.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.high || 0), 0) * travelers;
+  const activityLow = activityItems.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.low || 0), 0) * travelers;
+  const activityHigh = activityItems.reduce((sum, item) => sum + (item.estimatedCostPerPerson?.high || 0), 0) * travelers;
+  const fuelLow = Math.round(travelMinutes * 0.15);
+  const fuelHigh = Math.round(travelMinutes * 0.28 + 10);
+  const parkingLow = activityItems.length ? 5 : 0;
+  const parkingHigh = activityItems.length ? 25 : 10;
+  const miscellaneousLow = 10;
+  const miscellaneousHigh = 30;
+  const low = foodLow + activityLow + fuelLow + parkingLow + miscellaneousLow;
+  const high = foodHigh + activityHigh + fuelHigh + parkingHigh + miscellaneousHigh;
+  return {
+    food: moneyRange(foodLow, foodHigh),
+    fuel: moneyRange(fuelLow, fuelHigh),
+    parking: moneyRange(parkingLow, parkingHigh),
+    activities: moneyRange(activityLow, activityHigh),
+    tickets: moneyRange(activityLow, activityHigh),
+    transit: moneyRange(fuelLow, fuelHigh),
+    miscellaneous: moneyRange(miscellaneousLow, miscellaneousHigh),
+    totalRange: moneyRange(low, high)
+  };
+}
+
+function quickTipsForDay(day, archetype, input) {
+  const tips = [];
+  if (day.prioritySections?.dontMiss?.some((item) => item.offlineMapRequired === "Yes") || day.dailyDriveMinutes >= 90) tips.push("Download offline maps for the day route before leaving Wi-Fi.");
+  if (archetype === "Arrival day") tips.push("Keep arrival day light until check-in, parking, and bags are handled.");
+  if (archetype === "Departure day") tips.push("Do not add a deep final stop unless your departure window is intentionally late.");
+  if (day.prioritySections?.dontMiss?.some((item) => item.bookingRequired === "Yes")) tips.push("Confirm tickets or reservations before the day starts.");
+  if (day.scheduleItems.some((item) => item.weatherDependency === "high")) tips.push("Check weather in the morning and move indoor backups forward if needed.");
+  if (input.travelers > 1) tips.push("Agree on the Don’t Miss items before leaving so Bonus Stops are easy to cut.");
+  return tips.slice(0, 5);
+}
+
+function tomorrowPrepForDay(nextDay, day, input) {
+  if (!nextDay) return ["Set alarms for departure or checkout.", "Keep IDs, chargers, and essentials accessible.", "Save receipts and notes for the trip wrap-up."];
+  const prep = [];
+  if (nextDay.scheduleItems.some((item) => item.type === "travel") || nextDay.dailyDriveMinutes >= 90) prep.push("Fuel or charge the vehicle and download tomorrow’s route offline.");
+  if (nextDay.scheduleItems.some((item) => item.reservationRecommended)) prep.push("Confirm tomorrow’s tickets, reservations, parking, and arrival window.");
+  if (nextDay.scheduleItems.some((item) => item.weatherDependency === "high")) prep.push("Check tomorrow’s forecast and pack shoes, layers, water, and sun/rain gear.");
+  if (nextDay.dayNumber !== day.dayNumber + 1 || input.lodging.changeHotels !== "Stay in one place") prep.push("Keep luggage organized in case checkout or a base change becomes necessary.");
+  prep.push(`Aim to start Day ${nextDay.dayNumber} by ${nextDay.scheduleItems.find((item) => item.type === "activity")?.startTime || input.earliestActivity}.`);
+  return prep.slice(0, 5);
+}
+
+function delayStrategyForDay(day, archetype) {
+  const bonus = day.prioritySections?.bonusStops?.[0]?.activity || "the lowest-priority optional stop";
+  const worth = day.prioritySections?.worthDoing?.[0]?.activity || "a lower-priority Worth Doing item";
+  const keep = day.prioritySections?.dontMiss?.map((item) => item.activity).join(", ") || "travel and meal anchors";
+  return {
+    keep,
+    move: worth,
+    cutFirst: bonus,
+    latestSafeDepartureTime: archetype === "Departure day" ? "Protect the departure buffer entered for the trip." : day.scheduleItems.find((item) => item.type === "travel")?.startTime || "No fixed departure; protect dinner and return time.",
+    backupTrigger: day.scheduleItems.some((item) => item.weatherDependency === "high") ? "Use indoor or lower-weather backup if rain, heat, visibility, or trail conditions are poor." : "Use backups if the first Don’t Miss item runs more than 45 minutes late."
+  };
+}
+
+function buildLodgingPlan(input, days, hotelBase) {
+  const nights = calculateTripNights(input.numberOfDays);
+  return {
+    recommendedBase: hotelBase.primary,
+    nights,
+    hotelChangeCount: /change|split|multiple/i.test(input.lodging.changeHotels || "") ? "User open to changes; verify before booking." : 0,
+    nightlyPlan: days.slice(0, Math.max(0, nights)).map((day) => ({
+      night: day.dayNumber,
+      date: formatDisplayDate(day.date),
+      sleepArea: day.hotel || hotelBase.primary,
+      whyThisBase: day.dayArchetype === "Departure day" ? "Keeps departure simple." : "Keeps the next day route and meals practical."
+    })),
+    notes: [hotelBase.reason, hotelBase.tradeoffs, hotelBase.splitStaySuggestion]
+  };
+}
+
+function buildReservationList(days) {
+  const rows = [];
+  days.forEach((day) => {
+    day.prioritySections.dontMiss.concat(day.prioritySections.worthDoing).forEach((item) => {
+      if (item.bookingRequired === "Yes") rows.push({ dayNumber: day.dayNumber, item: item.activity, timing: item.preferredTime, priority: "Confirm before travel", reason: item.whyItMatters });
+    });
+    day.dailyFoodPlan.filter((meal) => /reserve|must-do/i.test(meal.reservationGuidance)).forEach((meal) => rows.push({ dayNumber: day.dayNumber, item: meal.primaryOption, timing: meal.time, priority: "Meal reservation check", reason: meal.reservationGuidance }));
+  });
+  return rows.length ? rows : [{ dayNumber: "", item: "No required bookings detected", timing: "Before trip", priority: "Verify anyway", reason: "Still confirm hours, tickets, parking, and closures directly." }];
+}
+
+function buildOfflineMapList(profile, input, days) {
+  const regions = new Set();
+  days.forEach((day) => {
+    if (day.dailyDriveMinutes >= 60 || day.prioritySections.dontMiss.some((item) => item.offlineMapRequired === "Yes")) regions.add(day.region);
+    day.scheduleItems.filter((item) => item.regionId && (item.type === "activity" || item.type === "travel")).forEach((item) => regions.add(regionName(profile, item.regionId)));
+  });
+  const items = [...regions].slice(0, 8).map((region) => ({ region, reason: "Useful for driving, parking, trailheads, or weak-signal areas." }));
+  if (input.origin && !sameAreaTrip(input, profile)) items.unshift({ region: `${input.origin} to ${profile.canonicalName}`, reason: "Arrival/departure route should be available offline." });
+  return items;
+}
+
+function buildPackingList(profile, input, constraints, days) {
+  const hasNature = days.some((day) => /Nature|Scenic|Excursion/.test(day.dayArchetype));
+  const hasReservations = days.some((day) => day.prioritySections.dontMiss.some((item) => item.bookingRequired === "Yes"));
+  const hasNight = days.some((day) => /night|evening|sunset|stargaz/i.test(day.eveningPlan));
+  return [
+    { category: "Documents", items: ["Photo ID", "reservation confirmations", hasReservations ? "ticket screenshots" : "saved itinerary PDF"].filter(Boolean) },
+    { category: "Navigation", items: ["offline maps", "charging cable", "car mount or transit app"] },
+    { category: "Comfort", items: ["walking shoes", "daypack", "reusable water bottle", hasNature ? "sun/rain layer" : "light layer"].filter(Boolean) },
+    { category: "Food and health", items: [constraints.seriousDietary ? "allergy or dietary notes for restaurants" : "snacks", "medications", "hand sanitizer"] },
+    { category: "Destination-specific", items: [hasNature ? "trail or outdoor clothes" : "city casual outfit", hasNight ? "evening layer" : "rest-day clothes", profile.currency !== "USD" ? `${profile.currency} payment backup` : "parking payment app"].filter(Boolean) }
+  ];
 }
 
 function normalizePace(value) {
