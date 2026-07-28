@@ -136,11 +136,11 @@ assert.equal(getHealth.statusCode, 200);
 assert.match(getHealth.headers["Content-Type"], /application\/json/);
 assert.match(getHealth.headers["Cache-Control"], /no-store/);
 assert.equal(getHealth.body.success, true);
-assert.equal(getHealth.body.data.canGenerate, true);
-assert.equal(getHealth.body.data.mode, "mock");
-assert.equal(getHealth.body.data.placeProviderAvailable, true);
-assert.equal(getHealth.body.data.destinationResearchAvailable, true);
-assert.equal(getHealth.body.data.routeProviderAvailable, true);
+assert.equal(getHealth.body.data.canGenerate, false);
+assert.equal(getHealth.body.data.mode, "unavailable");
+assert.equal(getHealth.body.data.placeProviderAvailable, false);
+assert.equal(getHealth.body.data.destinationResearchAvailable, false);
+assert.equal(getHealth.body.data.routeProviderAvailable, false);
 assert.equal(getHealth.body.data.weatherProviderAvailable, false);
 assert.equal("diagnostics" in getHealth.body.data, false);
 assert.ok(!JSON.stringify(getHealth.body).includes("secret-place-value"));
@@ -149,8 +149,8 @@ assert.ok(!JSON.stringify(getHealth.body).includes("secret-route-value"));
 const postHealth = await invokeProviderHealth("POST", { action: "status", payload: {} });
 assert.equal(postHealth.statusCode, 200);
 assert.equal(postHealth.body.success, true);
-assert.equal(postHealth.body.canGenerate, true);
-assert.equal(postHealth.body.mode, "mock");
+assert.equal(postHealth.body.canGenerate, false);
+assert.equal(postHealth.body.mode, "unavailable");
 
 process.env.PLACE_PROVIDER = "";
 process.env.ROUTE_PROVIDER = "";
@@ -167,6 +167,8 @@ assert.equal(badMethod.statusCode, 405);
 assert.equal(badMethod.headers.Allow, "GET, POST");
 assert.equal(badMethod.body.success, false);
 assert.equal(badMethod.body.error.code, "METHOD_NOT_ALLOWED");
+
+restoreEnv(originalEnv);
 
 const plannerUnknown = await invokePlanner("POST", { action: "not-real", payload: {} });
 assert.equal(plannerUnknown.statusCode, 400);
@@ -197,8 +199,6 @@ const plannerBadMethod = await invokePlanner("GET");
 assert.equal(plannerBadMethod.statusCode, 405);
 assert.match(plannerBadMethod.headers["Content-Type"], /application\/json/);
 assert.equal(plannerBadMethod.body.error.code, "METHOD_NOT_ALLOWED");
-
-restoreEnv(originalEnv);
 
 console.log("API gateway tests passed");
 

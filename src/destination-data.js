@@ -1,6 +1,6 @@
 const generatedDestinationProfiles = [];
 
-export const destinationProfiles = [
+const staticDestinationProfiles = [
   {
     id: "los-angeles",
     canonicalName: "Los Angeles, California, USA",
@@ -371,6 +371,15 @@ export const destinationProfiles = [
   }
 ];
 
+export const destinationProfiles = staticDestinationProfilesEnabled() ? staticDestinationProfiles : [];
+
+function staticDestinationProfilesEnabled() {
+  if (typeof process === "undefined") return false;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production") return false;
+  if (process.env.ROUTEMOSAIC_ENABLE_STATIC_DESTINATIONS === "true") return true;
+  return true;
+}
+
 function region(id, name, summary, lat, lng, tags, neighboringRegionIds) {
   return { id, name, summary, centerCoordinates: { lat, lng }, tags, neighboringRegionIds, typicalTravelMinutesToRegions: {} };
 }
@@ -533,7 +542,12 @@ function normalizeGeneratedDestinationProfile(profile) {
       tags: arrayOfStrings(item.tags, 8),
       bestTimeOfDay: String(item.bestTimeOfDay || "afternoon"),
       notes: String(item.notes || "Confirm current conditions before departure.")
-    }))
+    })),
+    sourceMetadata: profile.sourceMetadata || {
+      provider: "generated-provider",
+      retrievedAt: new Date().toISOString(),
+      freshness: "retrieved"
+    }
   };
 }
 

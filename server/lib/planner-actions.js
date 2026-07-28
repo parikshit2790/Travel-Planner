@@ -1,4 +1,4 @@
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "../../src/destination-data.js";
+import { registerGeneratedDestinationProfile } from "../../src/destination-data.js";
 import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
@@ -8,6 +8,7 @@ import { openAiDestinationResearch } from "./openai-destination-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
 import { withTimeout } from "./http.js";
 import { destinationResearchCacheKey, getCachedDestinationResearch } from "./destination-cache.js";
+import { assertProductionPlanningSafety, buildPlanningSourceDiagnostics } from "./production-safeguards.js";
 
 export async function handlePlannerAction(action, payload = {}, context = {}) {
   const requestId = context.requestId || requestIdFor("planner");
@@ -47,7 +48,7 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
   if (!destination) return actionError(400, "DESTINATION_REQUIRED", "Destination is required.", false, requestId);
   if (config.placeProvider === "mock" && !hasMockDestinationData(destination)) {
     logPlannerEvent({ requestId, action: "research-destination", mode: "mock", stage: "blocked", destination, errorCode: "MOCK_DESTINATION_UNAVAILABLE", durationMs: Date.now() - startedAt });
-    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.", false, requestId);
+    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data.", false, requestId);
   }
   try {
     logPlannerEvent({ requestId, action: "research-destination", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "start", destination });
@@ -84,17 +85,30 @@ function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = 
   if (!trip) return actionError(400, "TRIP_REQUIRED", "Trip is required.", false, requestId);
   const config = providerConfig();
   const destination = String(trip.destinationDisplay || trip.destination || "").trim();
+  const providerErrors = validatePlanningProviders(config);
+  if (config.production && providerErrors.length) {
+    return actionError(503, "PROVIDER_CONFIGURATION_REQUIRED", "Trip generation is temporarily unavailable. Please try again later.", true, requestId);
+  }
+  if (config.production && !destinationProfile) {
+    return actionError(422, "LIVE_DESTINATION_RESEARCH_REQUIRED", "We could not build a reliable live destination profile for this trip yet. Please retry.", true, requestId);
+  }
   if (config.placeProvider === "mock" && !destinationProfile && !hasMockDestinationData(destination)) {
-    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.", false, requestId);
+    return actionError(422, "MOCK_DESTINATION_UNAVAILABLE", "This destination is not available in the current demo data.", false, requestId);
   }
   try {
     const normalizedTrip = normalizeTripForPlanning(trip);
-    if (destinationProfile) registerGeneratedDestinationProfile(destinationProfile);
-    const result = generateTripPlan(normalizedTrip, { variationSeed });
+    const registeredProfile = destinationProfile ? registerGeneratedDestinationProfile(destinationProfile) : null;
+    const sourceDiagnostics = buildPlanningSourceDiagnostics(config, registeredProfile);
+    assertProductionPlanningSafety(config, registeredProfile, sourceDiagnostics);
+    const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics });
+    if (result?.plan?.generationMetadata) {
+      result.plan.generationMetadata.sourceDiagnostics = sourceDiagnostics;
+    }
     return { status: result.status === "ready" ? 200 : 422, body: result };
   } catch (error) {
-    logPlannerEvent({ requestId, action: "generate-trip", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "error", destination, errorCode: "GENERATION_FAILED" });
-    return actionError(500, "GENERATION_FAILED", "We could not build this trip.", true, requestId);
+    const code = error?.code || "GENERATION_FAILED";
+    logPlannerEvent({ requestId, action: "generate-trip", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "error", destination, errorCode: code });
+    return actionError(error?.status || 500, code, error?.message || "We could not build this trip.", error?.retryable ?? true, requestId);
   }
 }
 
@@ -176,18 +190,6 @@ async function researchDestination(destination, trip, config) {
   if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
   if (config.placeProvider === "google") return googleDestinationResearch(destination, trip, config);
   if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
-  const curatedProfile = resolveDestinationProfile(destination);
-  if (curatedProfile && !String(curatedProfile.id || "").startsWith("generic-")) {
-    return {
-      ...curatedProfile,
-      sourceMetadata: {
-        ...(curatedProfile.sourceMetadata || {}),
-        provider: "curated",
-        retrievedAt: new Date().toISOString(),
-        freshness: "curated-local-profile"
-      }
-    };
-  }
   throw new Error("Place provider is not implemented in this build.");
 }
 
@@ -248,7 +250,7 @@ function statusForDestinationResearch(code) {
 }
 
 function messageForDestinationResearch(code) {
-  if (code === "MOCK_DESTINATION_UNAVAILABLE") return "This destination is not available in the current demo data. Try the Los Angeles sample or configure live providers.";
+  if (code === "MOCK_DESTINATION_UNAVAILABLE") return "This destination is not available in the current demo data.";
   if (code === "INSUFFICIENT_DESTINATION_DATA") return "We could not find enough reliable destination information for this trip.";
   if (code === "PROVIDER_RATE_LIMITED") return "Trip planning services are temporarily busy. Please retry.";
   if (code === "AI_TIMEOUT") return "Destination intelligence took too long. Please retry.";

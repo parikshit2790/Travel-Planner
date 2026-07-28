@@ -160,6 +160,15 @@ export function generateTripPlan(trip, options = {}) {
       planningStages: buildPlanningStageTrace(),
       dynamicResearchPlan,
       destinationIntelligence: summarizeDestinationIntelligence(destinationIntelligence),
+      sourceDiagnostics: options.sourceDiagnostics || {
+        planningMode: destinationProfile.sourceMetadata?.provider === "mock" ? "mock" : "live",
+        destinationResearchSource: destinationProfile.sourceMetadata?.provider || "unknown",
+        routeSource: "planner-estimate",
+        itinerarySource: "generated",
+        usedPresetPlan: false,
+        usedMockProvider: destinationProfile.sourceMetadata?.provider === "mock",
+        usedTestFixture: destinationProfile.sourceMetadata?.provider === "mock"
+      },
       destinationArchetype: destinationIntelligence.destinationArchetype,
       opportunityGraph: summarizeOpportunityGraph(opportunityGraph),
       opportunityCoverageValidation,
@@ -189,32 +198,14 @@ export function generateTripPlan(trip, options = {}) {
 }
 
 function buildHotelBase(profile, input, days) {
-  const regions = days.map((day) => day.region);
-  if (profile.id !== "los-angeles") {
-    const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
-    const alternatives = profile.regions.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
-    return {
-      primary: primaryRegion.name,
-      alternatives,
-      reason: `${primaryRegion.name} is suggested as a practical planning base because it keeps the first itinerary pass central, flexible, and easier to verify for ${profile.canonicalName}.`,
-      tradeoffs: "This is a starter base recommendation. Confirm real lodging neighborhoods, transit access, parking, safety, and travel times before booking.",
-      splitStaySuggestion: input.numberOfDays >= 7 && input.lodging.changeHotels !== "Stay in one place" ? "A split stay may help if your verified must-do sights are far apart, but confirm distances first." : "One base is preferred until exact local distances are confirmed."
-    };
-  }
-  const wantsQuiet = (input.alcohol.preferences || []).some((item) => /quiet|walk|sunset/i.test(item));
-  const wantsNightlife = (input.alcohol.preferences || []).some((item) => /nightlife|live music|bars/i.test(item)) && input.alcohol.primary !== "No Alcohol";
-  const lowWalking = /minimal|easy/i.test(input.walkingLimit || "");
-  let primary = "Beverly Grove / Museum Row";
-  if (regions.some((region) => /Santa Monica|Malibu|Venice/.test(region)) && wantsQuiet) primary = "Santa Monica";
-  if (wantsNightlife) primary = "West Hollywood or Beverly Grove";
-  if (regions.filter((region) => /Downtown|Little Tokyo|Arts/.test(region)).length >= 2) primary = "Downtown Los Angeles";
-  if (regions.some((region) => /Pasadena/.test(region)) && input.numberOfDays <= 3) primary = "Pasadena";
+  const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
+  const alternatives = profile.regions.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
   return {
-    primary,
-    alternatives: ["Santa Monica", "West Hollywood", "Beverly Grove / Museum Row"].filter((item) => item !== primary).slice(0, 2),
-    reason: `${primary} is suggested as a planning base because it balances the selected regions, ${input.pace.toLowerCase()} pace, and evening preferences without claiming hotel availability.`,
-    tradeoffs: lowWalking ? "Choose lodging with parking, elevator access, and short pickup/drop-off paths." : "Los Angeles is spread out; even a central base still requires daily drive-time buffers.",
-    splitStaySuggestion: input.numberOfDays >= 7 && input.lodging.changeHotels !== "Stay in one place" ? "A westside plus Pasadena/Downtown split stay could reduce some late-trip driving, but it is optional." : "One base is preferred for this trip."
+    primary: primaryRegion.name,
+    alternatives,
+    reason: `${primaryRegion.name} is suggested as a practical planning base because it keeps the first itinerary pass central, flexible, and easier to verify for ${profile.canonicalName}.`,
+    tradeoffs: "This is a starter base recommendation. Confirm real lodging neighborhoods, transit access, parking, safety, and travel times before booking.",
+    splitStaySuggestion: input.numberOfDays >= 7 && input.lodging.changeHotels !== "Stay in one place" ? "A split stay may help if your verified must-do sights are far apart, but confirm distances first." : "One base is preferred until exact local distances are confirmed."
   };
 }
 
@@ -429,35 +420,9 @@ function destinationDayThemes(profile, input, intelligence = null) {
   if (intelligence?.destinationArchetype?.primaryArchetype === "beach/coastal") {
     return beachCoastalThemes(profile, input, intelligence);
   }
-  if (profile.id === "charlotte") {
-    const themes = charlotteIntelligentThemes(input, intelligence);
-    return rotate(themes, input.variationSeed).slice(0, input.numberOfDays);
-  }
-  if (profile.id === "dallas") {
-    return rotate([
-      ["downtown-dealey", "arts-district", "uptown"],
-      ["white-rock", "smu-park-cities"],
-      ["bishop-arts", "deep-ellum"],
-      ["fort-worth-stockyards"],
-      ["fair-park", "deep-ellum"],
-      ["arlington"],
-      ["arts-district", "downtown-dealey"]
-    ], input.variationSeed).slice(0, input.numberOfDays);
-  }
-  if (profile.id === "detroit") {
-    return rotate([
-      ["downtown", "santa-monica"],
-      ["griffith-park", "los-feliz", "hollywood"],
-      ["museum-row", "beverly-hills", "brentwood", "westwood"],
-      ["arts-district", "little-tokyo", "south-bay"],
-      ["venice", "santa-monica", "malibu"],
-      ["weho", "downtown"],
-      ["pasadena"]
-    ], input.variationSeed).slice(0, input.numberOfDays);
-  }
   const profileRegions = profile.regions.map((region) => region.id);
   const hasDefaultThemes = dayThemes.flat().some((regionId) => profileRegions.includes(regionId));
-  if (profile.id === "los-angeles" || hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
+  if (hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const anchor = profile.regions[(index + input.variationSeed) % profile.regions.length] || profile.regions[0];
     return [anchor.id, ...(anchor.neighboringRegionIds || [])].filter((regionId) => profileRegions.includes(regionId)).slice(0, input.pace === "Packed" ? 3 : 2);
@@ -491,52 +456,6 @@ function beachCoastalThemes(profile, input, intelligence) {
     unique([entertainment[1], beach[3], nature[1]])
   ].map((theme) => theme.filter((id) => regionIds.includes(id)).slice(0, input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
   return rotate(themes.length ? themes : [[defaultRegion]], input.variationSeed).slice(0, input.numberOfDays);
-}
-
-function charlotteIntelligentThemes(input, intelligence) {
-  const selected = normalizeText([
-    input.hiking,
-    input.walkingLimit,
-    ...(input.preferences || []).map((pref) => pref.label),
-    ...(input.food?.cuisine || []),
-    ...(input.alcohol?.preferences || []),
-    ...(input.mustHavePlaces || [])
-  ].join(" "));
-  const wantsNature = /nature|outdoor|hike|scenic|water|lake|waterfall|mountain/.test(selected);
-  const wantsFood = /food|cuisine|dining|restaurant|nightlife|bar|brewery|live music/.test(selected);
-  const regional = intelligence?.nearbyDayTrips?.find((item) => item.routeFeasibility.classification !== "overnight-recommended")?.place.regionId || "whitewater-center";
-  const overnight = intelligence?.regionalOvernightExtensions?.[0]?.place.regionId || "asheville-blue-ridge";
-  if (wantsNature) {
-    return [
-      ["uptown"],
-      [regional],
-      ["crowders-mountain", "lake-wylie"],
-      ["south-end", "noda", "plaza-midwood"],
-      ["lake-norman"],
-      [overnight],
-      ["camp-north-end", "uptown"]
-    ];
-  }
-  if (wantsFood) {
-    return [
-      ["uptown"],
-      ["south-end", "plaza-midwood"],
-      ["noda", "camp-north-end"],
-      ["ballantyne", "south-end"],
-      [regional],
-      ["lake-norman"],
-      ["uptown", "south-end"]
-    ];
-  }
-  return [
-    ["uptown"],
-    ["whitewater-center", "lake-wylie"],
-    ["south-end", "noda"],
-    ["camp-north-end", "plaza-midwood"],
-    ["lake-norman"],
-    ["crowders-mountain"],
-    ["concord", "uptown"]
-  ];
 }
 
 function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map()) {
@@ -767,10 +686,7 @@ function tripTravelContext(profile, input) {
 }
 
 function knownLocationCoordinates(value) {
-  const text = normalizeText(value);
-  if (/augusta/.test(text) && /georgia|ga/.test(text)) return { lat: 33.4735, lng: -82.0105 };
-  if (/charlotte/.test(text)) return { lat: 35.2271, lng: -80.8431 };
-  if (/asheville/.test(text)) return { lat: 35.5951, lng: -82.5515 };
+  if (!String(value || "").trim()) return null;
   return null;
 }
 
@@ -1434,7 +1350,7 @@ function buildDetailedTripGuide(profile, input, constraints, days, hotelBase, ro
       perPersonRange: moneyRange(budgetSummary.perPersonLow, budgetSummary.perPersonHigh)
     },
     assumptions: [
-      "Plans use provider and curated destination data, but hours, traffic, ticket prices, menus, and availability still require direct verification.",
+      "Plans use provider destination research and traveler inputs, but hours, traffic, ticket prices, menus, and availability still require direct verification.",
       "Mandatory traveler restrictions and allergies override general group preferences.",
       "Bonus Stops are the first items to cut when timing gets tight."
     ],
@@ -1869,10 +1785,9 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
     return firstAnchor ? `${shortTitle(firstAnchor)} and departure` : `Final morning and departure`;
   }
   if (archetype === "beach/coastal") {
-    if (activityTitles.some((title) => /huntington|brookgreen|atalaya|marshwalk/i.test(title))) return "Coastal nature and MarshWalk";
-    if (activityTitles.some((title) => /boardwalk|skywheel|oceanfront/i.test(title))) return "Boardwalk, beach, and oceanfront evening";
-    if (activityTitles.some((title) => /barefoot|broadway/i.test(title))) return "Beach entertainment and waterfront dining";
-    if (activityTitles.some((title) => /cherry grove|north myrtle/i.test(title))) return "North Myrtle Beach and Cherry Grove";
+    if (activityTitles.some((title) => /garden|preserve|nature|marsh|state park|wildlife/i.test(title))) return "Coastal nature and scenic water";
+    if (activityTitles.some((title) => /boardwalk|pier|oceanfront|waterfront|beach/i.test(title))) return "Beach, boardwalk, and oceanfront evening";
+    if (activityTitles.some((title) => /entertainment|music|show|market|district/i.test(title))) return "Beach entertainment and waterfront dining";
   }
   const names = activityTitles.slice(0, 2).map(shortTitle).filter(Boolean);
   return names.length ? names.join(" and ") : `${region.name} highlights`;
@@ -1884,11 +1799,9 @@ function shortTitle(value) {
 
 function dayThemeLabel(regions, intelligence = null) {
   if (intelligence?.destinationArchetype?.primaryArchetype === "beach/coastal") return "Beach, waterfront, food, and evening anchors";
-  if (regions.includes("santa-monica")) return "Coast, beach, and sunset";
-  if (regions.includes("griffith-park")) return "Views, film history, and hillside scenery";
-  if (regions.includes("downtown")) return "Culture, architecture, and food";
-  if (regions.includes("malibu")) return "Scenic coastal drive";
-  if (regions.includes("pasadena")) return "Gardens and relaxed culture";
+  if (regions.some((region) => /beach|coast|water|bay|pier|harbor/i.test(region))) return "Coast, water, and sunset";
+  if (regions.some((region) => /mountain|park|view|trail|garden/i.test(region))) return "Views, scenery, and open-air time";
+  if (regions.some((region) => /downtown|center|market|arts|museum|historic/i.test(region))) return "Culture, architecture, and food";
   return "Regional highlights";
 }
 

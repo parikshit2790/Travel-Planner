@@ -7,8 +7,8 @@ const css = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8
 
 assert.ok(app.includes("function renderTripPlan()"));
 assert.ok(app.includes("function renderUnsupportedPlan()"));
-assert.ok(app.includes("function recoverUnsupportedPlan()"));
-assert.ok(app.includes("Starter trip plan generated for this destination."));
+assert.equal(app.includes("function recoverUnsupportedPlan()"), false);
+assert.equal(app.includes("Starter trip plan generated for this destination."), false);
 assert.ok(app.includes("registration.update()"));
 assert.ok(app.includes("function ensureDestinationIntelligence()"));
 assert.ok(app.includes("routeMosaicApi.researchDestination"));

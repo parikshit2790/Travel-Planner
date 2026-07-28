@@ -51,7 +51,7 @@ const providerErrors = validatePlanningProviders({ production: true, placeProvid
 assert.ok(providerErrors.some((error) => error.includes("PLACE_PROVIDER")));
 assert.ok(providerErrors.some((error) => error.includes("ROUTE_PROVIDER")));
 
-const healthyStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", placeApiKey: "secret-place", routeApiKey: "secret-route", weatherProvider: "", aiProvider: "", weatherApiKey: "", aiApiKey: "" });
+const healthyStatus = providerStatus({ production: false, development: true, placeProvider: "mock", routeProvider: "mock", placeApiKey: "secret-place", routeApiKey: "secret-route", weatherProvider: "", aiProvider: "", weatherApiKey: "", aiApiKey: "" });
 assert.equal(healthyStatus.canGenerate, true);
 assert.equal(healthyStatus.mode, "mock");
 assert.equal(healthyStatus.placeProvider.configured, true);
@@ -62,15 +62,22 @@ assert.equal(healthyStatus.routeProviderAvailable, true);
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-place"));
 assert.ok(!JSON.stringify(healthyStatus).includes("secret-route"));
 
+const productionMockStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", placeApiKey: "secret-place", routeApiKey: "secret-route", weatherProvider: "", aiProvider: "", weatherApiKey: "", aiApiKey: "" });
+assert.equal(productionMockStatus.canGenerate, false);
+assert.equal(productionMockStatus.mode, "unavailable");
+assert.equal(productionMockStatus.publicMessage, "Trip generation is temporarily unavailable. Please try again later.");
+assert.ok(!JSON.stringify(productionMockStatus).includes("secret-place"));
+assert.ok(!JSON.stringify(productionMockStatus).includes("secret-route"));
+
 const placeMissingStatus = providerStatus({ production: true, development: false, placeProvider: "", routeProvider: "mock", placeApiKey: "", routeApiKey: "" });
 assert.equal(placeMissingStatus.canGenerate, false);
 assert.equal(placeMissingStatus.mode, "unavailable");
-assert.equal(placeMissingStatus.routeProvider.configured, true);
+assert.equal(placeMissingStatus.routeProvider.configured, false);
 
 const routeMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(routeMissingStatus.canGenerate, false);
 assert.equal(routeMissingStatus.mode, "unavailable");
-assert.equal(routeMissingStatus.placeProvider.configured, true);
+assert.equal(routeMissingStatus.placeProvider.configured, false);
 
 const liveStatus = providerStatus({ production: true, development: false, placeProvider: "openrouteservice", routeProvider: "openrouteservice", openRouteServiceApiKey: "secret-ors", placeApiKey: "", routeApiKey: "", aiProvider: "openai", aiApiKey: "secret-ai" });
 assert.equal(liveStatus.mode, "live");
@@ -86,7 +93,7 @@ assert.equal(routesOnlyStatus.placeProviderAvailable, true);
 assert.equal(routesOnlyStatus.routeProviderAvailable, true);
 assert.equal(routesOnlyStatus.destinationResearchAvailable, false);
 
-const optionalMissingStatus = providerStatus({ production: true, development: false, placeProvider: "mock", routeProvider: "mock", weatherProvider: "tomorrow", weatherApiKey: "", aiProvider: "openai", aiApiKey: "", placeApiKey: "", routeApiKey: "" });
+const optionalMissingStatus = providerStatus({ production: false, development: true, placeProvider: "mock", routeProvider: "mock", weatherProvider: "tomorrow", weatherApiKey: "", aiProvider: "openai", aiApiKey: "", placeApiKey: "", routeApiKey: "" });
 assert.equal(optionalMissingStatus.canGenerate, true);
 assert.equal(optionalMissingStatus.weatherProvider.status, "degraded");
 assert.equal(optionalMissingStatus.aiProvider.status, "degraded");

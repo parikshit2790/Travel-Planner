@@ -39,7 +39,6 @@ import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARC
 import {
   addCustomStop,
   compatibleAlternatives,
-  generateTripPlan,
   moveActivity,
   regenerateDay,
   regenerateMeals,
@@ -50,7 +49,7 @@ import {
   toggleItemLock,
   toggleItemMustDo
 } from "./planner.js";
-import { registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
+import { registerGeneratedDestinationProfile } from "./destination-data.js";
 import {
   approvedRouteStillValid,
   approveRouteOption,
@@ -304,12 +303,11 @@ function render() {
     return;
   }
   if (state.planStatus === "ready" && state.plan) {
-    document.title = state.plan.destination.includes("Los Angeles") ? "Your Los Angeles Trip Plan | RouteMosaic" : "Your Trip Plan | RouteMosaic";
+    document.title = "Your Trip Plan | RouteMosaic";
     renderTripPlan();
     return;
   }
   if (state.planStatus === "unsupported" && state.planError) {
-    if (recoverUnsupportedPlan()) return;
     renderUnsupportedPlan();
     return;
   }
@@ -383,19 +381,6 @@ function BrandIcon() {
 
 function Brand() {
   return `<div class="brand">${BrandIcon()}<div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>`;
-}
-
-function recoverUnsupportedPlan() {
-  const retry = generateTripPlan(state.trip, { variationSeed: state.plan?.generationMetadata?.variationSeed || 0 });
-  if (retry.status !== "ready") return false;
-  state.plan = retry.plan;
-  state.planStatus = "ready";
-  state.planError = null;
-  state.planStale = false;
-  ui.planSection = "overview";
-  ui.toast = "Starter trip plan generated for this destination.";
-  renderTripPlan();
-  return true;
 }
 
 function renderStaticInfoPage() {
@@ -490,7 +475,7 @@ function renderUnsupportedPlan() {
             <button class="primary" data-action="editUnsupportedDestination">Edit Destination</button>
             <button data-action="returnToReview">Return to Review</button>
           </div>
-          <div class="callout"><strong>Your wizard answers are preserved.</strong><p>RouteMosaic did not substitute Los Angeles or fabricate destination-specific stops.</p></div>
+          <div class="callout"><strong>Your wizard answers are preserved.</strong><p>RouteMosaic did not substitute another destination or fabricate destination-specific stops.</p></div>
         </section>
       </main>
     </div>`;
@@ -2312,7 +2297,7 @@ function reviewIssues() {
         field: "trip.destination",
         owningStep: 1,
         issue: "This destination is not available in the current demo data.",
-        action: "Edit Trip Basics or try the Los Angeles sample."
+        action: "Edit Trip Basics or use live providers for public trip generation."
       });
     }
   }
@@ -3008,14 +2993,12 @@ async function buildTripPlanAction(name) {
 }
 
 async function ensureDestinationIntelligence() {
-  const destination = state.trip.destinationDisplay || state.trip.destination || "";
-  const existing = resolveDestinationProfile(destination);
-  if (existing && !existing.id.startsWith("generic-")) return existing;
   try {
     const data = await routeMosaicApi.researchDestination(state.trip);
-    return registerGeneratedDestinationProfile(data.profile) || existing;
+    const profile = registerGeneratedDestinationProfile(data.profile);
+    if (!profile) throw new Error("Destination research did not return a usable profile.");
+    return profile;
   } catch (error) {
-    if (existing && !existing.id.startsWith("generic-")) return existing;
     if (error?.code === "PROVIDER_CONFIGURATION_REQUIRED") throw new Error("Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session.");
     throw error instanceof Error ? error : new Error("Destination research is unavailable right now. Your trip details are preserved.");
   }
