@@ -228,13 +228,14 @@ export function critiquePlanDeterministically(plan, graph = {}) {
     tripGuide: plan.tripGuide
   }).toLowerCase();
 
-  if (/(google places|openrouteservice point-of-interest candidate|provider-found|provider-retrieved|culture-area|central-area|food-area|nature-area|central area day|google places .* candidate)/.test(publicText)) {
+  if (isProviderGeneratedPlan(plan) && /(google places|openrouteservice point-of-interest candidate|provider-found|provider-retrieved|culture-area|central-area|food-area|nature-area|central area day|google places .* candidate|core area|museums and historic sights|parks and outdoor stops|dining and evening area|stop to consider|breakfast option|lunch option|dinner option|no items in this tier|skipped a late evening activity)/.test(publicText)) {
     hardFailures.push("internal-or-template-language");
   }
   if ((plan.days || []).length !== Number(plan.numberOfDays || 0)) hardFailures.push("day-count-mismatch");
   const mealItems = allItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
   const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || item.title)).filter(Boolean);
   const repeatedMeal = mostCommonCount(mealNames);
+  if (hasSameVenueForAllMealTypes(mealItems)) hardFailures.push("universal-restaurant-dominance");
   if (mealNames.length >= 6 && repeatedMeal > Math.ceil(mealNames.length * 0.7)) hardFailures.push("universal-restaurant-dominance");
   else if (mealNames.length >= 4 && repeatedMeal > Math.ceil(mealNames.length * 0.45)) issues.push("restaurant-repetition-risk");
   if (hasFixedDurationDominance(allItems)) issues.push("fixed-duration-dominance");
@@ -243,14 +244,17 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasRawPlaceLabel(allItems)) hardFailures.push("raw-place-label");
   if (isProviderGeneratedPlan(plan) && hasUnverifiedMealDominance(mealItems)) hardFailures.push("meal-research-insufficient");
   if ((plan.days || []).some((day) => genericDayTitle(day.title))) issues.push("generic-day-title");
+  if (hasMuseumDominance(plan)) hardFailures.push("category-concentration");
+  if (hasSamePrimaryMealForMultipleDays(mealItems)) hardFailures.push("meal-repetition");
+  if (hasMealVenueThatLooksLikeActivity(mealItems)) hardFailures.push("meal-venue-not-restaurant");
   if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
   if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
   if ((plan.days || []).some((day) => (day.backupOptions || []).some((backup) => Number(backup.estimatedDurationMinutes || 0) > 240))) issues.push("backup-too-large");
 
   const subScores = {
-    destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, issues.includes("generic-day-title") ? 8 : 0),
+    destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, hardFailures.includes("category-concentration") ? 30 : 0, issues.includes("generic-day-title") ? 8 : 0),
     routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
-    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
+    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
     scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0),
     costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
     languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0)
@@ -271,7 +275,9 @@ export function critiquePlanDeterministically(plan, graph = {}) {
       "template-language leakage",
       "duration and cost variation",
       "backup plausibility",
-      "candidate graph coverage"
+      "candidate graph coverage",
+      "experience category concentration",
+      "meal repetition"
     ]
   };
 }
@@ -476,7 +482,64 @@ function childFreeAdultTrip(input) {
 }
 
 function genericDayTitle(value) {
-  return /^(regional highlights|central area day|culture and landmarks day|parks and viewpoints day|beach, boardwalk, and oceanfront evening|coastal nature and scenic water)$/i.test(String(value || "").trim());
+  const text = String(value || "").trim();
+  return /^(regional highlights|central area day|culture and landmarks day|parks and viewpoints day|beach, boardwalk, and oceanfront evening|coastal nature and scenic water)$/i.test(text)
+    || /\b(museums and historic sights|parks and outdoor stops|dining and evening area)\b/i.test(text);
+}
+
+function hasSameVenueForAllMealTypes(mealItems) {
+  const byName = mealItems.reduce((groups, item) => {
+    if (!item.mealDetails?.primaryPlaceId) return groups;
+    const name = normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "");
+    if (!name) return groups;
+    groups[name] ||= new Set();
+    groups[name].add(item.type);
+    return groups;
+  }, {});
+  return Object.values(byName).some((types) => types.size >= 3);
+}
+
+function hasSamePrimaryMealForMultipleDays(mealItems) {
+  const byName = frequency(mealItems
+    .filter((item) => item.mealDetails?.primaryPlaceId)
+    .map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || ""))
+    .filter(Boolean));
+  return Object.values(byName).some((count) => count >= 3);
+}
+
+function hasMealVenueThatLooksLikeActivity(mealItems) {
+  return mealItems.some((item) => {
+    const text = normalizeText(`${item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || item.title} ${item.description || ""}`);
+    if (!text) return false;
+    const restaurantSignal = /\b(restaurant|cafe|coffee|bakery|brunch|breakfast|diner|bistro|grill|taqueria|pizzeria|pizza|bbq|barbecue|ramen|sushi|tavern|kitchen|eatery|deli|sandwich|seafood|steakhouse|burger|tacos|dessert|food hall|public market|market hall)\b/.test(text);
+    const activitySignal = /\b(rail trail|greenway|arts district|museum|park|lake|mountain|waterfall|campus|neighborhood|walking route|scenic drive|visitor center|hall of fame)\b/.test(text);
+    return activitySignal && !restaurantSignal;
+  });
+}
+
+function hasMuseumDominance(plan) {
+  const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
+  if (/beach|coastal|mountain|resort/i.test(archetype)) return false;
+  const planText = normalizeText(`${plan.destination || ""} ${plan.overview?.destinationSummary || ""} ${(plan.days || []).map((day) => `${day.title} ${day.summary}`).join(" ")}`);
+  if (/\b(beach|coastal|ocean|waterfront|riverwalk|island|harbor|marina)\b/.test(planText) && /\b(beach|waterfront|riverwalk|island|harbor|marina|park|garden|trail|outdoor)\b/.test(planText)) return false;
+  const activityItems = (plan.days || []).flatMap((day) => (day.scheduleItems || []).filter((item) => item.type === "activity"));
+  if (activityItems.length < 4 || explicitMuseumIntent(plan)) return false;
+  const museumItems = activityItems.filter((item) => /\b(museum|gallery|exhibition|historic house|history center)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
+  const outdoorOrNeighborhood = activityItems.filter((item) => /\b(park|garden|greenway|trail|lake|mountain|waterfall|whitewater|neighborhood|district|market|camp|waterfront|beach|boardwalk|scenic)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
+  if (museumItems.length >= 3 && museumItems.length / activityItems.length > 0.42) return true;
+  if (museumItems.length >= 2 && outdoorOrNeighborhood.length === 0) return true;
+  return (plan.days || []).some((day) => (day.scheduleItems || []).filter((item) => item.type === "activity" && /\b(museum|gallery|exhibition)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`)).length >= 3);
+}
+
+function explicitMuseumIntent(plan) {
+  const prefs = plan?.preferencesSnapshot || {};
+  const text = normalizeText([
+    prefs.preferences?.join(" "),
+    prefs.mustHavePlaces?.join(" "),
+    prefs.tripDescription,
+    prefs.destination
+  ].filter(Boolean).join(" "));
+  return /\b(museum|museums|gallery|galleries|history|historic|art collection|architecture tour)\b/.test(text);
 }
 
 function hasFixedDurationDominance(items) {

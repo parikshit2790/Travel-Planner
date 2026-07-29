@@ -274,9 +274,19 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isFamilyFocused = isChildrenFocused || has(/\b(family|zoo|aquarium|theme park|amusement|science center)\b/);
   const isFoodHall = has(/\b(food hall|public market|market hall|marketplace|transfer co|food court)\b/);
   const isBar = has(/\b(bar|brewery|brewhouse|beer garden|taproom|cocktail|distillery|winery|wine bar)\b/);
+  const eveningOnlyFoodArea = /evening/i.test(place.bestTimeOfDay || "") && categoryHas(/\b(quiet-evening|dessert|evening)\b/) && !categoryHas(/\b(breakfast|brunch|lunch|dinner|restaurant)\b/);
   const restaurantWords = /\b(restaurant|cafe|cafes|coffee|bakery|brunch|breakfast|diner|bistro|grill|taqueria|pizzeria|pizza|bbq|barbecue|ramen|sushi|tavern|kitchen|eatery|deli|sandwich|seafood|steakhouse|noodle|burger|tacos|dumpling|dessert|ice cream)\b/;
   const attractionOnlyFood = /\b(museum|park|garden|trail|greenway|lake|mountain|viewpoint|monument|memorial|stadium|arena|science center|children|playground|amusement|go kart|arcade|pier|boardwalk|promenade|skywheel|theater|theatre|show)\b/;
-  const isRestaurant = (restaurantWords.test(text) || categoryHas(/\b(food|restaurant|cafe|bakery|bar)\b/) || isFoodHall)
+  const areaOrDistrictOnly = (/\b(neighborhood|district|corridor|campus|rail trail|greenway|arts district|market district|village|downtown|uptown|area|route|walk|stroll|murals|public space)\b/.test(name)
+    || (/\b(walk|stroll|murals|art|arts|events|music)\b/.test(categoryText) && !/\b(dining|restaurant|food hall|market hall|public market)\b/.test(categoryText)))
+    && !restaurantWords.test(name)
+    && !/\b(food hall|public market|market hall|restaurant row|dining hall|brewery|bar|cafe|bakery)\b/.test(name);
+  const specificRestaurantSignal = restaurantWords.test(text)
+    || categoryHas(/\b(restaurant|cafe|bakery|bar|brewery|breakfast|brunch|dinner|dining|food hall)\b/)
+    || isFoodHall;
+  const isRestaurant = specificRestaurantSignal
+    && !areaOrDistrictOnly
+    && !eveningOnlyFoodArea
     && !isEntertainmentCenter
     && !isPier
     && !isDinnerShow
@@ -288,9 +298,11 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isHotel = has(/\b(hotel|motel|inn|suites|lodging|resort|accommodation)\b/);
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const routeScope = routeScopeFrom(feasibility, text);
-  const servesBreakfast = isRestaurant && !isDinnerShow && (has(/\b(breakfast|brunch|cafe|coffee|bakery|diner)\b/) || !isBar && !has(/\b(cocktail|nightclub|brewery|seafood|steakhouse|dinner)\b/));
-  const servesLunch = isRestaurant && !has(/\b(cocktail lounge|nightclub)\b/);
-  const servesDinner = isRestaurant && (has(/\b(dinner|restaurant|bistro|grill|tavern|bar|brewery|food hall|kitchen|pizzeria|bbq|barbecue|seafood|steakhouse)\b/) || !has(/\b(breakfast only)\b/));
+  const breakfastSignalText = `${name} ${categoryText} ${description}`;
+  const servesBreakfast = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !isDinnerShow && (/\b(breakfast|brunch|cafe|coffee|bakery|diner)\b/.test(breakfastSignalText) || !isBar && !isFoodHall && !has(/\b(cocktail|nightclub|brewery|seafood|steakhouse|dinner|dining|evening)\b/));
+  const servesLunch = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !has(/\b(cocktail lounge|nightclub)\b/);
+  const breakfastOrCafeFocused = categoryHas(/\b(breakfast|brunch|cafe|bakery)\b/) && !categoryHas(/\b(lunch|dinner|restaurant|dining|bar|brewery)\b/);
+  const servesDinner = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !breakfastOrCafeFocused && (isFoodHall || has(/\b(dinner|restaurant|bistro|grill|tavern|bar|brewery|food hall|dining|kitchen|pizzeria|bbq|barbecue|seafood|steakhouse)\b/) || !has(/\b(breakfast only)\b/));
   const travelerFit = travelerFitFor(place, input, { isChildrenFocused, isFamilyFocused, isEntertainmentCenter, isBar, isPark });
   const destinationSignificance = destinationSignificanceFor(place, profile, { isRestaurant, isMuseum, isPark, isNeighborhood, isEntertainmentCenter, isOrdinaryBusiness, routeScope });
   const primaryType = primaryTypeFor({ isRestaurant, isFoodHall, isBar, isEntertainmentCenter, isChildrenFocused, isMuseum, isPark, isNeighborhood, isCity, isHotel, categories, text });
