@@ -1,4 +1,4 @@
-import { classifyPlaceForPlanning } from "./destination-intelligence.js";
+import { classifyPlaceForPlanning, firstTimeVisitorValueFor } from "./destination-intelligence.js";
 
 export const PLANNING_STAGE_NAMES = [
   "destination-understanding",
@@ -119,7 +119,8 @@ export function normalizePlanningCandidate(candidate, profile, input = {}) {
     archetypeFit: archetypeFitFor(classification, profile, candidate),
     travelerFit: classification.travelerFit || { score: 0, reasons: [] },
     destinationSignificance: classification.destinationSignificance || { score: Number(place.priorityScore || 0), reasons: [] },
-    firstTimeVisitorValue: firstTimeVisitorValue(place, classification),
+    firstTimeVisitorValue: firstTimeVisitorValueFor(place, profile, classification),
+    ordinaryLocalFacilityPenalty: classification.ordinaryLocalFacilityPenalty || { score: 0, reasons: [] },
     localSignificance: Number(candidate?.significanceScore || place.priorityScore || 0),
     uniqueness: uniquenessFor(place, classification),
     seasonalFit: seasonalFitFor(place, input),
@@ -249,13 +250,17 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasMealVenueThatLooksLikeActivity(mealItems)) hardFailures.push("meal-venue-not-restaurant");
   if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
   if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
+  if (hasSignatureCoverageFailure(plan, graph)) hardFailures.push("signature-attraction-coverage");
+  if (hasOrdinaryLocalFacilityPromotion(plan, graph)) hardFailures.push("ordinary-local-facility-overpromotion");
+  if (hasStaleAttractionRecommendation(plan)) hardFailures.push("stale-attraction-recommended");
+  if (hasWeakFirstTimeCoverage(plan, graph)) hardFailures.push("first-time-coverage-insufficient");
   if ((plan.days || []).some((day) => (day.backupOptions || []).some((backup) => Number(backup.estimatedDurationMinutes || 0) > 240))) issues.push("backup-too-large");
 
   const subScores = {
-    destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, hardFailures.includes("category-concentration") ? 30 : 0, issues.includes("generic-day-title") ? 8 : 0),
+    destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, hardFailures.includes("signature-attraction-coverage") ? 38 : 0, hardFailures.includes("first-time-coverage-insufficient") ? 32 : 0, hardFailures.includes("ordinary-local-facility-overpromotion") ? 35 : 0, hardFailures.includes("category-concentration") ? 30 : 0, issues.includes("generic-day-title") ? 8 : 0),
     routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
     mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
-    scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0),
+    scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0, hardFailures.includes("stale-attraction-recommended") ? 45 : 0),
     costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
     languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0)
   };
@@ -277,7 +282,10 @@ export function critiquePlanDeterministically(plan, graph = {}) {
       "backup plausibility",
       "candidate graph coverage",
       "experience category concentration",
-      "meal repetition"
+      "meal repetition",
+      "first-time signature coverage",
+      "ordinary local facility suppression",
+      "current-status confidence"
     ]
   };
 }
@@ -398,13 +406,6 @@ function archetypeFitFor(classification, profile, candidate) {
   return "supporting";
 }
 
-function firstTimeVisitorValue(place, classification) {
-  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
-  if (/signature|landmark|famous|essential|museum|national|boardwalk|beach|historic/.test(text)) return "high";
-  if (classification.isRestaurant || classification.isBar) return "supporting";
-  return "moderate";
-}
-
 function uniquenessFor(place, classification) {
   if (classification.isOrdinaryBusiness) return "low";
   const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.tags || []).join(" ")}`);
@@ -515,6 +516,59 @@ function hasMealVenueThatLooksLikeActivity(mealItems) {
     const activitySignal = /\b(rail trail|greenway|arts district|museum|park|lake|mountain|waterfall|campus|neighborhood|walking route|scenic drive|visitor center|hall of fame)\b/.test(text);
     return activitySignal && !restaurantSignal;
   });
+}
+
+function hasSignatureCoverageFailure(plan, graph = {}) {
+  const nodes = destinationDefiningNodes(graph);
+  if (!nodes.length) return false;
+  const publicText = publicPlanText(plan);
+  const topLocal = nodes.filter((node) => !/overnight|long-day-trip|not-practical/.test(node.geographicScope || "")).slice(0, 5);
+  const includedTopLocal = topLocal.filter((node) => publicText.includes(normalizeText(node.canonicalName)));
+  if (topLocal[0]?.firstTimeVisitorValue?.score >= 90 && !includedTopLocal.length) return true;
+  if (topLocal.length >= 4 && includedTopLocal.length < Math.min(2, topLocal.length)) return true;
+  return false;
+}
+
+function hasWeakFirstTimeCoverage(plan, graph = {}) {
+  const nodes = destinationDefiningNodes(graph);
+  if (nodes.length < 4) return false;
+  const publicText = publicPlanText(plan);
+  const included = nodes.slice(0, 10).filter((node) => publicText.includes(normalizeText(node.canonicalName)));
+  const hasCulture = included.some((node) => /museum|culture|historic|landmark|civil|human rights|national/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+  const hasNeighborhood = included.some((node) => /neighborhood|district|market|beltline|public market|food hall/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+  const hasOutdoor = included.some((node) => /outdoor|park|garden|trail|mountain|waterfront/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+  return included.length < Math.min(3, nodes.length) || !(hasCulture && hasNeighborhood && hasOutdoor);
+}
+
+function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
+  const publicText = publicPlanText(plan);
+  const definingNames = new Set(destinationDefiningNodes(graph).slice(0, 8).map((node) => normalizeText(node.canonicalName)));
+  const includedDefining = [...definingNames].filter((name) => publicText.includes(name)).length;
+  const ordinaryNodes = (graph.nodes || []).filter((node) => Number(node.ordinaryLocalFacilityPenalty?.score || 0) >= 50 || (node.rejectionReasons || []).includes("ordinary-business"));
+  return ordinaryNodes.some((node) => publicText.includes(normalizeText(node.canonicalName)) && includedDefining < 3);
+}
+
+function hasStaleAttractionRecommendation(plan) {
+  const text = publicPlanText(plan);
+  return /\b(cnn studio tour|old cnn studio tour|permanently closed|no longer operates|discontinued tour|defunct attraction)\b/.test(text);
+}
+
+function destinationDefiningNodes(graph = {}) {
+  return (graph.nodes || [])
+    .filter((node) => !["restaurant", "bar-or-nightlife"].includes(node.primaryType))
+    .filter((node) => Number(node.firstTimeVisitorValue?.score || 0) >= 58)
+    .sort((a, b) => Number(b.firstTimeVisitorValue?.score || 0) - Number(a.firstTimeVisitorValue?.score || 0) || Number(b.destinationSignificance?.score || 0) - Number(a.destinationSignificance?.score || 0));
+}
+
+function publicPlanText(plan) {
+  return normalizeText(JSON.stringify({
+    overview: plan.overview,
+    days: plan.days,
+    foodPlan: plan.foodPlan,
+    routeSummary: plan.routeSummary,
+    hotelBase: plan.hotelBase,
+    tripGuide: plan.tripGuide
+  }));
 }
 
 function hasMuseumDominance(plan) {

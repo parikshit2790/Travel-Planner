@@ -217,6 +217,12 @@ function summarizeDestinationIntelligence(intelligence) {
     name: item.place.name,
     categories: item.categories,
     score: item.score,
+    firstTimeVisitorValue: item.classification?.firstTimeVisitorValue,
+    destinationSignificanceScore: item.classification?.destinationSignificance?.score || 0,
+    travelerFitScore: item.classification?.travelerFit?.score || 0,
+    routeFit: item.routeFeasibility?.classification || "",
+    currentStatusConfidence: item.classification?.currentStatusConfidence,
+    ordinaryLocalFacilityPenalty: item.classification?.ordinaryLocalFacilityPenalty,
     accepted: item.accepted,
     reason: item.reason,
     routeTime: item.routeFeasibility
@@ -301,6 +307,18 @@ export function scoreCandidates(profile, input, constraints, intelligence = buil
     if (classification.isOrdinaryBusiness) {
       score += planningWeights.hardExclusion;
       reasons.push("Rejected because it appears to be an ordinary business, not a destination stop.");
+    }
+    if (classification.isStaleOrClosedAttraction) {
+      score += planningWeights.hardExclusion;
+      reasons.push("Rejected because current-status checks indicate the attraction, tour, or venue identity may be stale or discontinued.");
+    }
+    if (classification.firstTimeVisitorValue?.score) {
+      score += classification.firstTimeVisitorValue.score * 2;
+      reasons.push(`First-time visitor value: ${classification.firstTimeVisitorValue.band}.`);
+    }
+    if (classification.ordinaryLocalFacilityPenalty?.score) {
+      score -= classification.ordinaryLocalFacilityPenalty.score * 2;
+      reasons.push(classification.ordinaryLocalFacilityPenalty.reasons?.[0] || "Reduced because it looks like an ordinary local facility.");
     }
     if (childFreeAdultTrip(input) && classification.isChildrenFocused) {
       score += planningWeights.hardExclusion;
@@ -393,6 +411,29 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
     .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
     .find((item) => Number(item.place.priorityScore || 0) >= 94 && Number(item.place.typicalDurationMinutes || 0) >= 300 && routeRank(item.intelligence?.routeFeasibility?.classification) <= 1);
   if (signatureFullDay && dayIndex > 0 && dayIndex < input.numberOfDays - 1) return [signatureFullDay];
+  if (dayIndex <= 1) {
+    const topUnscheduledSignature = candidates
+      .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
+      .map((item) => ({
+        item,
+        flag: item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility),
+        routeRank: routeRank(item.intelligence?.routeFeasibility?.classification)
+      }))
+      .filter(({ flag, routeRank: rank }) => rank <= 1 && Number(flag.firstTimeVisitorValue?.score || 0) >= 88 && !flag.isRestaurant && !flag.isFoodHall && !flag.isBar)
+      .sort((a, b) => Number(b.flag.firstTimeVisitorValue?.score || 0) - Number(a.flag.firstTimeVisitorValue?.score || 0) || b.item.score - a.item.score)[0]?.item || null;
+    if (topUnscheduledSignature && !replacements.some((item) => {
+      const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+      return Number(flag.firstTimeVisitorValue?.score || 0) >= 88;
+    })) {
+      const replaceIndex = replacements.findIndex((item) => {
+        const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+        return Number(flag.firstTimeVisitorValue?.score || 0) < 88 || flag.isNeighborhood || flag.isPark;
+      });
+      if (replaceIndex >= 0) replacements[replaceIndex] = topUnscheduledSignature;
+      else if (replacements.length < input.maxActivities) replacements.push(topUnscheduledSignature);
+      selectedIds.add(topUnscheduledSignature.place.id);
+    }
+  }
   const closerSignatureAnchor = candidates
     .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
     .map((item) => ({
@@ -558,7 +599,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
 
 function isActivityCandidateForSchedule(item, profile, input) {
   const classification = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
-  if (classification.isOrdinaryBusiness || classification.isChildrenFocused) return false;
+  if (classification.isOrdinaryBusiness || classification.isStaleOrClosedAttraction || classification.isChildrenFocused) return false;
   if (classification.isRestaurant || classification.isFoodHall || classification.isBar) return false;
   if (classification.isDinnerShow) return false;
   return true;
@@ -1228,7 +1269,10 @@ function applyGeographicState(profile, input, days) {
       const travel = item.travelFromPrevious || null;
       if (item.type === "travel" && travel?.toLabel) {
         currentLocation = travel.toLabel;
-        if (normalizeText(travel.fromLabel).includes(normalizeText(profile.canonicalName.split(",")[0])) && !normalizeText(travel.toLabel).includes(normalizeText(profile.canonicalName.split(",")[0]))) departedPrimary = true;
+        const destinationCity = normalizeText(profile.canonicalName.split(",")[0]);
+        const originLabel = normalizeText(input.origin || "");
+        const toLabel = normalizeText(travel.toLabel);
+        if (item.title?.startsWith("Depart ") || originLabel && toLabel.includes(originLabel) || destinationCity && /^depart /.test(normalizeText(item.title))) departedPrimary = true;
       } else if (place) {
         currentLocation = place.name;
       } else if (region) {

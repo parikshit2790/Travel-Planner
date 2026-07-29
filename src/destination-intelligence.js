@@ -35,10 +35,12 @@ export function buildDestinationIntelligence(profile, input, constraints = {}) {
             : 0;
     const accessibilityPenalty = constraints.minimalWalking && place.accessibility === "limited" ? 45 : 0;
     const travelerPenalty = Math.min(90, Math.max(0, -classification.travelerFit.score));
-    const ordinaryPenalty = classification.isOrdinaryBusiness ? 140 : 0;
-    const score = Math.round(significanceScore + classification.destinationSignificance.score + userFitScore + classification.travelerFit.score - routeBurdenPenalty - accessibilityPenalty - ordinaryPenalty);
+    const ordinaryPenalty = classification.ordinaryLocalFacilityPenalty.score;
+    const currentStatusPenalty = classification.isStaleOrClosedAttraction ? 260 : 0;
+    const score = Math.round(significanceScore + classification.destinationSignificance.score + classification.firstTimeVisitorValue.score + userFitScore + classification.travelerFit.score - routeBurdenPenalty - accessibilityPenalty - ordinaryPenalty - currentStatusPenalty);
     const rejected = feasibility.classification === "not-practical"
       || classification.isOrdinaryBusiness
+      || classification.isStaleOrClosedAttraction
       || childFreeAdultTrip(input) && classification.isChildrenFocused
       || travelerPenalty >= 70;
     return {
@@ -141,10 +143,11 @@ export function buildDestinationArchetype(profile, input = {}, opportunities = [
 export function localSignificanceScore(place, profile) {
   const text = textFor(place);
   let score = Number(place.priorityScore || 60);
-  if (/signature|major|essential|famous|hall of fame|museum|landmark|national|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access/.test(text)) score += 18;
+  if (/signature|major|essential|famous|iconic|must see|must do|official tourism|hall of fame|museum|landmark|national|civil rights|aquarium|botanical|history center|historic site|historic district|olympic park|beltline|public market|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access/.test(text)) score += 18;
   if (/food hall|market|rooftop|local|neighborhood|arts district|live music/.test(text)) score += 10;
   if (/day-trip|regional|mountain|lake|waterfall|state park|scenic|coastal|beach|waterfront|cruise|kayak|paddleboard|fishing/.test(text)) score += 12;
   if (/backup|generic|area$|walk$|candidate|starter planning/.test(text)) score -= 20;
+  if (ordinaryLocalFacilityPenaltyFor(place, {}).score >= 60) score -= 28;
   if (profile.id.startsWith("generic-")) score -= 10;
   return Math.max(0, Math.round(score));
 }
@@ -297,6 +300,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isCity = categories.has("city") || has(/\b(city of|downtown [a-z]+|nearby city|university town|college town)\b/);
   const isHotel = has(/\b(hotel|motel|inn|suites|lodging|resort|accommodation)\b/);
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
+  const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
   const breakfastSignalText = `${name} ${categoryText} ${description}`;
   const servesBreakfast = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !isDinnerShow && (/\b(breakfast|brunch|cafe|coffee|bakery|diner)\b/.test(breakfastSignalText) || !isBar && !isFoodHall && !has(/\b(cocktail|nightclub|brewery|seafood|steakhouse|dinner|dining|evening)\b/));
@@ -304,7 +308,10 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const breakfastOrCafeFocused = categoryHas(/\b(breakfast|brunch|cafe|bakery)\b/) && !categoryHas(/\b(lunch|dinner|restaurant|dining|bar|brewery)\b/);
   const servesDinner = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !breakfastOrCafeFocused && (isFoodHall || has(/\b(dinner|restaurant|bistro|grill|tavern|bar|brewery|food hall|dining|kitchen|pizzeria|bbq|barbecue|seafood|steakhouse)\b/) || !has(/\b(breakfast only)\b/));
   const travelerFit = travelerFitFor(place, input, { isChildrenFocused, isFamilyFocused, isEntertainmentCenter, isBar, isPark });
-  const destinationSignificance = destinationSignificanceFor(place, profile, { isRestaurant, isMuseum, isPark, isNeighborhood, isEntertainmentCenter, isOrdinaryBusiness, routeScope });
+  const ordinaryLocalFacilityPenalty = ordinaryLocalFacilityPenaltyFor(place, { isMuseum, isPark, isNeighborhood, isRestaurant, isFoodHall, isBar, isEntertainmentCenter, isOrdinaryBusiness });
+  const destinationSignificance = destinationSignificanceFor(place, profile, { isRestaurant, isMuseum, isPark, isNeighborhood, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, ordinaryLocalFacilityPenalty, routeScope });
+  const firstTimeVisitorValue = firstTimeVisitorValueFor(place, profile, { isRestaurant, isFoodHall, isBar, isMuseum, isPark, isNeighborhood, isFamilyFocused, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, ordinaryLocalFacilityPenalty, routeScope });
+  const currentStatusConfidence = currentStatusConfidenceFor(place, isStaleOrClosedAttraction);
   const primaryType = primaryTypeFor({ isRestaurant, isFoodHall, isBar, isEntertainmentCenter, isChildrenFocused, isMuseum, isPark, isNeighborhood, isCity, isHotel, categories, text });
   const secondaryTypes = [...new Set([
     isFoodHall ? "food-hall" : "",
@@ -351,12 +358,17 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isOvernightExtension: routeScope === "overnight-recommended",
     isHotel,
     isOrdinaryBusiness,
-    isBackupCompatible: !isOrdinaryBusiness && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
+    isOrdinaryLocalFacility: ordinaryLocalFacilityPenalty.score >= 60,
+    isStaleOrClosedAttraction,
+    isBackupCompatible: !isOrdinaryBusiness && !isStaleOrClosedAttraction && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
     servesBreakfast,
     servesLunch,
     servesDinner,
     travelerFit,
     destinationSignificance,
+    firstTimeVisitorValue,
+    ordinaryLocalFacilityPenalty,
+    currentStatusConfidence,
     routeScope,
     confidence: confidenceFor(place, profile, text)
   };
@@ -367,7 +379,7 @@ function classifyPlace(place, feasibility, classification = classifyPlaceForPlan
   const nameText = normalizeText(place.name);
   const categoryText = normalizeText((place.categories || []).join(" "));
   const categories = new Set();
-  if (!classification.isOrdinaryBusiness && !classification.isChildrenFocused && (/signature|hall of fame|speedway|discovery|mint|bechtler|sixth floor|stockyards|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|broadway at the beach|barefoot landing/.test(nameText) || /museum|landmark|motorsports|science|beach|waterfront/.test(categoryText))) categories.add("signatureExperiences");
+  if (!classification.isOrdinaryBusiness && !classification.isChildrenFocused && !classification.isStaleOrClosedAttraction && (classification.firstTimeVisitorValue.score >= 72 || /signature|hall of fame|speedway|discovery|mint|bechtler|sixth floor|stockyards|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|broadway at the beach|barefoot landing/.test(nameText) || /museum|landmark|motorsports|science|beach|waterfront/.test(categoryText))) categories.add("signatureExperiences");
   if (/local|arts district|neighborhood|rail trail|noda|plaza|south end|camp north|bishop|deep ellum/.test(text)) categories.add("localFavorites");
   if (/neighborhood|district|rail trail|noda|plaza|south end|camp north|bishop|deep ellum|davidson/.test(text)) categories.add("neighborhoods");
   if (/nature|park|mountain|hike|garden|greenway|lake|waterfall|whitewater|arboretum|parkway|outdoor|beach|coastal|marsh|state park|brookgreen/.test(text)) categories.add("natureAnchors");
@@ -420,9 +432,13 @@ function destinationSignificanceFor(place, profile, flags) {
   const text = textFor(place);
   let score = 0;
   const reasons = [];
-  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|historic|presidential|art museum|natural sciences|history museum|botanical|university|warehouse district|city market|stockyards|sixth floor|duke|unc|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|barefoot landing|broadway at the beach|oceanfront|beach access|cherry grove/.test(text)) {
+  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|official tourism|historic|presidential|civil rights|aquarium|art museum|natural sciences|history museum|history center|botanical|university|warehouse district|city market|public market|olympic park|beltline|national historical park|historic district|memorial|stockyards|sixth floor|duke|unc|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|barefoot landing|broadway at the beach|oceanfront|beach access|cherry grove/.test(text)) {
     score += 26;
     reasons.push("Recognized as a destination-significant anchor.");
+  }
+  if (/one of the largest|world class|world renowned|nationally significant|civil rights|human rights|birth home|presidential|botanical garden|aquarium|historic park|olympic|landmark market/.test(text)) {
+    score += 22;
+    reasons.push("Carries strong first-time visitor or national/local identity value.");
   }
   if (flags.isBeachOrWaterfront || flags.isWaterActivity) score += 24;
   if (flags.isEveningAnchor) score += 14;
@@ -431,10 +447,88 @@ function destinationSignificanceFor(place, profile, flags) {
   if (flags.isEntertainmentCenter) score -= 25;
   if (flags.isDinnerShow) score -= 20;
   if (flags.isOrdinaryBusiness) score -= 80;
+  if (flags.ordinaryLocalFacilityPenalty?.score) score -= Math.round(flags.ordinaryLocalFacilityPenalty.score * 0.55);
+  if (flags.isStaleOrClosedAttraction) score -= 140;
   if (["long-day-trip", "overnight-recommended", "impractical"].includes(flags.routeScope)) score -= 12;
   if (/generic|candidate|starter planning|area only|verify and replace/.test(text)) score -= 22;
   if (profile.id?.startsWith("generic-")) score -= 8;
   return { score, reasons: reasons.length ? reasons : ["Standard destination candidate."] };
+}
+
+export function firstTimeVisitorValueFor(place, profile = {}, flags = {}) {
+  const text = textFor(place);
+  const source = normalizeText(`${place.sourceMetadata?.sourceUrl || ""} ${place.sourceMetadata?.dataFreshness || ""} ${place.sourceMetadata?.dataConfidence || ""}`);
+  let score = 0;
+  const reasons = [];
+  const add = (amount, reason) => {
+    score += amount;
+    if (reason) reasons.push(reason);
+  };
+  if (/official tourism|visitor bureau|destination guide|must see|must do|first time|top attraction|iconic|signature|essential|famous|landmark/.test(text)) add(30, "Prominent first-time or official-tourism signal.");
+  if (/national|national historical park|national historic site|presidential|civil rights|human rights|memorial|historic district|world class|one of the largest|world renowned/.test(text)) add(26, "Local or national significance signal.");
+  if (/aquarium|botanical garden|art museum|history center|science center|olympic park|public market|food hall|market|beltline|riverwalk|boardwalk|stockyards|observatory|viewpoint|cathedral|palace|castle|monument/.test(text)) add(20, "Destination-defining attraction type.");
+  if (flags.isMuseum || flags.isNeighborhood || flags.isPark) add(8, "Adds cultural, neighborhood, or outdoor trip depth.");
+  if (flags.isRestaurant || flags.isFoodHall || flags.isBar) add(flags.isFoodHall ? 12 : 4, "Useful as food or evening support, not a primary attraction by itself.");
+  if (/couple|adult|solo|family|senior/.test(text)) add(4, "Has broad traveler fit metadata.");
+  if (Number(place.typicalDurationMinutes || 0) >= 150) add(8, "Has enough experience depth for a major vacation block.");
+  if (/high|official|retrieved|ai assisted|provider/.test(source)) add(4, "Has a current/provider-backed source signal.");
+  if (flags.routeScope === "local") add(8, "Route-compatible for a first-time base itinerary.");
+  if (flags.routeScope === "easy-day-trip") add(2, "Plausible nearby excursion.");
+  if (flags.routeScope === "long-day-trip") score -= 10;
+  if (flags.routeScope === "overnight-recommended") score -= 16;
+  if (flags.isEntertainmentCenter) score -= 20;
+  if (flags.isOrdinaryBusiness) score -= 80;
+  if (flags.ordinaryLocalFacilityPenalty?.score) score -= flags.ordinaryLocalFacilityPenalty.score;
+  if (flags.isStaleOrClosedAttraction) score -= 140;
+  if (/backup|generic|candidate|starter planning|ordinary|local facility|sports field|playground|recreation center/.test(text)) score -= 18;
+  return {
+    score: Math.max(-140, Math.round(score)),
+    band: score >= 88 ? "destination-defining" : score >= 58 ? "major" : score >= 30 ? "supporting" : "low",
+    reasons: reasons.length ? reasons : ["No strong first-time visitor signal."]
+  };
+}
+
+function ordinaryLocalFacilityPenaltyFor(place, flags = {}) {
+  const text = textFor(place);
+  if (flags.isOrdinaryBusiness) return { score: 140, reasons: ["Ordinary business without destination value."] };
+  const reasons = [];
+  let score = 0;
+  const ordinaryPark = /\b(neighborhood park|community park|local park|playground|sports field|ball field|soccer field|skate park|dog park|recreation center|rec center|aquatic center|county park|municipal park)\b/.test(text);
+  const ordinaryFarm = /\b(farm|orchard|pumpkin patch|corn maze|u pick|u-pick)\b/.test(text) && !/\b(winery|historic|national|state|botanical|world|signature|famous|official tourism|regional destination)\b/.test(text);
+  const specialInterestWorship = /\b(temple|church|cathedral|mosque|synagogue|shrine)\b/.test(text) && !/\b(cathedral|historic|national|landmark|famous|architecture|official tourism|pilgrimage|world)\b/.test(text);
+  const genericSuburbanFacility = /\b(suburban|ordinary|local facility|school campus|sports complex|community center)\b/.test(text);
+  if (ordinaryPark) {
+    score += 72;
+    reasons.push("Ordinary local recreation facility.");
+  }
+  if (ordinaryFarm) {
+    score += 64;
+    reasons.push("Local farm/seasonal facility without strong destination signal.");
+  }
+  if (specialInterestWorship) {
+    score += 48;
+    reasons.push("Special-interest worship site reduced unless explicitly requested.");
+  }
+  if (genericSuburbanFacility) {
+    score += 52;
+    reasons.push("Generic suburban facility signal.");
+  }
+  if ((flags.isMuseum || flags.isNeighborhood || flags.isRestaurant || flags.isFoodHall || flags.isBar) && score) score = Math.max(0, score - 24);
+  return { score, reasons };
+}
+
+function staleOrClosedAttractionFor(place) {
+  const text = textFor(place);
+  if (/\b(old cnn studio tour|cnn studio tour)\b/.test(text) && !/\bcurrent official public tour exists\b/.test(text)) return true;
+  return /\b(closed|permanently closed|no longer operates|discontinued|defunct)\b/.test(text)
+    && !/\b(current|reopened|reimagined|reopened as|now operates|current identity verified)\b/.test(text);
+}
+
+function currentStatusConfidenceFor(place, stale) {
+  const text = normalizeText(`${place.openingTimeGuidance || ""} ${(place.seasonalNotes || []).join(" ")} ${place.sourceMetadata?.dataFreshness || ""} ${place.sourceMetadata?.retrievedAt || ""}`);
+  if (stale) return { score: 0, band: "stale-or-closed", lastVerifiedAt: place.sourceMetadata?.retrievedAt || "", reasons: ["Stale or discontinued attraction signal detected."] };
+  if (/date specific|current|retrieved|official|verify current|confirm current/.test(text)) return { score: 74, band: "verify-current-before-booking", lastVerifiedAt: place.sourceMetadata?.retrievedAt || "", reasons: ["Current-status check is present but should be verified before travel."] };
+  return { score: 45, band: "unknown", lastVerifiedAt: place.sourceMetadata?.retrievedAt || "", reasons: ["No date-specific operating status available."] };
 }
 
 function destinationDefiningExperiences(profile, primaryArchetype, placeFlags) {
@@ -519,6 +613,7 @@ function confidenceFor(place, profile, text) {
 
 function rejectionReason(classification, feasibility, input) {
   if (classification.isOrdinaryBusiness) return "Rejected because it appears to be an ordinary business rather than a traveler-facing destination stop.";
+  if (classification.isStaleOrClosedAttraction) return "Rejected because current-status checks indicate the attraction, tour, or venue identity may be stale or discontinued.";
   if (childFreeAdultTrip(input) && classification.isChildrenFocused) return "Rejected because children-focused stops do not fit a child-free adult trip unless explicitly requested.";
   if (classification.travelerFit.score <= -70) return classification.travelerFit.reasons[0] || "Rejected because traveler fit is too weak.";
   if (feasibility.classification === "not-practical") return "Rejected because the route burden is too high for the configured daily drive limit.";
