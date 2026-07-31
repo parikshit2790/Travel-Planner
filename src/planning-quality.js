@@ -63,6 +63,7 @@ export function buildDynamicResearchPlan(profile, input, intelligence) {
     foodIdentity: archetype.foodIdentity || "local dining",
     eveningStrength: archetype.eveningStrength || "unknown",
     regionalExtensions: archetype.regionalExtensions || [],
+    regionalDestinationProfile: intelligence?.regionalDestinationProfile || null,
     confidence: archetype.confidence || intelligence?.researchConfidence || "starter"
   };
   return {
@@ -254,6 +255,9 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasOrdinaryLocalFacilityPromotion(plan, graph)) hardFailures.push("ordinary-local-facility-overpromotion");
   if (hasStaleAttractionRecommendation(plan)) hardFailures.push("stale-attraction-recommended");
   if (hasWeakFirstTimeCoverage(plan, graph)) hardFailures.push("first-time-coverage-insufficient");
+  const regionalQuality = regionalDestinationQuality(plan, graph);
+  regionalQuality.hardFailures.forEach((failure) => hardFailures.push(failure));
+  regionalQuality.issues.forEach((issue) => issues.push(issue));
   if ((plan.days || []).some((day) => (day.backupOptions || []).some((backup) => Number(backup.estimatedDurationMinutes || 0) > 240))) issues.push("backup-too-large");
 
   const subScores = {
@@ -262,7 +266,12 @@ export function critiquePlanDeterministically(plan, graph = {}) {
     mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
     scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0, hardFailures.includes("stale-attraction-recommended") ? 45 : 0),
     costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
-    languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0)
+    languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0),
+    mealDiversity: regionalQuality.scores.mealDiversity,
+    cafeDiversity: regionalQuality.scores.cafeDiversity,
+    mealRouteFit: regionalQuality.scores.mealRouteFit,
+    regionalFoodCoverage: regionalQuality.scores.regionalFoodCoverage,
+    regionalPlanning: regionalQuality.scores.regionalPlanning
   };
   const score = Math.round(Object.values(subScores).reduce((sum, value) => sum + value, 0) / Object.values(subScores).length);
   return {
@@ -285,7 +294,10 @@ export function critiquePlanDeterministically(plan, graph = {}) {
       "meal repetition",
       "first-time signature coverage",
       "ordinary local facility suppression",
-      "current-status confidence"
+      "current-status confidence",
+      "regional corridor and gateway-town coverage",
+      "mountain destination park specificity",
+      "meal diversity and route fit"
     ]
   };
 }
@@ -342,6 +354,7 @@ export function buildPlannerObservabilitySummary({ researchPlan, graph, coverage
 function domainsForArchetype(archetype) {
   if (archetype === "beach/coastal") return ["beaches and waterfront access", "coastal nature", "sunset/evening waterfront", "seafood and breakfast"];
   if (archetype === "mountain") return ["trailheads", "scenic drives", "viewpoints", "waterfalls", "weather-safe town blocks"];
+  if (archetype === "national park") return ["named scenic corridors", "trailheads", "waterfalls", "visitor areas", "gateway towns", "park closures and parking", "packed lunch planning"];
   if (archetype === "major city") return ["landmarks", "museums", "historic neighborhoods", "food districts", "transit and parking"];
   if (archetype === "food destination") return ["signature restaurants", "markets", "regional cuisine", "reservation needs"];
   return ["signature local anchors", "nearby nature", "neighborhoods", "food districts"];
@@ -534,6 +547,12 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
   if (nodes.length < 4) return false;
   const publicText = publicPlanText(plan);
   const included = nodes.slice(0, 10).filter((node) => publicText.includes(normalizeText(node.canonicalName)));
+  const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
+  if (/mountain|national park/.test(archetype)) {
+    const hasScenicOrTrail = included.some((node) => /\b(outdoor|park|trail|mountain|waterfall|scenic|overlook|corridor|parkway|kuwohi|gap|cove|fork|river road)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+    const hasGatewayOrEntertainment = included.some((node) => /\b(neighborhood|district|downtown|gateway|entertainment|theme park|island|dollywood|anakeesta|skypark|gatlinburg|pigeon forge)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+    return included.length < Math.min(3, nodes.length) || !(hasScenicOrTrail && hasGatewayOrEntertainment);
+  }
   const hasCulture = included.some((node) => /museum|culture|historic|landmark|civil|human rights|national/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
   const hasNeighborhood = included.some((node) => /neighborhood|district|market|beltline|public market|food hall/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
   const hasOutdoor = included.some((node) => /outdoor|park|garden|trail|mountain|waterfront/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
@@ -551,6 +570,68 @@ function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
 function hasStaleAttractionRecommendation(plan) {
   const text = publicPlanText(plan);
   return /\b(cnn studio tour|old cnn studio tour|permanently closed|no longer operates|discontinued tour|defunct attraction)\b/.test(text);
+}
+
+function regionalDestinationQuality(plan, graph = {}) {
+  const hardFailures = [];
+  const issues = [];
+  const profile = plan?.generationMetadata?.destinationProfileSnapshot || {};
+  const regional = plan?.generationMetadata?.destinationIntelligence?.regionalDestinationProfile
+    || plan?.generationMetadata?.destinationProfile?.regionalDestinationProfile
+    || profile.regionalDestinationProfile
+    || null;
+  const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
+  const publicText = publicPlanText(plan);
+  const regionalText = normalizeText(JSON.stringify(regional || {}));
+  const namedGatewayRegion = /\b(gatlinburg|pigeon forge|sevierville|smoky mountains|great smoky mountains|national park gateway)\b/;
+  const applies = /^(mountain|national-park)$/.test(archetype)
+    || namedGatewayRegion.test(regionalText)
+    || namedGatewayRegion.test(publicText);
+  const mealItems = (plan.days || []).flatMap((day) => day.scheduleItems || []).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "")).filter(Boolean);
+  const uniqueMeals = new Set(mealNames);
+  const cafeMeals = mealNames.filter((name) => /\b(cafe|coffee|bakery|breakfast|brunch|market|deli)\b/.test(name));
+  const packedMeals = mealNames.filter((name) => /\b(packed lunch|picnic)\b/.test(name));
+  const routedMeals = mealItems.filter((item) => item.mealDetails?.routeDetour && !/not a verified|confirm exact/i.test(item.mealDetails.routeDetour)).length;
+  const mealDiversity = scoreFrom(100, mealNames.length >= 6 && uniqueMeals.size < Math.ceil(mealNames.length * 0.6) ? 34 : 0, mostCommonCount(mealNames) >= 3 ? 22 : 0);
+  const cafeDiversity = scoreFrom(100, mealItems.length >= 8 && cafeMeals.length + packedMeals.length < 2 ? 20 : 0);
+  const mealRouteFit = scoreFrom(100, mealItems.length && routedMeals < Math.ceil(mealItems.length * 0.75) ? 18 : 0);
+  const regionalFoodCoverage = scoreFrom(100, mealItems.length >= 8 && uniqueMeals.size < 5 ? 24 : 0);
+  if (!applies) {
+    return {
+      hardFailures,
+      issues,
+      scores: { mealDiversity, cafeDiversity, mealRouteFit, regionalFoodCoverage, regionalPlanning: 100 }
+    };
+  }
+  const scenicTerms = /\b(newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|scenic drive|scenic corridor|parkway|overlook)\b/;
+  const hikeTerms = /\b(gatlinburg trail|grotto falls|laurel falls|rainbow falls|abrams falls|cataract falls|waterfall|trailhead|hike|trail)\b/;
+  const gatewayTerms = /\b(gatlinburg|pigeon forge|sevierville|gateway town|downtown|old mill|the island in pigeon forge)\b/;
+  const entertainmentTerms = /\b(the island in pigeon forge|dollywood|anakeesta|skypark|ober gatlinburg|mountain coaster|show|live music|entertainment district)\b/;
+  const noveltyTerms = /\b(knife works|knife store|motorcycle museum|crime museum|alcatraz east|haunted house|wax museum|mirror maze|great smoky mountains railroad)\b/;
+  const genericPark = /\bgreat smoky mountains national park\b/.test(publicText) && !scenicTerms.test(publicText) && !hikeTerms.test(publicText);
+  if (genericPark) hardFailures.push("generic-park-container-scheduled");
+  if ((plan.numberOfDays || 0) >= 4) {
+    if (!scenicTerms.test(publicText)) hardFailures.push("regional-scenic-corridor-missing");
+    if (!hikeTerms.test(publicText)) hardFailures.push("regional-trail-or-waterfall-missing");
+    if (!gatewayTerms.test(publicText)) hardFailures.push("regional-gateway-town-coverage-missing");
+    if (!entertainmentTerms.test(publicText)) issues.push("regional-evening-entertainment-light");
+  }
+  if (noveltyTerms.test(publicText) && !/\bmust have|explicitly requested|traveler requested\b/.test(publicText)) hardFailures.push("novelty-attraction-overpromotion");
+  if (mealDiversity < 75) hardFailures.push("regional-meal-diversity-insufficient");
+  if (cafeDiversity < 82) issues.push("cafe-diversity-light");
+  const regionalPlanning = scoreFrom(100,
+    hardFailures.includes("generic-park-container-scheduled") ? 38 : 0,
+    hardFailures.includes("regional-scenic-corridor-missing") ? 30 : 0,
+    hardFailures.includes("regional-trail-or-waterfall-missing") ? 26 : 0,
+    hardFailures.includes("regional-gateway-town-coverage-missing") ? 20 : 0,
+    hardFailures.includes("novelty-attraction-overpromotion") ? 32 : 0,
+    issues.includes("regional-evening-entertainment-light") ? 8 : 0);
+  return {
+    hardFailures,
+    issues,
+    scores: { mealDiversity, cafeDiversity, mealRouteFit, regionalFoodCoverage, regionalPlanning }
+  };
 }
 
 function destinationDefiningNodes(graph = {}) {

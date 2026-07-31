@@ -229,6 +229,7 @@ function summarizeDestinationIntelligence(intelligence) {
   });
   return {
     destinationIdentity: intelligence.destinationIdentity,
+    regionalDestinationProfile: intelligence.regionalDestinationProfile,
     categoryCoverage: intelligence.categoryCoverage,
     experienceGaps: intelligence.experienceGaps,
     routeOptions: intelligence.routeOptions,
@@ -350,6 +351,23 @@ function destinationIntelligenceArchetype(intelligence) {
 }
 
 function archetypeScoreAdjustment(archetype, classification, placeText, input) {
+  if (archetype?.primaryArchetype === "mountain" || archetype?.primaryArchetype === "national park") {
+    if (isGenericParkContainerText(placeText)) return { score: -180, reason: "Reduced because park days need specific roads, trails, overlooks, visitor areas, or waterfalls." };
+    if (/newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|scenic corridor|motor nature trail|loop road/.test(placeText)) {
+      return { score: 115, reason: "Boosted because this is a destination-defining scenic corridor or high-value park route." };
+    }
+    if (/grotto falls|laurel falls|rainbow falls|abrams falls|cataract falls|waterfall|trailhead|trail\b|hike\b|overlook/.test(placeText)) {
+      return { score: 84, reason: "Boosted because mountain trips need real trail, waterfall, and overlook candidates." };
+    }
+    if (/the island in pigeon forge|dollywood|anakeesta|skypark|ober gatlinburg|downtown gatlinburg|old mill|show|live music|entertainment district/.test(placeText)) {
+      return { score: 58, reason: "Boosted because gateway mountain regions need a town or evening entertainment block." };
+    }
+    if (/knife store|knife works|motorcycle museum|crime museum|haunted house|wax museum|mirror maze|ordinary shop|souvenir/.test(placeText)) {
+      return { score: -130, reason: "Reduced because novelty retail or narrow special-interest attractions should not anchor a mountain vacation." };
+    }
+    if (classification.isRestaurant && /breakfast|brunch|cafe|bakery|lunch|dinner|local/.test(placeText)) return { score: 20, reason: "Boosted for route-compatible local food support." };
+    return null;
+  }
   if (archetype?.primaryArchetype !== "beach/coastal") return null;
   const userRejectsBeach = /avoid beach|no beach|skip beach|not beach/.test(normalizeText(`${input.mustHavePlaces?.join(" ")} ${input.avoidPlaces?.join(" ")}`));
   if (!userRejectsBeach && (classification.isBeachOrWaterfront || classification.isBoardwalk || classification.isWaterActivity || /oceanfront|marshwalk|skywheel|barefoot landing|broadway at the beach|brookgreen|huntington beach/.test(placeText))) {
@@ -364,6 +382,9 @@ function archetypeScoreAdjustment(archetype, classification, placeText, input) {
 
 function improveArchetypeSelection(profile, input, intelligence, dayIndex, themeRegions, selected, candidates, scheduled) {
   const archetype = intelligence?.destinationArchetype;
+  if (archetype?.primaryArchetype === "mountain" || archetype?.primaryArchetype === "national park") {
+    return improveMountainRegionalSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled);
+  }
   if (archetype?.primaryArchetype !== "beach/coastal") {
     return improveMixedDestinationSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled);
   }
@@ -390,6 +411,47 @@ function improveArchetypeSelection(profile, input, intelligence, dayIndex, theme
   return replacements.slice(0, input.maxActivities);
 }
 
+function improveMountainRegionalSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled) {
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const scheduledItems = candidates.filter((item) => scheduled.has(item.place.id));
+  const allSelected = [...selected, ...scheduledItems];
+  const already = {
+    scenic: allSelected.some((item) => isScenicMountainCorridor(item.place)),
+    hike: allSelected.some((item) => isHikeOrWaterfall(item.place)),
+    town: allSelected.some((item) => isGatewayTownOrDowntown(item.place)),
+    entertainment: allSelected.some((item) => isMountainEntertainment(item.place))
+  };
+  const replacements = [...selected];
+  const pick = (predicate) => candidates.find((item) => {
+    if (scheduled.has(item.place.id) || selectedIds.has(item.place.id)) return false;
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    if (flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness || flag.isChildrenFocused) return false;
+    return predicate(item.place, flag, item);
+  });
+  const replaceLowest = (candidate) => {
+    if (!candidate) return false;
+    const replaceIndex = replacements.findIndex((item) => {
+      const text = normalizeText(`${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+      return /museum|shop|retail|generic|area$|novelty|children|family entertainment/.test(text)
+        || (!isScenicMountainCorridor(item.place) && !isHikeOrWaterfall(item.place) && !isGatewayTownOrDowntown(item.place) && !isMountainEntertainment(item.place));
+    });
+    if (replaceIndex >= 0) replacements[replaceIndex] = candidate;
+    else if (replacements.length < input.maxActivities) replacements.push(candidate);
+    else return false;
+    selectedIds.add(candidate.place.id);
+    return true;
+  };
+  const sightseeingDay = dayIndex > 0 && dayIndex < input.numberOfDays - 1;
+  if (sightseeingDay && !already.scenic && (dayIndex === 1 || input.numberOfDays >= 4)) {
+    const scenic = pick((place) => isScenicMountainCorridor(place));
+    replaceLowest(scenic);
+  }
+  if (sightseeingDay && !already.hike && dayIndex >= 1) replaceLowest(pick((place) => isHikeOrWaterfall(place) && Number(place.typicalDurationMinutes || 0) <= 260));
+  if (sightseeingDay && !already.entertainment && dayIndex >= 2) replaceLowest(pick((place) => isMountainEntertainment(place)));
+  if (!already.town && dayIndex === 0) replaceLowest(pick((place) => isGatewayTownOrDowntown(place)));
+  return replacements.slice(0, input.maxActivities);
+}
+
 function improveMixedDestinationSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled) {
   const selectedIds = new Set(selected.map((item) => item.place.id));
   const selectedFlags = selected.map((item) => item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility));
@@ -397,6 +459,7 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
   const scheduledFlags = scheduledItems.map((item) => item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility));
   const selectedOrScheduled = [...selectedFlags, ...scheduledFlags];
   const explicitMuseumIntent = hasExplicitMuseumIntent(input);
+  const scheduledMuseumCount = scheduledFlags.filter((flag) => flag.isMuseum).length;
   const hasOutdoor = selectedOrScheduled.some((flag) => flag.isPark || flag.isMountainOrTrail || flag.isWaterActivity || flag.isBeachOrWaterfront);
   const hasNearbyAnchor = selectedOrScheduled.some((flag) => flag.isDayTrip || flag.isOvernightExtension || flag.isRegionalDestination);
   const hasNeighborhood = selectedOrScheduled.some((flag) => flag.isNeighborhood || flag.isEveningAnchor);
@@ -419,7 +482,7 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
         flag: item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility),
         routeRank: routeRank(item.intelligence?.routeFeasibility?.classification)
       }))
-      .filter(({ flag, routeRank: rank }) => rank <= 1 && Number(flag.firstTimeVisitorValue?.score || 0) >= 88 && !flag.isRestaurant && !flag.isFoodHall && !flag.isBar)
+      .filter(({ flag, routeRank: rank }) => rank <= 1 && Number(flag.firstTimeVisitorValue?.score || 0) >= 88 && !flag.isRestaurant && !flag.isFoodHall && !flag.isBar && (explicitMuseumIntent || scheduledMuseumCount < 2 || !flag.isMuseum))
       .sort((a, b) => Number(b.flag.firstTimeVisitorValue?.score || 0) - Number(a.flag.firstTimeVisitorValue?.score || 0) || b.item.score - a.item.score)[0]?.item || null;
     if (topUnscheduledSignature && !replacements.some((item) => {
       const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
@@ -509,9 +572,9 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
     const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
     return flag.isMuseum;
   }).length;
-  if (!explicitMuseumIntent && museumCount > 1) {
+  if (!explicitMuseumIntent && (museumCount > 1 || scheduledMuseumCount >= 2 && museumCount > 0)) {
     replacements.forEach((item, index) => {
-      if (museumCount <= 1) return;
+      if (museumCount <= 1 && scheduledMuseumCount < 2) return;
       const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
       if (!flag.isMuseum) return;
       const replacement = pick((candidateFlag) => !candidateFlag.isMuseum && !candidateFlag.isRestaurant && !candidateFlag.isFoodHall && !candidateFlag.isBar);
@@ -547,6 +610,39 @@ function hasExplicitMuseumIntent(input) {
 function isCoastalNaturePlace(place, classification = classifyPlaceForPlanning(place)) {
   const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
   return classification.isPark && /state park|garden|marsh|brookgreen|huntington|atalaya|wildlife|coastal nature/.test(text);
+}
+
+function isScenicMountainCorridor(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(scenic corridor|scenic drive|parkway|motor nature trail|loop road|gap road|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|overlook)\b/.test(text);
+}
+
+function isHikeOrWaterfall(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(hike|trail|trailhead|waterfall|falls|cataract|grotto|laurel|rainbow|abrams|nature walk)\b/.test(text);
+}
+
+function isGatewayTownOrDowntown(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(gateway town|downtown|village|main street|old mill|town core|local shops|arts district|walkable district|orientation district|gatlinburg|pigeon forge|sevierville)\b/.test(text);
+}
+
+function isMountainEntertainment(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(the island in pigeon forge|dollywood|anakeesta|skypark|ober gatlinburg|mountain coaster|alpine coaster|show|live music|entertainment district|theme park|distillery)\b/.test(text)
+    && !/\b(knife works|knife store|crime museum|haunted house|wax museum|mirror maze)\b/.test(text);
+}
+
+function isGenericParkContainer(place, profile = {}) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  const destinationName = normalizeText(profile.canonicalName || "");
+  return isGenericParkContainerText(text)
+    || (destinationName && normalizeText(place.name) === destinationName && /\bnational park|state park|destination\b/.test(text));
+}
+
+function isGenericParkContainerText(text) {
+  return /^(great smoky mountains national park|national park|state park|parks and scenery|area parks|park area)$/.test(String(text || "").trim())
+    || /\bgreat smoky mountains national park\b/.test(text) && !/\b(newfound gap|kuwohi|clingsmans|cades cove|roaring fork|little river|foothills|trail|falls|visitor center|overlook|road|loop)\b/.test(text);
 }
 
 export function buildDays(profile, input, constraints, scored, intelligence = null) {
@@ -602,6 +698,7 @@ function isActivityCandidateForSchedule(item, profile, input) {
   if (classification.isOrdinaryBusiness || classification.isStaleOrClosedAttraction || classification.isChildrenFocused) return false;
   if (classification.isRestaurant || classification.isFoodHall || classification.isBar) return false;
   if (classification.isDinnerShow) return false;
+  if (isGenericParkContainer(item.place, profile)) return false;
   return true;
 }
 
@@ -609,10 +706,41 @@ function destinationDayThemes(profile, input, intelligence = null) {
   if (intelligence?.destinationArchetype?.primaryArchetype === "beach/coastal") {
     return beachCoastalThemes(profile, input, intelligence);
   }
+  if (intelligence?.destinationArchetype?.primaryArchetype === "mountain" || intelligence?.destinationArchetype?.primaryArchetype === "national park") {
+    return mountainRegionalThemes(profile, input, intelligence);
+  }
   const profileRegions = profile.regions.map((region) => region.id);
   const hasDefaultThemes = dayThemes.flat().some((regionId) => profileRegions.includes(regionId));
   if (hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
   return coordinateClusterThemes(profile, input);
+}
+
+function mountainRegionalThemes(profile, input, intelligence) {
+  const regionIds = profile.regions.map((region) => region.id);
+  const defaultRegion = profile.planningRules?.defaultHotelRegion || regionIds[0];
+  const byPlace = (predicate) => (intelligence?.allCandidates || [])
+    .filter((item) => item.accepted && predicate(item.place, item.classification))
+    .map((item) => item.place.regionId)
+    .filter((id) => regionIds.includes(id));
+  const gateway = byPlace((place) => isGatewayTownOrDowntown(place));
+  const scenic = byPlace((place) => isScenicMountainCorridor(place));
+  const hikes = byPlace((place) => isHikeOrWaterfall(place));
+  const entertainment = byPlace((place) => isMountainEntertainment(place));
+  const food = byPlace((place, flag) => flag.isRestaurant || flag.isFoodHall || flag.isEveningAnchor);
+  const unique = (values) => [...new Set(values.filter(Boolean))];
+  const sightseeingDays = Math.max(1, Number(input.numberOfDays || 1) - 2);
+  const themes = [
+    unique([defaultRegion, gateway[0], food[0]]),
+    unique([scenic[0], hikes[0], defaultRegion]),
+    unique([entertainment[0], gateway[1], food[1]]),
+    unique([scenic[1], hikes[1], gateway[0]]),
+    unique([hikes[2], scenic[2], defaultRegion]),
+    unique([gateway[2], entertainment[1], food[2]])
+  ].map((theme) => keepNearbyThemeRegions(profile, theme.filter((id) => regionIds.includes(id)), input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
+  const rotated = rotate(themes.length ? themes : coordinateClusterThemes(profile, input), input.variationSeed);
+  if (input.numberOfDays <= 2) return rotated.slice(0, input.numberOfDays);
+  if (input.numberOfDays === 3) return [rotated[0] || [defaultRegion], rotated.find((theme) => theme.some((id) => scenic.includes(id) || hikes.includes(id))) || rotated[1] || [defaultRegion], rotated[2] || rotated[0] || [defaultRegion]];
+  return rotated.slice(0, Math.max(input.numberOfDays, sightseeingDays));
 }
 
 function beachCoastalThemes(profile, input, intelligence) {
@@ -674,6 +802,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   const travelContext = tripTravelContext(profile, input);
   const isArrivalDay = dayIndex === 0 && travelContext.needsArrivalLogistics;
   const isDepartureDay = dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
+  const parkRouteDay = shouldPackLunchForDay(places);
   const breakfastStart = constraints.breakfastMinutes;
   const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, isArrivalDay ? 16 * 60 : 0);
   const firstRegion = places[0]?.regionId || "santa-monica";
@@ -705,7 +834,8 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       cursor += travel.durationMinutes + buffers;
     }
     if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30) {
-      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), mealRecommendation(profile, input, place.regionId, "lunch", mealUsage), place.regionId, input, constraints, mealUsage);
+      const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage);
+      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), lunchRecommendation, place.regionId, input, constraints, parkRouteDay ? null : mealUsage);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
     }
     const scheduledActivity = activityItem(place, cursor, constraints, index);
@@ -715,7 +845,8 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   });
   if (!items.some((item) => item.type === "lunch")) {
     const lunchRegion = places[0]?.regionId || firstRegion;
-    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage), lunchRegion, input, constraints, mealUsage);
+    const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage);
+    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
   if (!isDepartureDay && input.pace !== "Packed") {
@@ -746,6 +877,35 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
   }
   return sortAndFormat(items);
+}
+
+function shouldPackLunchForDay(places) {
+  if (!Array.isArray(places) || places.length < 1) return false;
+  const text = normalizeText(places.map((place) => `${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`).join(" "));
+  const outdoorMinutes = places.reduce((sum, place) => /\b(scenic corridor|scenic drive|parkway|trail|hike|waterfall|overlook|national park|motor nature trail|loop road|gap road)\b/.test(normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`)) ? sum + Number(place.typicalDurationMinutes || 0) : sum, 0);
+  return outdoorMinutes >= 180 || /\b(newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|remote trailhead|limited services)\b/.test(text);
+}
+
+function packedLunchRecommendation(profile, input, regionId) {
+  const price = moneyRange(mealCost(input, "lunch").low, Math.max(mealCost(input, "lunch").low, Math.min(mealCost(input, "lunch").high, 24)));
+  const region = regionName(profile, regionId);
+  return {
+    primary: "Packed lunch or picnic supplies",
+    secondary: `${region} cafe or market before the park route`,
+    primaryPlaceId: "",
+    secondaryPlaceId: "",
+    text: `Pack lunch, water, and snacks before the scenic or trail block, or buy picnic supplies near ${region} before leaving the town area. This avoids forcing a weak restaurant stop into a park route. Dietary and allergy safety must be confirmed directly when buying food.`,
+    cuisine: "Flexible picnic",
+    price,
+    reservation: "No reservation. Buy before entering the scenic route or trail area.",
+    mealTypesServed: ["lunch"],
+    openingHours: "Buy supplies before the park route; confirm market or cafe hours directly.",
+    routeDetour: "Designed for remote scenic or trail days with limited meal access.",
+    priceLevel: price,
+    dietaryFit: "Choose packed items that satisfy traveler restrictions and allergies.",
+    reservationNeed: "No reservation.",
+    confidence: "medium"
+  };
 }
 
 function activityItem(place, start, constraints, index) {
@@ -1064,6 +1224,8 @@ function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled,
     })
     .filter(({ place, travel, classification }) => {
       if (!classification.isBackupCompatible) return false;
+      if (classification.isOrdinaryLocalFacility || Number(classification.ordinaryLocalFacilityPenalty?.score || 0) >= 50) return false;
+      if (classification.travelerFit?.score <= -50) return false;
       if (!regionIds.includes(place.regionId) && travel.durationMinutes > 45) return false;
       return true;
     })
@@ -1431,6 +1593,9 @@ function buildOverview(profile, input, days, budget, route) {
 }
 
 function buildTripShapeOptions(profile, input, intelligence) {
+  if ((intelligence?.destinationArchetype?.primaryArchetype === "mountain" || intelligence?.destinationArchetype?.primaryArchetype === "national park") && intelligence?.regionalDestinationProfile) {
+    return buildRegionalMountainTripShapeOptions(profile, input, intelligence);
+  }
   const coreRegions = profile.regions.slice(0, Math.min(3, profile.regions.length)).map((region) => region.name);
   const dayTrips = (intelligence?.nearbyDayTrips || [])
     .filter((item) => ["local", "easy-day-trip"].includes(item.routeFeasibility?.classification))
@@ -1509,6 +1674,85 @@ function buildTripShapeOptions(profile, input, intelligence) {
       tradeoffs: ["May miss signature nearby experiences"],
       costImpact: "Predictable local cost range.",
       whyItFitsUser: "Best if the traveler prefers certainty, lower driving, and fewer hotel changes.",
+      confidence: "medium"
+    }));
+  }
+  return options.slice(0, 3);
+}
+
+function buildRegionalMountainTripShapeOptions(profile, input, intelligence) {
+  const regional = intelligence.regionalDestinationProfile;
+  const base = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
+  const gatewayNames = regional.gatewayTowns?.length ? regional.gatewayTowns : [base?.name || profile.canonicalName];
+  const scenicAnchors = (intelligence.scenicDrives || []).filter((item) => ["local", "easy-day-trip"].includes(item.routeFeasibility?.classification)).slice(0, 4);
+  const entertainment = (intelligence.entertainmentAnchors || []).filter((item) => ["local", "easy-day-trip"].includes(item.routeFeasibility?.classification)).slice(0, 3);
+  const overnight = (intelligence.regionalOvernightExtensions || [])[0];
+  const nights = Math.max(0, calculateTripNights(input.numberOfDays));
+  const scenicMinutes = scenicAnchors.reduce((sum, item) => sum + Number(item.routeFeasibility?.estimatedRoundTripMinutes || 0), 0);
+  const options = [
+    tripShapeOption({
+      id: "shape-regional-gateway-base",
+      title: `${gatewayNames[0]} base with connected regional days`,
+      structureType: "One base plus connected regional day trips",
+      routeSequence: [gatewayNames[0], ...scenicAnchors.slice(0, 2).map((item) => item.place.name), ...entertainment.slice(0, 1).map((item) => item.place.name)],
+      overnightBases: [{ base: base?.name || gatewayNames[0], nights }],
+      hotelChanges: 0,
+      majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
+      totalEstimatedDriving: `${formatDuration(scenicMinutes + input.numberOfDays * 20)}-${formatDuration(scenicMinutes + input.numberOfDays * 40)} including scenic-route days`,
+      totalMajorDriving: scenicMinutes,
+      longestDrivingDay: scenicAnchors[0] ? `${scenicAnchors[0].place.name}, about ${formatDuration(scenicAnchors[0].routeFeasibility?.estimatedRoundTripMinutes || scenicAnchors[0].place.typicalDurationMinutes || 0)} with stops` : "Local gateway days only",
+      fullSightseeingDays: Math.max(1, input.numberOfDays - 2),
+      arrivalAssumptions: "Keep arrival light, then use full middle days for park/scenic/town clusters.",
+      departureAssumptions: "Protect departure buffers and avoid a deep park route after checkout.",
+      experienceMix: `Gateway town depth, scenic corridors, waterfalls or trails, and ${entertainment[0]?.place.name || "evening entertainment"}.`,
+      advantages: ["No hotel changes", "Uses the connected tourism region", "Keeps park days weather-aware"],
+      tradeoffs: ["Some out-and-back scenic driving", "Remote routes need offline maps and packed meals"],
+      costImpact: "Lower lodging friction; parking, fuel, and ticketed mountain attractions may vary.",
+      whyItFitsUser: `${input.pace} pace with ${input.travelers} traveler${input.travelers === 1 ? "" : "s"} favors a practical base and selected regional variety.`,
+      confidence: regional.regionalConfidence || "medium"
+    }),
+    tripShapeOption({
+      id: "shape-gateway-plus-entertainment",
+      title: `${gatewayNames.slice(0, 2).join(" + ") || "Gateway towns"} with entertainment balance`,
+      structureType: "One base, town-to-town regional mix",
+      routeSequence: [...gatewayNames.slice(0, 2), ...entertainment.map((item) => item.place.name)],
+      overnightBases: [{ base: base?.name || gatewayNames[0], nights }],
+      hotelChanges: 0,
+      majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
+      totalEstimatedDriving: `${formatDuration(input.numberOfDays * 30)}-${formatDuration(input.numberOfDays * 55)} local and gateway movement`,
+      totalMajorDriving: input.numberOfDays * 42,
+      longestDrivingDay: "No intentionally extreme transfer day",
+      fullSightseeingDays: Math.max(1, input.numberOfDays - 2),
+      arrivalAssumptions: "Start with the selected town, then add nearby connected towns only when they improve the trip.",
+      departureAssumptions: "End with a light town or cafe block.",
+      experienceMix: "Town attractions, meals, cafes, evenings, and one scenic or waterfall day.",
+      advantages: ["More food and evening variety", "Easy to cut if tired", "No silent second base"],
+      tradeoffs: ["Less deep park coverage than the scenic-first option"],
+      costImpact: "Moderate ticket and meal flexibility.",
+      whyItFitsUser: "Useful when the traveler wants regional feel without overloading driving.",
+      confidence: "medium"
+    })
+  ];
+  if (overnight && input.numberOfDays >= 6 && input.lodging?.changeHotels !== "Stay in one place") {
+    options.push(tripShapeOption({
+      id: "shape-regional-extension",
+      title: "Broader mountain-region extension with approval",
+      structureType: "Optional second base",
+      routeSequence: [gatewayNames[0], overnight.place.name],
+      overnightBases: [{ base: base?.name || gatewayNames[0], nights: Math.max(1, nights - 1) }, { base: overnight.place.name, nights: 1 }],
+      hotelChanges: 1,
+      majorTransferDays: [`Transfer to ${overnight.place.name}`],
+      totalEstimatedDriving: `${formatDuration(Number(overnight.routeFeasibility?.estimatedRoundTripMinutes || 0) + 120)} plus local driving`,
+      totalMajorDriving: Number(overnight.routeFeasibility?.estimatedRoundTripMinutes || 0),
+      longestDrivingDay: `${overnight.place.name}, about ${formatDuration(overnight.routeFeasibility?.estimatedRoundTripMinutes || 0)}`,
+      fullSightseeingDays: Math.max(1, input.numberOfDays - 3),
+      arrivalAssumptions: "Requires explicit approval before daily scheduling.",
+      departureAssumptions: "Avoid adding this when the traveler wants zero hotel changes.",
+      experienceMix: "Broader region variety with more transfer burden.",
+      advantages: ["More regional variety"],
+      tradeoffs: ["Adds packing, lodging, and route friction"],
+      costImpact: "Higher lodging and transfer cost.",
+      whyItFitsUser: "Only fits longer trips or explicit extension interest.",
       confidence: "medium"
     }));
   }
@@ -2117,6 +2361,8 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
   }
   const counts = categoryCountsForTitle(activityItems);
   const dominantRegion = dominantRegionName(profile, activityItems) || region.name;
+  const mountainTitle = mountainRegionalDayTitle(activityItems, eveningItems);
+  if (mountainTitle) return mountainTitle;
   if ((counts.beach + counts.waterfront) >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
     return `${dominantRegion} beach and waterfront`;
   }
@@ -2131,6 +2377,24 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
   }
   const names = activityTitles.slice(0, 2).map(shortTitle).filter(Boolean);
   return names.length ? names.join(" and ") : `${region.name} highlights`;
+}
+
+function mountainRegionalDayTitle(activityItems, eveningItems = []) {
+  const text = normalizeText([...activityItems, ...eveningItems].map((item) => `${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`).join(" "));
+  if (!/\b(mountain|trail|waterfall|falls|parkway|overlook|scenic|gatlinburg|pigeon forge|sevierville|kuwohi|newfound gap|cades cove|roaring fork|little river|foothills|dollywood|island)\b/.test(text)) return "";
+  if (/\bnewfound gap\b/.test(text) && /\bkuwohi|clingsmans\b/.test(text)) return "Newfound Gap and Kuwohi scenic day";
+  if (/\bcades cove\b/.test(text)) return "Cades Cove and mountain scenery";
+  if (/\broaring fork\b/.test(text)) return "Roaring Fork and Gatlinburg waterfalls";
+  if (/\blittle river road\b/.test(text)) return "Little River Road and waterfall stops";
+  if (/\bfoothills parkway\b/.test(text)) return "Foothills Parkway scenic overlooks";
+  if (/\bdollywood\b/.test(text)) return "Dollywood and Pigeon Forge evening";
+  if (/\bthe island in pigeon forge\b/.test(text)) return "The Island and Pigeon Forge entertainment";
+  if (/\banakeesta|skypark|ober gatlinburg\b/.test(text)) return "Gatlinburg mountain attractions";
+  if (/\bgrotto falls|laurel falls|rainbow falls|abrams falls|cataract falls\b/.test(text)) return "Waterfall trail and scenic town evening";
+  if (/\bdowntown gatlinburg|gatlinburg\b/.test(text) && /\bpigeon forge|island|old mill\b/.test(text)) return "Gatlinburg and Pigeon Forge gateway day";
+  if (/\btrail|hike|waterfall|falls\b/.test(text)) return "Trail and waterfall day";
+  if (/\bscenic drive|parkway|overlook\b/.test(text)) return "Scenic drive and overlook day";
+  return "";
 }
 
 function categoryCountsForTitle(items) {
@@ -2173,7 +2437,10 @@ function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
     const distanceMiles = haversineMiles(fromCoordinates.lat, fromCoordinates.lng, toCoordinates.lat, toCoordinates.lng);
     const minimum = Math.ceil(distanceMiles / (route?.tags?.includes("scenic") || distanceMiles > 18 ? 0.65 : 0.45));
     const routeMinutes = route?.estimatedDriveMinutes;
-    const durationMinutes = Math.max(8, Math.round(routeMinutes ? Math.max(routeMinutes, minimum) : minimum + (distanceMiles > 20 ? 18 : 8)));
+    let durationMinutes = Math.max(8, Math.round(routeMinutes ? Math.max(routeMinutes, minimum) : minimum + (distanceMiles > 20 ? 18 : 8)));
+    if (fromRegionId !== toRegionId && isMountainRegionalTransfer(profile, fromPlaceOrRegion, toPlaceOrRegion)) {
+      durationMinutes = Math.max(durationMinutes, 25);
+    }
     return {
       mode: "Drive",
       durationMinutes,
@@ -2187,6 +2454,28 @@ function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
   if (fromRegionId === toRegionId) return { mode: "Drive", durationMinutes: 12, distanceMiles: 3, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "same-area-estimate", note: "Short same-area transfer estimate; verify exact location and parking." };
   const minutes = route?.estimatedDriveMinutes || 35;
   return { mode: "Drive", durationMinutes: minutes, distanceMiles: route?.estimatedDistanceMiles || Math.round(minutes * 0.7), fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "curated-region-estimate", note: `Estimated drive: about ${minutes} minutes. Verify live traffic before traveling.` };
+}
+
+function isMountainRegionalTransfer(profile, fromPlaceOrRegion, toPlaceOrRegion) {
+  const archetype = profile.destinationArchetype?.primaryArchetype || "";
+  const profileText = normalizeText([
+    profile.canonicalName,
+    profile.summary,
+    ...(profile.regions || []).map((region) => region.name),
+    ...(profile.scenicRoutes || []).map((route) => route.name)
+  ].filter(Boolean).join(" "));
+  if (archetype !== "mountain" && archetype !== "national-park" && !/\b(mountain|national park|parkway|ridge|trail|waterfall|falls|scenic route|scenic drive)\b/.test(profileText)) return false;
+  const textFor = (value) => {
+    const regionId = typeof value === "string" ? value : value?.regionId;
+    return normalizeText([
+      typeof value === "object" ? value.name : "",
+      typeof value === "object" ? value.shortDescription : "",
+      typeof value === "object" ? (value.categories || []).join(" ") : "",
+      typeof value === "object" ? (value.tags || []).join(" ") : "",
+      regionName(profile, regionId)
+    ].filter(Boolean).join(" "));
+  };
+  return /\b(mountain|parkway|trail|waterfall|falls|arboretum|nature|garden|scenic|catawba|craggy|ridge)\b/.test(`${textFor(fromPlaceOrRegion)} ${textFor(toPlaceOrRegion)}`);
 }
 
 function coordinatesFor(profile, placeOrRegion) {

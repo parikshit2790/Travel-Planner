@@ -1139,11 +1139,11 @@ function heroDescription(trip) {
 
 function stepView() {
   if (state.activeStep === 1) return basicsStep();
-  if (state.activeStep === 2 && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) return routeRecommendationStep();
   if (state.activeStep === 2) return travelersStep();
   if (state.activeStep === 3) return styleStep();
   if (state.activeStep === 4) return foodStep();
   if (state.activeStep === 5) return comfortStep();
+  if (state.activeStep === 6 && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) return routeRecommendationStep();
   return reviewStep();
 }
 
@@ -2940,7 +2940,7 @@ function setPath(root, path, value) {
 async function buildTripPlanAction(name) {
   if (ui.generatingPlan) return;
   if (name !== "regeneratePlan" && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
-    state.activeStep = 2;
+    state.activeStep = 6;
     state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
     state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
     ui.toast = "Approve a route shape before building the detailed itinerary.";
@@ -3190,14 +3190,6 @@ function action(name) {
       ui.toast = "Resolve Step 1 issues before continuing.";
     } else {
       ensureRouteArchitecture(state.trip);
-      if (routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
-        state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
-        state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
-        state.activeStep = 2;
-        ui.toast = "Choose and approve a route shape before traveler details.";
-        persist("Updated");
-        return;
-      }
       state.activeStep = 2;
       ui.toast = "";
     }
@@ -3209,7 +3201,7 @@ function action(name) {
   if (name.startsWith("approveRoute:")) {
     const id = name.split(":")[1] || state.trip.pendingRouteOptionId;
     approveRouteOption(state.trip, id);
-    state.activeStep = 2;
+    state.activeStep = 6;
     ui.toast = "Route approved. Detailed itinerary generation will use only this trip shape.";
   }
   if (name === "regenerateRouteOptions") {

@@ -153,6 +153,12 @@ function destinationPrompt(destinationName, trip) {
     `Pace: ${trip?.schedule?.pace || "Balanced"}`,
     "Create a destination profile that a vacation planner can schedule directly.",
     "Include 8-12 regions/neighborhoods, 24-36 places, 6-10 food areas, and 5-10 routes or nearby excursions.",
+    "If the destination is part of a connected vacation region, return regionalDestinationProfile with primaryDestination, gatewayTowns, metroOrTourismRegion, parkRelationship, majorGeographicZones, scenicCorridors, entertainmentZones, foodZones, realisticBaseOptions, nearbyDayTrips, overnightExtensions, and regionalConfidence.",
+    "For mountain, national-park, lake, coastal, island, wine-country, or resort regions, evaluate the connected tourism region rather than only the typed town. Do not silently add a second overnight base.",
+    "For national-park or mountain trips, include named scenic corridors and named trail/waterfall candidates as schedulable places. Do not use the park name alone as a generic activity.",
+    "Scenic routes should include start/end, drive distance, drive duration without stops, recommended stops, overlooks, hikes, waterfalls, parking notes, closure/weather cautions, daylight needs, offline-map needs, and full experience duration when known. If unknown, say to verify rather than invent.",
+    "For hikes and waterfalls, include trail name, trailhead, coordinates when known, parking, round-trip distance, elevation gain, estimated duration, difficulty, terrain, waterfall/viewpoint, crowd/early-start guidance, seasonal/weather sensitivity, traveler fit, backup, and source confidence when known.",
+    "Research breakfast, lunch, dinner, cafes/bakeries, packed-lunch/picnic support, and evening food separately. Do not repeat the same restaurant pair across a whole trip.",
     "Build candidate pools from separate domains before ranking: signature attractions, history/culture, art/museums, neighborhoods, outdoors/parks/gardens, food, evenings/nightlife, sports/events, and regional day trips.",
     "Places must include iconic must-dos, local neighborhoods, weather backups, food/market anchors, scenic/outdoor options, destination-defining experiences, and nearby day trips when appropriate.",
     "For first-time balanced trips, prioritize destination-defining official-tourism and nationally/locally significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, parking, or generic local facilities.",
@@ -212,6 +218,9 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
     places,
     foodAreas,
     scenicRoutes,
+    scenicCorridors: normalizeScenicCorridors(raw.scenicCorridors, regions),
+    hikesAndWaterfalls: normalizeHikesAndWaterfalls(raw.hikesAndWaterfalls, regions),
+    regionalDestinationProfile: normalizeRegionalDestinationProfile(raw.regionalDestinationProfile),
     sourceMetadata: {
       provider: "openai",
       retrievedAt: new Date().toISOString(),
@@ -304,8 +313,87 @@ function normalizeRoutes(value, regions) {
     estimatedDistanceMiles: clampNumber(item.estimatedDistanceMiles, 1, 250, 8),
     tags: strings(item.tags, 8),
     bestTimeOfDay: clean(item.bestTimeOfDay) || "afternoon",
-    notes: cleanPublicPlanningText(item.notes) || "Verify current route conditions before departure."
+    notes: cleanPublicPlanningText(item.notes) || "Verify current route conditions before departure.",
+    start: cleanPublicPlanningText(item.start),
+    end: cleanPublicPlanningText(item.end),
+    recommendedStops: strings(item.recommendedStops, 12).map(cleanPublicPlanningText),
+    overlooks: strings(item.overlooks, 10).map(cleanPublicPlanningText),
+    hikes: strings(item.hikes, 10).map(cleanPublicPlanningText),
+    waterfalls: strings(item.waterfalls, 10).map(cleanPublicPlanningText),
+    parking: cleanPublicPlanningText(item.parking),
+    seasonalClosures: strings(item.seasonalClosures, 6).map(cleanPublicPlanningText),
+    daylightRequired: Boolean(item.daylightRequired),
+    offlineMapRecommended: Boolean(item.offlineMapRecommended),
+    fullExperienceDurationMinutes: clampNumber(item.fullExperienceDurationMinutes, 30, 600, clampNumber(item.estimatedDriveMinutes, 5, 360, 25))
   }));
+}
+
+function normalizeScenicCorridors(value, regions) {
+  const list = Array.isArray(value) ? value : [];
+  return list.filter((item) => item?.name).slice(0, 14).map((item, index) => ({
+    id: slug(item.id || item.name || `corridor-${index + 1}`),
+    name: cleanPublicPlanningText(item.name),
+    start: cleanPublicPlanningText(item.start),
+    end: cleanPublicPlanningText(item.end),
+    originRegionId: regionIdFor(item.originRegionId, regions, index),
+    destinationRegionId: regionIdFor(item.destinationRegionId, regions, index + 1),
+    routeDistanceMiles: clampNumber(item.routeDistanceMiles || item.estimatedDistanceMiles, 0, 250, 0),
+    routeDurationMinutes: clampNumber(item.routeDurationMinutes || item.estimatedDriveMinutes, 0, 360, 0),
+    recommendedStops: strings(item.recommendedStops, 14).map(cleanPublicPlanningText),
+    overlooks: strings(item.overlooks, 12).map(cleanPublicPlanningText),
+    hikes: strings(item.hikes, 12).map(cleanPublicPlanningText),
+    waterfalls: strings(item.waterfalls, 12).map(cleanPublicPlanningText),
+    parking: cleanPublicPlanningText(item.parking),
+    seasonalClosures: strings(item.seasonalClosures, 8).map(cleanPublicPlanningText),
+    daylightRequired: Boolean(item.daylightRequired),
+    offlineMapRecommended: Boolean(item.offlineMapRecommended),
+    fullExperienceDurationMinutes: clampNumber(item.fullExperienceDurationMinutes, 30, 600, item.routeDurationMinutes || 180),
+    sourceMetadata: { provider: "openai", dataConfidence: "ai-assisted", sourceUrl: OPENAI_SOURCE_URL }
+  }));
+}
+
+function normalizeHikesAndWaterfalls(value, regions) {
+  const list = Array.isArray(value) ? value : [];
+  return list.filter((item) => item?.trailName || item?.name).slice(0, 20).map((item, index) => ({
+    id: slug(item.id || item.trailName || item.name || `trail-${index + 1}`),
+    trailName: cleanPublicPlanningText(item.trailName || item.name),
+    trailhead: cleanPublicPlanningText(item.trailhead),
+    regionId: regionIdFor(item.regionId, regions, index),
+    coordinates: coordinates(item.coordinates),
+    parking: cleanPublicPlanningText(item.parking),
+    roundTripDistanceMiles: clampNumber(item.roundTripDistanceMiles, 0, 30, 0),
+    elevationGainFeet: clampNumber(item.elevationGainFeet, 0, 8000, 0),
+    estimatedDurationMinutes: clampNumber(item.estimatedDurationMinutes, 30, 600, 120),
+    difficulty: cleanPublicPlanningText(item.difficulty),
+    terrain: cleanPublicPlanningText(item.terrain),
+    waterfallOrViewpoint: cleanPublicPlanningText(item.waterfallOrViewpoint),
+    crowdLevel: cleanPublicPlanningText(item.crowdLevel),
+    earlyStartRecommended: Boolean(item.earlyStartRecommended),
+    seasonalCondition: cleanPublicPlanningText(item.seasonalCondition),
+    weatherSensitivity: cleanPublicPlanningText(item.weatherSensitivity),
+    travelerFit: cleanPublicPlanningText(item.travelerFit),
+    backupOption: cleanPublicPlanningText(item.backupOption),
+    sourceConfidence: clean(item.sourceConfidence) || "ai-assisted",
+    sourceMetadata: { provider: "openai", dataConfidence: "ai-assisted", sourceUrl: OPENAI_SOURCE_URL }
+  }));
+}
+
+function normalizeRegionalDestinationProfile(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    primaryDestination: cleanPublicPlanningText(value.primaryDestination),
+    gatewayTowns: strings(value.gatewayTowns, 8).map(cleanPublicPlanningText),
+    metroOrTourismRegion: cleanPublicPlanningText(value.metroOrTourismRegion || value.tourismRegion),
+    parkRelationship: cleanPublicPlanningText(value.parkRelationship),
+    majorGeographicZones: strings(value.majorGeographicZones, 12).map(cleanPublicPlanningText),
+    scenicCorridors: strings(value.scenicCorridors, 12).map(cleanPublicPlanningText),
+    entertainmentZones: strings(value.entertainmentZones, 10).map(cleanPublicPlanningText),
+    foodZones: strings(value.foodZones, 10).map(cleanPublicPlanningText),
+    realisticBaseOptions: strings(value.realisticBaseOptions, 8).map(cleanPublicPlanningText),
+    nearbyDayTrips: strings(value.nearbyDayTrips, 12).map(cleanPublicPlanningText),
+    overnightExtensions: strings(value.overnightExtensions, 8).map(cleanPublicPlanningText),
+    regionalConfidence: clean(value.regionalConfidence) || "medium"
+  };
 }
 
 function destinationProfileSchema() {
@@ -327,7 +415,10 @@ function destinationProfileSchema() {
       regions: { type: "array", items: { type: "object", additionalProperties: true } },
       places: { type: "array", items: { type: "object", additionalProperties: true } },
       foodAreas: { type: "array", items: { type: "object", additionalProperties: true } },
-      scenicRoutes: { type: "array", items: { type: "object", additionalProperties: true } }
+      scenicRoutes: { type: "array", items: { type: "object", additionalProperties: true } },
+      scenicCorridors: { type: "array", items: { type: "object", additionalProperties: true } },
+      hikesAndWaterfalls: { type: "array", items: { type: "object", additionalProperties: true } },
+      regionalDestinationProfile: { type: ["object", "null"], additionalProperties: true }
     }
   };
 }
