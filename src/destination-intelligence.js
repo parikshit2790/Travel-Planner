@@ -341,6 +341,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     && !/\b(food hall|public market|market hall|restaurant row|dining hall|brewery|bar|cafe|bakery)\b/.test(name);
   const specificRestaurantSignal = restaurantWords.test(text)
     || categoryHas(/\b(restaurant|cafe|bakery|bar|brewery|breakfast|brunch|dinner|dining|food hall)\b/)
+    || categories.has("food")
     || isFoodHall;
   const isRestaurant = specificRestaurantSignal
     && !areaOrDistrictOnly
