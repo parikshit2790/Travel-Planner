@@ -108,7 +108,15 @@ function ashevilleLikeProfile() {
       place("craggy-gardens", "Craggy Gardens", "blue-ridge-parkway-north", ["nature", "mountain", "scenic"], 120, "morning", 86, 35.704, -82.373),
       place("catawba-falls", "Catawba Falls", "black-mountain-catawba", ["waterfall", "hike", "nature"], 180, "morning", 82, 35.611, -82.229),
       place("north-carolina-arboretum", "North Carolina Arboretum", "arboretum-southwest", ["garden", "nature"], 150, "morning", 80, 35.497, -82.609),
-      place("wnc-nature-center", "Western North Carolina Nature Center", "downtown-asheville", ["nature center", "family"], 120, "afternoon", 72, 35.579, -82.493)
+      place("wnc-nature-center", "Western North Carolina Nature Center", "downtown-asheville", ["nature center", "family"], 120, "afternoon", 72, 35.579, -82.493),
+      restaurant("all-day-darling", "All Day Darling", "downtown-asheville", ["breakfast", "lunch"], 35.593, -82.552),
+      restaurant("biscuit-head", "Biscuit Head", "downtown-asheville", ["breakfast"], 35.596, -82.556),
+      restaurant("chai-pani", "Chai Pani", "downtown-asheville", ["lunch", "dinner"], 35.594, -82.554),
+      restaurant("cucina24", "Cucina 24", "downtown-asheville", ["dinner"], 35.595, -82.553),
+      restaurant("vivian", "Vivian", "downtown-asheville", ["dinner"], 35.592, -82.55),
+      restaurant("clingman-cafe", "Clingman Cafe", "river-arts-district", ["breakfast", "lunch"], 35.585, -82.566),
+      restaurant("river-arts-taproom", "River Arts District Taproom", "river-arts-district", ["lunch", "dinner"], 35.586, -82.567),
+      restaurant("bone-broth-biltmore", "Village Bistro at Biltmore Park", "biltmore-estate", ["lunch", "dinner"], 35.541, -82.554)
     ],
     foodAreas: [
       foodArea("downtown-food", "Downtown Asheville restaurants", "downtown-asheville"),
@@ -161,6 +169,18 @@ function place(id, name, regionId, categories, duration, bestTimeOfDay, priority
 
 function foodArea(id, name, regionId) {
   return { id, name, regionId, cuisines: ["Local cuisine", "Vegetarian-friendly", "Cafes"], mealTypes: ["breakfast", "lunch", "dinner"], budgetLevels: ["budget", "moderate"], dietarySupport: ["Vegetarian"], eveningSuitability: ["quiet"] };
+}
+
+function restaurant(id, name, regionId, mealTypes, lat, lng, low = 10, high = 32) {
+  return {
+    ...place(id, name, regionId, ["restaurant", "food"], 60, mealTypes.includes("breakfast") ? "morning" : "dinner", 78, lat, lng),
+    estimatedCostLow: low,
+    estimatedCostHigh: high,
+    indoorOutdoor: "indoor",
+    weatherDependency: "low",
+    tags: ["restaurant", ...mealTypes, "local dining"],
+    dietaryRelevance: ["confirm dietary needs directly"]
+  };
 }
 
 function route(id, name, originRegionId, destinationRegionId, estimatedDriveMinutes, estimatedDistanceMiles) {

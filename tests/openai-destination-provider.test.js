@@ -203,7 +203,15 @@ function parisProfile() {
     place("versailles", "Palace of Versailles", "versailles", 95, "full-day", 300),
     place("canal", "Canal Saint-Martin evening", "canal-saint-martin", 78),
     place("arc", "Arc de Triomphe and Champs-Elysees", "eiffel-invalides", 82),
-    place("sainte-chapelle", "Sainte-Chapelle", "central-paris", 80)
+    place("sainte-chapelle", "Sainte-Chapelle", "central-paris", 80),
+    restaurant("cafe-de-flore", "Cafe de Flore", "latin-quarter", ["breakfast", "lunch"]),
+    restaurant("du-pain-et-des-idees", "Du Pain et des Idees", "central-paris", ["breakfast"]),
+    restaurant("chez-janou", "Chez Janou", "le-marais", ["lunch", "dinner"]),
+    restaurant("breizh-cafe", "Breizh Cafe", "le-marais", ["lunch"]),
+    restaurant("le-bouillon-pigalle", "Le Bouillon Pigalle", "montmartre", ["dinner"]),
+    restaurant("septime", "Septime", "canal-saint-martin", ["dinner"]),
+    restaurant("bistrot-paul-bert", "Bistrot Paul Bert", "latin-quarter", ["dinner"]),
+    restaurant("angelina", "Angelina Rivoli", "central-paris", ["breakfast", "lunch"])
   ];
   return {
     canonicalName: "Paris, France",
@@ -266,6 +274,19 @@ function place(id, name, regionId, priorityScore, bestTimeOfDay = "afternoon", d
     priorityScore,
     coordinates: null,
     backupForTags: []
+  };
+}
+
+function restaurant(id, name, regionId, mealTypes) {
+  return {
+    ...place(id, name, regionId, 75, mealTypes.includes("breakfast") ? "morning" : "dinner", 60),
+    categories: ["restaurant", "food"],
+    tags: ["restaurant", ...mealTypes, "local dining"],
+    indoorOutdoor: "indoor",
+    weatherDependency: "low",
+    estimatedCostLow: 12,
+    estimatedCostHigh: 45,
+    dietaryRelevance: ["confirm dietary needs directly"]
   };
 }
 

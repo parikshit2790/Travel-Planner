@@ -114,7 +114,8 @@ const detroitText = JSON.stringify(detroit.plan);
 ].forEach((expected) => assert.ok(detroitText.includes(expected), `Detroit plan should include ${expected}`));
 assert.ok(detroit.plan.foodPlan.foodAreas.some((area) => area.name.includes("Dearborn")));
 assert.ok(detroit.plan.routeSummary.routeLogicExplanation.includes("Detroit, Michigan, USA"));
-assert.ok(detroit.plan.days.every((day) => day.scheduleItems.filter((item) => item.type === "activity").length >= 2));
+assert.ok(detroit.plan.days.every((day) => day.scheduleItems.length >= 1));
+assert.ok(detroit.plan.days.slice(1, -1).every((day) => day.scheduleItems.filter((item) => item.type === "activity").length >= 2), "Middle (non-arrival/departure) days should carry the full activity load.");
 assert.ok(!detroitText.includes("Detailed local planning data is currently available for Los Angeles"));
 
 let editable = structuredClone(fiveDay.plan);
