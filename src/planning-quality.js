@@ -555,7 +555,11 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
   }
   const hasCulture = included.some((node) => /museum|culture|historic|landmark|civil|human rights|national/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
   const hasNeighborhood = included.some((node) => /neighborhood|district|market|beltline|public market|food hall/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
-  const hasOutdoor = included.some((node) => /outdoor|park|garden|trail|mountain|waterfront/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+  const hasOutdoor = included.some((node) => /outdoor|park|garden|trail|mountain|waterfront|monument|memorial|national mall|promenade|river|water/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+  const publicUrbanBalance = /\b(capitol|library of congress|civic|government|cathedral|parliament|city hall)\b/.test(publicText)
+    && /\b(museum|gallery|art|history|culture)\b/.test(publicText)
+    && /\b(neighborhood|district|market|waterfront|wharf|promenade|monument|memorial|national mall)\b/.test(publicText);
+  if (publicUrbanBalance && included.length >= Math.min(3, nodes.length)) return false;
   return included.length < Math.min(3, nodes.length) || !(hasCulture && hasNeighborhood && hasOutdoor);
 }
 
@@ -660,7 +664,8 @@ function hasMuseumDominance(plan) {
   const activityItems = (plan.days || []).flatMap((day) => (day.scheduleItems || []).filter((item) => item.type === "activity"));
   if (activityItems.length < 4 || explicitMuseumIntent(plan)) return false;
   const museumItems = activityItems.filter((item) => /\b(museum|gallery|exhibition|historic house|history center)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
-  const outdoorOrNeighborhood = activityItems.filter((item) => /\b(park|garden|greenway|trail|lake|mountain|waterfall|whitewater|neighborhood|district|market|camp|waterfront|beach|boardwalk|scenic)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
+  const outdoorOrNeighborhood = activityItems.filter((item) => /\b(park|garden|greenway|trail|lake|mountain|waterfall|whitewater|neighborhood|district|market|camp|waterfront|beach|boardwalk|scenic|food|arts|art|local culture|evening)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
+  if (outdoorOrNeighborhood.length >= Math.max(3, museumItems.length)) return false;
   if (museumItems.length >= 3 && museumItems.length / activityItems.length > 0.42) return true;
   if (museumItems.length >= 2 && outdoorOrNeighborhood.length === 0) return true;
   return (plan.days || []).some((day) => (day.scheduleItems || []).filter((item) => item.type === "activity" && /\b(museum|gallery|exhibition)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`)).length >= 3);

@@ -81,7 +81,7 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
   }
 }
 
-function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = {}, { requestId } = {}) {
+async function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = {}, { requestId } = {}) {
   if (!trip) return actionError(400, "TRIP_REQUIRED", "Trip is required.", false, requestId);
   const config = providerConfig();
   const destination = String(trip.destinationDisplay || trip.destination || "").trim();
@@ -100,6 +100,10 @@ function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = 
     const registeredProfile = destinationProfile ? registerGeneratedDestinationProfile(destinationProfile) : null;
     const sourceDiagnostics = buildPlanningSourceDiagnostics(config, registeredProfile);
     assertProductionPlanningSafety(config, registeredProfile, sourceDiagnostics);
+    if (shouldRequireArrivalRoute(normalizedTrip, registeredProfile, config) && !normalizedTrip.arrivalRouteEstimate) {
+      normalizedTrip.arrivalRouteEstimate = await estimateArrivalRouteForGeneration(normalizedTrip, registeredProfile, config);
+      normalizedTrip.routeQualityRequired = true;
+    }
     const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics });
     if (result?.plan?.generationMetadata) {
       result.plan.generationMetadata.sourceDiagnostics = sourceDiagnostics;
@@ -110,6 +114,43 @@ function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = 
     logPlannerEvent({ requestId, action: "generate-trip", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "error", destination, errorCode: code });
     return actionError(error?.status || 500, code, error?.message || "We could not build this trip.", error?.retryable ?? true, requestId);
   }
+}
+
+function shouldRequireArrivalRoute(trip, profile, config) {
+  if (!profile) return false;
+  const transportText = `${trip.transportation || ""} ${trip.transport?.mode || ""}`.toLowerCase();
+  const driving = /drive|car|rent/.test(transportText) && !/fly/.test(transportText);
+  const origin = String(trip.fromDisplay || trip.from || "").trim().toLowerCase();
+  const destination = String(trip.destinationDisplay || trip.destination || profile.canonicalName || "").trim().toLowerCase();
+  return Boolean(driving && origin && destination && origin !== destination && config.production);
+}
+
+async function estimateArrivalRouteForGeneration(trip, profile, config) {
+  const origin = routePointFor(trip.fromLocation, trip.fromDisplay || trip.from);
+  const destination = routePointFor(trip.destinationLocation, trip.destinationDisplay || trip.destination || profile.canonicalName);
+  try {
+    const estimate = await withTimeout(estimateRoute(origin, destination, "driving", config), config.googleRequestTimeoutMs, "Route estimate", "ROUTE_TIMEOUT", 504);
+    return {
+      durationMinutes: Number(estimate.durationMinutes || estimate.estimatedDurationMinutes || 0),
+      distanceMiles: Number(estimate.distanceMiles || estimate.estimatedDistanceMiles || 0),
+      provider: estimate.provider || config.routeProvider || "route-provider",
+      checkedAt: estimate.checkedAt || estimate.retrievedAt || new Date().toISOString(),
+      confidence: estimate.confidence || "provider"
+    };
+  } catch (error) {
+    const wrapped = new Error("We found destination ideas, but could not calculate reliable travel times.");
+    wrapped.code = routeErrorCode(error);
+    wrapped.status = ["ROUTE_TIMEOUT", "REQUEST_TIMEOUT", "GOOGLE_TIMEOUT"].includes(wrapped.code) ? 504 : 502;
+    wrapped.retryable = true;
+    throw wrapped;
+  }
+}
+
+function routePointFor(location, fallback) {
+  if (location?.latitude && location?.longitude) {
+    return { label: location.canonicalName || fallback || "", latitude: Number(location.latitude), longitude: Number(location.longitude) };
+  }
+  return fallback || "";
 }
 
 function handleRegeneratePlan({ plan } = {}, { requestId } = {}) {

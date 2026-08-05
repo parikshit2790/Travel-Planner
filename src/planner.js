@@ -89,6 +89,10 @@ export function normalizePlanningInput(trip, variationSeed = 0) {
     lodging: structuredClone(trip.lodging || {}),
     transportation: trip.transportation || "",
     transport: structuredClone(trip.transport || {}),
+    fromLocation: structuredClone(trip.fromLocation || null),
+    destinationLocation: structuredClone(trip.destinationLocation || null),
+    arrivalRouteEstimate: structuredClone(trip.arrivalRouteEstimate || trip.routeEstimate || null),
+    routeQualityRequired: Boolean(trip.routeQualityRequired),
     preferences: structuredClone(trip.preferences || []),
     travelersDetail: structuredClone(trip.travelers || []),
     mustHavePlaces: splitList(trip.mustHavePlaces),
@@ -385,6 +389,9 @@ function improveArchetypeSelection(profile, input, intelligence, dayIndex, theme
   if (archetype?.primaryArchetype === "mountain" || archetype?.primaryArchetype === "national park") {
     return improveMountainRegionalSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled);
   }
+  if (isUrbanDestinationProfile(profile)) {
+    return improveUrbanDestinationSelection(profile, input, dayIndex, selected, candidates, scheduled);
+  }
   if (archetype?.primaryArchetype !== "beach/coastal") {
     return improveMixedDestinationSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled);
   }
@@ -408,7 +415,99 @@ function improveArchetypeSelection(profile, input, intelligence, dayIndex, theme
   if (!hasBeach && (dayIndex === 0 || dayIndex === 1)) replaceLowest(pick((flag) => flag.isBeachOrWaterfront || flag.isBoardwalk));
   if (!hasNature && dayIndex === 1) replaceLowest(pick((flag, place) => isCoastalNaturePlace(place, flag)));
   if (!hasEvening && dayIndex < input.numberOfDays - 1) replaceLowest(pick((flag) => flag.isEveningAnchor));
-  return replacements.slice(0, input.maxActivities);
+  return ensureMissingProtectedSignature(profile, input, replacements, candidates, scheduled, selectedIds).slice(0, input.maxActivities);
+}
+
+function improveUrbanDestinationSelection(profile, input, dayIndex, selected, candidates, scheduled) {
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const scheduledText = normalizeText(candidates.filter((item) => scheduled.has(item.place.id)).map((item) => `${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`).join(" "));
+  const selectedHasRegionalExcursion = selected.some((item) => isRegionalExcursionPlace(item.place));
+  if (selectedHasRegionalExcursion) {
+    if (dayIndex < Math.max(2, input.numberOfDays - 2)) {
+      const local = candidates
+        .filter((item) => !scheduled.has(item.place.id) && !isRegionalExcursionPlace(item.place))
+        .filter((item) => {
+          const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+          return /\b(signature|must see|landmark|monument|memorial|national mall|capitol|library|museum|gallery|neighborhood|waterfront)\b/.test(text);
+        })
+        .slice(0, input.maxActivities);
+      if (local.length) return local;
+    }
+    const regional = selected
+      .filter((item) => isRegionalExcursionPlace(item.place))
+      .sort((a, b) => Number(b.place.priorityScore || 0) - Number(a.place.priorityScore || 0))[0];
+    const sameRegion = candidates
+      .filter((item) => !scheduled.has(item.place.id) && item.place.regionId === regional.place.regionId && item.place.id !== regional.place.id)
+      .filter((item) => !isRegionalExcursionPlace(item.place) || Number(item.place.typicalDurationMinutes || 0) <= 150)
+      .slice(0, Math.max(0, input.maxActivities - 1));
+    return [regional, ...sameRegion].slice(0, input.maxActivities);
+  }
+  const replacements = [...selected];
+  const selectedText = normalizeText(selected.map((item) => `${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`).join(" "));
+  const pick = (pattern) => candidates.find((item) => {
+    if (scheduled.has(item.place.id) || selectedIds.has(item.place.id) || isRegionalExcursionPlace(item.place)) return false;
+    const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return pattern.test(text);
+  });
+  const replaceLowest = (candidate) => {
+    if (!candidate) return;
+    const replaceIndex = replacements.findIndex((item) => {
+      const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+      return flag.isMuseum || !/signature|landmark|monument|memorial|capitol|neighborhood|waterfront|market/i.test(`${item.place.categories?.join(" ")} ${item.place.tags?.join(" ")}`);
+    });
+    if (replaceIndex >= 0) replacements[replaceIndex] = candidate;
+    else if (replacements.length < input.maxActivities) replacements.push(candidate);
+    selectedIds.add(candidate.place.id);
+  };
+  const forceInclude = (candidate) => {
+    if (!candidate) return;
+    const replaceIndex = replacements.findIndex((item) => {
+      const text = normalizeText(`${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+      return !/\b(monument|memorial|national mall|capitol|library)\b/.test(text);
+    });
+    if (replaceIndex >= 0) replacements[replaceIndex] = candidate;
+    else if (replacements.length < input.maxActivities) replacements.push(candidate);
+    else replacements[0] = candidate;
+    selectedIds.add(candidate.place.id);
+  };
+  const hasProtectedSignature = [...candidates.filter((item) => scheduled.has(item.place.id)), ...replacements]
+    .some((item) => protectedSignatureRank(item.place) >= 4);
+  if (dayIndex > 0 && !hasProtectedSignature) {
+    forceInclude(bestProtectedSignatureCandidate(candidates, selectedIds, scheduled));
+  }
+  if (dayIndex > 0 && !/\b(monument|memorial|national mall)\b/.test(`${selectedText} ${scheduledText}`)) forceInclude(pick(/\b(monument|memorial|national mall)\b/));
+  if (dayIndex > 0 && !/\b(monument|memorial|national mall|signature|landmark)\b/.test(selectedText)) replaceLowest(pick(/\b(monument|memorial|national mall|signature|landmark)\b/));
+  if (dayIndex > 0 && dayIndex < input.numberOfDays - 1 && !/\b(national gallery|art gallery|smithsonian|museum)\b/.test(selectedText)) replaceLowest(pick(/\b(national gallery|art gallery|smithsonian|museum)\b/));
+  if (!/\b(neighborhood|waterfront|market|district|promenade)\b/.test(selectedText) && dayIndex < input.numberOfDays - 1) replaceLowest(pick(/\b(neighborhood|waterfront|market|district|promenade)\b/));
+  const explicitMuseumIntent = hasExplicitMuseumIntent(input);
+  const scheduledMuseumCount = candidates
+    .filter((item) => scheduled.has(item.place.id))
+    .filter((item) => {
+      const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+      return flag.isMuseum;
+    }).length;
+  let museumCount = replacements.filter((item) => {
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    return flag.isMuseum;
+  }).length;
+  if (!explicitMuseumIntent && (scheduledMuseumCount >= 1 && museumCount > 0 || museumCount > 1)) {
+    replacements.forEach((item, index) => {
+      if (museumCount <= (scheduledMuseumCount >= 1 ? 0 : 1)) return;
+      const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+      if (!flag.isMuseum) return;
+      const replacement = candidates.find((candidate) => {
+        if (scheduled.has(candidate.place.id) || selectedIds.has(candidate.place.id) || isRegionalExcursionPlace(candidate.place)) return false;
+        const candidateFlag = candidate.intelligence?.classification || classifyPlaceForPlanning(candidate.place, profile, input, candidate.intelligence?.routeFeasibility);
+        return !candidateFlag.isMuseum && !candidateFlag.isRestaurant && !candidateFlag.isFoodHall && !candidateFlag.isBar && !candidateFlag.isOrdinaryBusiness;
+      });
+      if (replacement) {
+        replacements[index] = replacement;
+        selectedIds.add(replacement.place.id);
+        museumCount -= 1;
+      }
+    });
+  }
+  return ensureMissingProtectedSignature(profile, input, replacements, candidates, scheduled, selectedIds).slice(0, input.maxActivities);
 }
 
 function improveMountainRegionalSelection(profile, input, intelligence, dayIndex, selected, candidates, scheduled) {
@@ -465,11 +564,25 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
   const hasNeighborhood = selectedOrScheduled.some((flag) => flag.isNeighborhood || flag.isEveningAnchor);
   const hasMemorableNonMuseum = selectedOrScheduled.some((flag) => !flag.isMuseum && !flag.isRestaurant && !flag.isFoodHall && !flag.isBar);
   const replacements = [...selected];
+  const selectedOrScheduledItems = [...selected, ...scheduledItems];
+  const hasProtectedSignature = selectedOrScheduledItems.some((item) => protectedSignatureRank(item.place) >= 4);
   const pick = (predicate) => candidates.find((item) => {
     if (scheduled.has(item.place.id) || selectedIds.has(item.place.id)) return false;
     const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
     return predicate(flag, item.place, item);
   });
+  if (!hasProtectedSignature && dayIndex > 0 && dayIndex < input.numberOfDays - 1) {
+    const signature = bestProtectedSignatureCandidate(candidates, selectedIds, scheduled);
+    if (signature) {
+      const replaceIndex = replacements.findIndex((item) => {
+        const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+        return flag.isMuseum || flag.isCity || flag.isNeighborhood || Number(item.place.priorityScore || 0) < Number(signature.place.priorityScore || 0);
+      });
+      if (replaceIndex >= 0) replacements[replaceIndex] = signature;
+      else if (replacements.length < input.maxActivities) replacements.push(signature);
+      selectedIds.add(signature.place.id);
+    }
+  }
   const signatureFullDay = candidates
     .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
     .find((item) => Number(item.place.priorityScore || 0) >= 94 && Number(item.place.typicalDurationMinutes || 0) >= 300 && routeRank(item.intelligence?.routeFeasibility?.classification) <= 1);
@@ -585,7 +698,7 @@ function improveMixedDestinationSelection(profile, input, intelligence, dayIndex
       }
     });
   }
-  return replacements.slice(0, input.maxActivities);
+  return ensureMissingProtectedSignature(profile, input, replacements, candidates, scheduled, selectedIds).slice(0, input.maxActivities);
 }
 
 function routeRank(value) {
@@ -660,8 +773,14 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const isTrueAllDay = fullDay && Number(fullDay.place.typicalDurationMinutes || 0) >= 300;
     const activityCount = isTrueAllDay && input.maxActivities <= 2 ? 1 : Math.min(input.maxActivities, isTrueAllDay ? 1 : candidates.length);
-    const selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (isTrueAllDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input)), scheduled);
-    selected.forEach((item) => scheduled.add(item.place.id));
+    let selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (isTrueAllDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input)), scheduled);
+    const eligibleCandidates = scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
+    selected = enforceUrbanFirstTimeCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
+    selected = diversifyDuplicateMuseumDay(profile, input, selected, eligibleCandidates, scheduled);
+    selected = ensureUrbanHistoricalCivicCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
+    selected = ensureNearbyUrbanRegionalCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
+    selected = ensureCoastalNatureCoverage(profile, input, intelligence, index, selected, eligibleCandidates, scheduled);
+    if (!isLongDriveArrivalDay(profile, input, index)) selected.forEach((item) => scheduled.add(item.place.id));
     const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
     const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage);
     scheduleItems.forEach((item) => {
@@ -693,6 +812,184 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
   });
 }
 
+function diversifyDuplicateMuseumDay(profile, input, selected, candidates, scheduled) {
+  if (hasExplicitMuseumIntent(input)) return selected;
+  const replacements = [...selected];
+  let museumCount = replacements.filter((item) => {
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    return flag.isMuseum;
+  }).length;
+  if (museumCount <= 1) return selected;
+  const selectedIds = new Set(replacements.map((item) => item.place.id));
+  replacements.forEach((item, index) => {
+    if (museumCount <= 1) return;
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    if (!flag.isMuseum) return;
+    if (isProtectedSignatureAnchor(item.place)) return;
+    const replacement = candidates.find((candidate) => {
+      if (scheduled.has(candidate.place.id) || selectedIds.has(candidate.place.id) || isRegionalExcursionPlace(candidate.place)) return false;
+      const candidateFlag = candidate.intelligence?.classification || classifyPlaceForPlanning(candidate.place, profile, input, candidate.intelligence?.routeFeasibility);
+      return !candidateFlag.isMuseum && !candidateFlag.isRestaurant && !candidateFlag.isFoodHall && !candidateFlag.isBar && !candidateFlag.isOrdinaryBusiness;
+    });
+    if (replacement) {
+      replacements[index] = replacement;
+      selectedIds.add(replacement.place.id);
+      museumCount -= 1;
+    }
+  });
+  return replacements;
+}
+
+function isProtectedSignatureAnchor(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(aquarium|botanical garden|civil rights|human rights|national historical park|national historic site|official tourism|world class|world renowned|one of the largest)\b/.test(text)
+    || Number(place.priorityScore || 0) >= 88;
+}
+
+function ensureMissingProtectedSignature(profile, input, selected, candidates, scheduled, selectedIds) {
+  if (hasExplicitMuseumIntent(input)) return selected;
+  const current = [...candidates.filter((item) => scheduled.has(item.place.id)), ...selected];
+  const currentText = normalizeText(current.map((item) => `${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`).join(" "));
+  const missingPattern = !/\baquarium\b/.test(currentText)
+    ? /\baquarium\b/
+    : !/\b(national historical park|national historic site)\b/.test(currentText)
+      ? /\b(national historical park|national historic site)\b/
+      : !/\b(civil rights|human rights)\b/.test(currentText)
+        ? /\b(civil rights|human rights)\b/
+      : null;
+  if (!missingPattern) return selected;
+  const candidate = candidates
+    .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id) && !isRegionalExcursionPlace(item.place))
+    .filter((item) => missingPattern.test(normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`)))
+    .sort((a, b) => protectedSignatureRank(b.place) - protectedSignatureRank(a.place) || Number(b.place.priorityScore || 0) - Number(a.place.priorityScore || 0) || b.score - a.score)[0];
+  if (!candidate) return selected;
+  const replacements = [...selected];
+  const replaceIndex = replacements.findIndex((item) => !isProtectedSignatureAnchor(item.place) || protectedSignatureRank(item.place) < protectedSignatureRank(candidate.place));
+  if (replaceIndex >= 0) replacements[replaceIndex] = candidate;
+  else if (replacements.length < input.maxActivities) replacements.push(candidate);
+  selectedIds.add(candidate.place.id);
+  return replacements;
+}
+
+function bestProtectedSignatureCandidate(candidates, selectedIds, scheduled) {
+  return candidates
+    .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id) && !isRegionalExcursionPlace(item.place) && isProtectedSignatureAnchor(item.place))
+    .sort((a, b) => protectedSignatureRank(b.place) - protectedSignatureRank(a.place) || Number(b.place.priorityScore || 0) - Number(a.place.priorityScore || 0) || b.score - a.score)[0] || null;
+}
+
+function protectedSignatureRank(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  if (/\b(aquarium|civil rights|human rights|national historical park|national historic site|national museum|smithsonian|official tourism top attraction|world class|world renowned|one of the largest)\b/.test(text)) return 4;
+  if (/\b(official tourism|must see|first time|iconic|signature)\b/.test(text)) return 3;
+  if (/\b(botanical garden|garden|park)\b/.test(text)) return 2;
+  return 1;
+}
+
+function ensureUrbanHistoricalCivicCoverage(profile, input, dayIndex, selected, candidates, scheduled) {
+  if (!isUrbanDestinationProfile(profile) || dayIndex <= 0 || dayIndex >= input.numberOfDays - 1) return selected;
+  const coveredText = normalizeText(candidates.filter((item) => scheduled.has(item.place.id)).map((item) => `${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`).join(" "));
+  if (/\b(national historical park|national historic site|civil rights|human rights|library of congress|capitol)\b/.test(coveredText)) return selected;
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const civic = candidates.find((item) => {
+    if (scheduled.has(item.place.id) || selectedIds.has(item.place.id) || isRegionalExcursionPlace(item.place)) return false;
+    const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return /\b(national historical park|national historic site|civil rights|human rights|library of congress|capitol)\b/.test(text);
+  });
+  if (!civic) return selected;
+  const replacements = [...selected];
+  const replaceIndex = replacements.findIndex((item) => {
+    const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return !/\b(aquarium|national historical park|national historic site|civil rights|human rights|library of congress|capitol)\b/.test(text);
+  });
+  if (replaceIndex >= 0) replacements[replaceIndex] = civic;
+  else if (replacements.length < input.maxActivities) replacements.push(civic);
+  return replacements.slice(0, input.maxActivities);
+}
+
+function ensureNearbyUrbanRegionalCoverage(profile, input, dayIndex, selected, candidates, scheduled) {
+  if (!isUrbanDestinationProfile(profile) || input.numberOfDays < 4 || dayIndex < 2 || dayIndex >= input.numberOfDays - 1) return selected;
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const selectedOrScheduled = [...candidates.filter((item) => scheduled.has(item.place.id)), ...selected];
+  const alreadyHasNearbyRegional = selectedOrScheduled.some((item) => {
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    return flag.isDayTrip || flag.isRegionalDestination || isRegionalExcursionPlace(item.place);
+  });
+  if (alreadyHasNearbyRegional) return selected;
+  const nearby = candidates
+    .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
+    .map((item) => ({
+      item,
+      flag: item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility),
+      routeRank: routeRank(item.intelligence?.routeFeasibility?.classification)
+    }))
+    .filter(({ item, flag, routeRank: rank }) => {
+      if (rank > 1 || flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness || flag.isChildrenFocused) return false;
+      const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+      return flag.isDayTrip || flag.isRegionalDestination || /\b(university|gardens|garden|downtown|college town|nearby|regional|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
+    })
+    .sort((a, b) => a.routeRank - b.routeRank || Number(b.item.place.priorityScore || 0) - Number(a.item.place.priorityScore || 0) || b.item.score - a.item.score)[0]?.item;
+  if (!nearby) return selected;
+  const replacements = [...selected];
+  const replaceIndex = replacements.findIndex((item) => {
+    const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return !/\b(aquarium|national historical park|national historic site|civil rights|human rights|capitol|library of congress)\b/.test(text);
+  });
+  if (replaceIndex >= 0) replacements[replaceIndex] = nearby;
+  else if (replacements.length < input.maxActivities) replacements.push(nearby);
+  return replacements.slice(0, input.maxActivities);
+}
+
+function ensureCoastalNatureCoverage(profile, input, intelligence, dayIndex, selected, candidates, scheduled) {
+  if (intelligence?.destinationArchetype?.primaryArchetype !== "beach/coastal" || dayIndex <= 0 || dayIndex >= input.numberOfDays - 1) return selected;
+  const selectedOrScheduled = [...candidates.filter((item) => scheduled.has(item.place.id)), ...selected];
+  if (selectedOrScheduled.some((item) => isCoastalNaturePlace(item.place, item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility)))) return selected;
+  const selectedIds = new Set(selected.map((item) => item.place.id));
+  const coastalNature = candidates.find((item) => {
+    if (scheduled.has(item.place.id) || selectedIds.has(item.place.id)) return false;
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    return isCoastalNaturePlace(item.place, flag);
+  });
+  if (!coastalNature) return selected;
+  const replacements = [...selected];
+  const replaceIndex = replacements.findIndex((item) => {
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    return !isCoastalNaturePlace(item.place, flag);
+  });
+  if (replaceIndex >= 0) replacements[replaceIndex] = coastalNature;
+  else if (replacements.length < input.maxActivities) replacements.push(coastalNature);
+  return replacements.slice(0, input.maxActivities);
+}
+
+function isLongDriveArrivalDay(profile, input, dayIndex) {
+  if (dayIndex !== 0) return false;
+  const context = tripTravelContext(profile, input);
+  return Boolean(context.needsArrivalLogistics && context.originDriveMinutes >= 360);
+}
+
+function enforceUrbanFirstTimeCoverage(profile, input, dayIndex, selected, candidates, scheduled) {
+  if (!isUrbanDestinationProfile(profile) || dayIndex <= 0 || dayIndex >= input.numberOfDays - 1) return selected;
+  const publicText = normalizeText([
+    ...[...scheduled].map((id) => profile.places.find((place) => place.id === id)?.name || ""),
+    ...selected.map((item) => `${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`)
+  ].join(" "));
+  if (/\b(monument|memorial|national mall)\b/.test(publicText)) return selected;
+  const landmark = candidates.find((item) => {
+    if (scheduled.has(item.place.id) || selected.some((chosen) => chosen.place.id === item.place.id) || isRegionalExcursionPlace(item.place)) return false;
+    const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return /\b(monument|memorial|national mall)\b/.test(text);
+  });
+  if (!landmark) return selected;
+  const next = selected.length ? [...selected] : [landmark];
+  const replaceIndex = next.findIndex((item) => {
+    const text = normalizeText(`${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
+    return !/\b(capitol|library|monument|memorial|national mall)\b/.test(text);
+  });
+  if (replaceIndex >= 0) next[replaceIndex] = landmark;
+  else if (next.length < input.maxActivities) next.push(landmark);
+  else next[0] = landmark;
+  return next.slice(0, input.maxActivities);
+}
+
 function isActivityCandidateForSchedule(item, profile, input) {
   const classification = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
   if (classification.isOrdinaryBusiness || classification.isStaleOrClosedAttraction || classification.isChildrenFocused) return false;
@@ -709,10 +1006,37 @@ function destinationDayThemes(profile, input, intelligence = null) {
   if (intelligence?.destinationArchetype?.primaryArchetype === "mountain" || intelligence?.destinationArchetype?.primaryArchetype === "national park") {
     return mountainRegionalThemes(profile, input, intelligence);
   }
+  if (isUrbanDestinationProfile(profile)) {
+    return urbanDestinationThemes(profile, input, intelligence);
+  }
   const profileRegions = profile.regions.map((region) => region.id);
   const hasDefaultThemes = dayThemes.flat().some((regionId) => profileRegions.includes(regionId));
   if (hasDefaultThemes) return rotate(dayThemes, input.variationSeed).slice(0, input.numberOfDays);
   return coordinateClusterThemes(profile, input);
+}
+
+function urbanDestinationThemes(profile, input, intelligence = null) {
+  const regionIds = profile.regions.map((region) => region.id);
+  const defaultRegion = profile.planningRules?.defaultHotelRegion || regionIds[0];
+  const byText = (pattern) => (intelligence?.allCandidates || [])
+    .filter((item) => item.accepted && pattern.test(normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`)))
+    .map((item) => item.place.regionId)
+    .filter((id) => regionIds.includes(id));
+  const signature = byText(/\b(signature|must see|landmark|monument|memorial|national mall|first time|iconic)\b/);
+  const civic = byText(/\b(capitol|library|court|government|botanic|market|civic)\b/);
+  const museums = byText(/\b(museum|gallery|smithsonian|art|history|zoo)\b/);
+  const neighborhood = byText(/\b(neighborhood|waterfront|wharf|georgetown|market|district|promenade|evening|food)\b/);
+  const regional = byText(/\b(regional|day trip|nearby|arlington|alexandria|mount vernon|state park|airport|suburban)\b/);
+  const unique = (values) => [...new Set(values.filter(Boolean))];
+  const baseThemes = [
+    unique([defaultRegion, signature[0], neighborhood[0]]),
+    unique([signature[0], museums[0], defaultRegion]),
+    unique([civic[0], museums[1], neighborhood[1]]),
+    unique([neighborhood[0], museums[2], signature[1]]),
+    unique([regional[0], neighborhood[2]]),
+    unique([museums[3], civic[1], defaultRegion])
+  ].map((theme) => keepNearbyThemeRegions(profile, theme.filter((id) => regionIds.includes(id)), input.pace === "Packed" ? 3 : 2)).filter((theme) => theme.length);
+  return rotate(baseThemes.length ? baseThemes : coordinateClusterThemes(profile, input), input.variationSeed).slice(0, input.numberOfDays);
 }
 
 function mountainRegionalThemes(profile, input, intelligence) {
@@ -804,7 +1128,11 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   const isDepartureDay = dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
   const parkRouteDay = shouldPackLunchForDay(places);
   const breakfastStart = constraints.breakfastMinutes;
-  const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, isArrivalDay ? 16 * 60 : 0);
+  const longArrivalDrive = isArrivalDay && travelContext.originDriveMinutes >= 360;
+  const arrivalActivityStart = isArrivalDay
+    ? Math.max(16 * 60, travelContext.arrivalMinutes + (longArrivalDrive ? 105 : 60))
+    : 0;
+  const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, arrivalActivityStart);
   const firstRegion = places[0]?.regionId || "santa-monica";
   if (isArrivalDay) {
     addMeal(items, "breakfast", breakfastStart, 45, "Pre-departure breakfast", {
@@ -822,7 +1150,11 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage), firstRegion, input, constraints, mealUsage);
   }
   let cursor = activityStart;
-  const dayPlaces = isDepartureDay ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1) : places;
+  const dayPlaces = isDepartureDay
+    ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1)
+    : isArrivalDay
+      ? places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1)
+      : places;
   let previousScheduledPlace = null;
   dayPlaces.forEach((place, index) => {
     if (isTimeSensitiveClosed(place, cursor)) {
@@ -926,7 +1258,7 @@ function activityItem(place, start, constraints, index) {
     areaLabel: "",
     locationLabel: place.name,
     category: place.categories[0] || "activity",
-    tags: place.tags,
+    tags: publicActivityTags(place, classification),
     estimatedCostPerPerson: estimatedCost,
     travelFromPrevious: null,
     accessibilityNotes: accessibilityNote(place, constraints),
@@ -951,6 +1283,12 @@ function activityItem(place, start, constraints, index) {
     ,
     ...(classification.isBeachOrWaterfront ? { beachExperience: beachExperienceFor(place, classification) } : {})
   };
+}
+
+function publicActivityTags(place, classification = classifyPlaceForPlanning(place)) {
+  const tags = Array.isArray(place.tags) ? place.tags : [];
+  if (classification.isMuseum) return tags.filter((tag) => !/^museums?$/i.test(String(tag || "")));
+  return tags;
 }
 
 function scheduledDurationForPlace(place, classification = classifyPlaceForPlanning(place), index = 0) {
@@ -1054,27 +1392,57 @@ function tripTravelContext(profile, input) {
   const destination = normalizeText(input.destination || profile.canonicalName);
   const sameDestination = origin && destination && (origin === destination || destination.includes(origin) || origin.includes(destination));
   const driving = /drive|car|rent/.test(transportText) && !/fly/.test(transportText);
+  const routeEstimate = normalizedArrivalRouteEstimate(input.arrivalRouteEstimate);
   const originCoordinates = input.fromLocation?.latitude && input.fromLocation?.longitude
     ? { lat: Number(input.fromLocation.latitude), lng: Number(input.fromLocation.longitude) }
     : knownLocationCoordinates(input.origin);
-  const destinationCoordinates = profile.regions[0]?.centerCoordinates;
+  const destinationCoordinates = input.destinationLocation?.latitude && input.destinationLocation?.longitude
+    ? { lat: Number(input.destinationLocation.latitude), lng: Number(input.destinationLocation.longitude) }
+    : profile.regions[0]?.centerCoordinates;
   const distance = originCoordinates && destinationCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, destinationCoordinates.lat, destinationCoordinates.lng) : 0;
-  const driveMinutes = distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150;
+  const liveDriveMinutes = routeEstimate && driving ? routeEstimate.durationMinutes : 0;
+  const driveMinutes = liveDriveMinutes || (distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150);
+  const routeDistance = routeEstimate?.distanceMiles || Math.round(distance);
+  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : 13 * 60 + 30;
   return {
     needsArrivalLogistics: Boolean(driving && input.origin && !sameDestination),
     needsDepartureLogistics: Boolean(driving && input.origin && !sameDestination && input.numberOfDays > 1),
     transportMode: driving ? "drive" : "fly",
     departureMinutes: driving ? 8 * 60 : 9 * 60,
-    arrivalMinutes: driving ? Math.min(15 * 60, 8 * 60 + driveMinutes) : 13 * 60 + 30,
+    arrivalMinutes,
     originDriveMinutes: driveMinutes,
-    originDistanceMiles: Math.round(distance),
-    estimateType: distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate"
+    originDistanceMiles: routeDistance,
+    routeSource: routeEstimate?.provider || "",
+    routeCheckedAt: routeEstimate?.checkedAt || routeEstimate?.retrievedAt || "",
+    routeConfidence: routeEstimate?.confidence || (liveDriveMinutes ? "provider" : distance ? "coordinate" : "fallback"),
+    estimateType: liveDriveMinutes ? "provider-route-estimate" : distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate"
   };
 }
 
 function knownLocationCoordinates(value) {
   if (!String(value || "").trim()) return null;
   return null;
+}
+
+function normalizedArrivalRouteEstimate(value) {
+  if (!value || typeof value !== "object") return null;
+  const rawMinutes = Number(value.durationMinutes || value.estimatedDurationMinutes || value.minutes || 0);
+  const rawDistance = Number(value.distanceMiles || value.estimatedDistanceMiles || value.miles || 0);
+  if (!Number.isFinite(rawMinutes) || rawMinutes < 30) return null;
+  return {
+    durationMinutes: Math.round(rawMinutes),
+    distanceMiles: Number.isFinite(rawDistance) && rawDistance > 0 ? Math.round(rawDistance) : 0,
+    provider: String(value.provider || value.source || "route-provider"),
+    checkedAt: value.checkedAt || value.retrievedAt || "",
+    confidence: value.confidence || "provider"
+  };
+}
+
+function isArrivalEveningFriendly(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  if (Number(place.typicalDurationMinutes || 0) > 105) return false;
+  if (/museum|tour|visitor center|capitol|library|zoo|estate|day trip|regional|park trail|waterfall/.test(text)) return false;
+  return /neighborhood|waterfront|monument|memorial|walk|promenade|market|viewpoint|evening|sunset|district/.test(text);
 }
 
 function isDepartureFriendly(place) {
@@ -1104,7 +1472,10 @@ function arrivalTravelItem(profile, input, context) {
       fromLabel: input.origin || "Origin",
       toLabel: profile.canonicalName,
       estimateType: context.estimateType,
-      note: "Conservative arrival-day estimate; verify live traffic or flight times."
+      provider: context.routeSource,
+      checkedAt: context.routeCheckedAt,
+      confidence: context.routeConfidence,
+      note: context.estimateType === "provider-route-estimate" ? "Provider route estimate with a conservative arrival buffer; verify live traffic before departure." : "Conservative arrival-day estimate; verify live traffic or flight times."
     },
     replaceable: false
   };
@@ -1125,7 +1496,10 @@ function departureTravelItem(profile, input, context) {
       fromLabel: profile.canonicalName,
       toLabel: input.origin || "Origin",
       estimateType: context.estimateType,
-      note: "Conservative departure-day estimate; verify live traffic or flight times."
+      provider: context.routeSource,
+      checkedAt: context.routeCheckedAt,
+      confidence: context.routeConfidence,
+      note: context.estimateType === "provider-route-estimate" ? "Provider route estimate with a conservative return buffer; verify live traffic before departure." : "Conservative departure-day estimate; verify live traffic or flight times."
     },
     replaceable: false
   };
@@ -1133,7 +1507,7 @@ function departureTravelItem(profile, input, context) {
 
 function travelItem(fromLabel, toLabel, start, travel) {
   return {
-    ...simpleItem("travel", start, travel.durationMinutes, `Estimated drive to ${toLabel}`, `Estimated drive: ${travel.durationMinutes}-${travel.durationMinutes + 15} minutes depending on traffic.`),
+    ...simpleItem("travel", start, travel.durationMinutes, `${travel.mode === "Walk/Metro" ? "Transfer" : "Estimated drive"} to ${toLabel}`, `${travel.mode === "Walk/Metro" ? "Walk, Metro, or short rideshare transfer" : "Estimated drive"}: ${travel.durationMinutes}-${travel.durationMinutes + 15} minutes depending on traffic.`),
     travelFromPrevious: travel,
     locationLabel: `${fromLabel} to ${toLabel}`,
     replaceable: false
@@ -1226,6 +1600,8 @@ function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled,
       if (!classification.isBackupCompatible) return false;
       if (classification.isOrdinaryLocalFacility || Number(classification.ordinaryLocalFacilityPenalty?.score || 0) >= 50) return false;
       if (classification.travelerFit?.score <= -50) return false;
+      if (isUrbanDestinationProfile(profile) && isRegionalExcursionPlace(place) && place.regionId !== anchorRegion) return false;
+      if (isUrbanDestinationProfile(profile) && !regionIds.includes(place.regionId) && travel.durationMinutes > 25) return false;
       if (!regionIds.includes(place.regionId) && travel.durationMinutes > 45) return false;
       return true;
     })
@@ -1233,9 +1609,9 @@ function buildBackups(profile, constraints, regionIds, primaryPlaces, scheduled,
     .map(({ place, travel }) => ({
       id: uid("backup"),
       title: place.name,
-      description: place.shortDescription,
+      description: publicPlaceDescription(place.shortDescription),
       placeId: place.id,
-      reason: place.indoorOutdoor === "indoor" ? `Indoor alternative in the same route cluster, about ${travel.durationMinutes} minutes away.` : constraints.minimalWalking ? "Lower-walking alternative near the same route." : `Nearby replacement in the same route cluster, about ${travel.durationMinutes} minutes away.`,
+      reason: place.indoorOutdoor === "indoor" ? `Indoor alternative in the same local cluster, about ${travel.durationMinutes} minutes away.` : constraints.minimalWalking ? "Lower-walking alternative near the same route." : `Nearby replacement in the same local cluster, about ${travel.durationMinutes} minutes away.`,
       indoorOutdoor: place.indoorOutdoor,
       estimatedDurationMinutes: place.typicalDurationMinutes,
       estimatedCostPerPerson: { low: place.estimatedCostLow, high: place.estimatedCostHigh },
@@ -1371,14 +1747,19 @@ export function regeneratePlanPreservingLocks(plan) {
   const next = generateTripPlan(tripLike, { variationSeed: input.variationSeed });
   if (next.status !== "ready") return plan;
   const draft = next.plan;
+  const lockedDaySnapshots = new Map();
   plan.days.forEach((day, index) => {
-    if (day.locked) draft.days[index] = day;
+    if (day.locked) {
+      const snapshot = structuredClone(day);
+      lockedDaySnapshots.set(index, snapshot);
+      draft.days[index] = snapshot;
+    }
     else {
       const locked = day.scheduleItems.filter((item) => item.locked || item.mustDo || item.customItem);
       if (locked.length && draft.days[index]) draft.days[index].scheduleItems = [...locked, ...draft.days[index].scheduleItems];
     }
   });
-  refreshPlanTotals(draft, resolvePlanProfile(draft));
+  refreshPlanTotalsPreservingLockedDays(draft, resolvePlanProfile(draft), lockedDaySnapshots);
   return draft;
 }
 
@@ -1410,6 +1791,25 @@ function refreshPlanTotals(plan, profile) {
   plan.hotelBase = hotelBase;
   plan.days = buildDetailedTripDays(profile, plan.preferencesSnapshot, constraints, plan.days, hotelBase);
   applyGeographicState(profile, plan.preferencesSnapshot, plan.days);
+  plan.routeSummary = buildRouteSummary(profile, plan.days);
+  plan.budgetSummary = buildBudgetSummary(plan.preferencesSnapshot, plan.days);
+  plan.foodPlan = buildFoodPlan(profile, plan.preferencesSnapshot, constraints, plan.days);
+  plan.advisories = buildAdvisories(profile, plan.preferencesSnapshot, constraints, plan.days, plan.budgetSummary);
+  const intelligence = buildDestinationIntelligence(profile, plan.preferencesSnapshot, constraints);
+  const tripShapeOptions = plan.generationMetadata?.tripShapeOptions || buildTripShapeOptions(profile, plan.preferencesSnapshot, intelligence);
+  plan.tripGuide = buildDetailedTripGuide(profile, plan.preferencesSnapshot, constraints, plan.days, hotelBase, plan.routeSummary, plan.budgetSummary, tripShapeOptions);
+  plan.overview = buildOverview(profile, plan.preferencesSnapshot, plan.days, plan.budgetSummary, plan.routeSummary);
+}
+
+function refreshPlanTotalsPreservingLockedDays(plan, profile, lockedDaySnapshots) {
+  if (!lockedDaySnapshots?.size) {
+    refreshPlanTotals(plan, profile);
+    return;
+  }
+  const constraints = buildTravelerConstraintProfile(plan.preferencesSnapshot);
+  const hotelBase = buildHotelBase(profile, plan.preferencesSnapshot, plan.days);
+  plan.hotelBase = hotelBase;
+  plan.days = plan.days.map((day, index) => lockedDaySnapshots.get(index) || day);
   plan.routeSummary = buildRouteSummary(profile, plan.days);
   plan.budgetSummary = buildBudgetSummary(plan.preferencesSnapshot, plan.days);
   plan.foodPlan = buildFoodPlan(profile, plan.preferencesSnapshot, constraints, plan.days);
@@ -1504,7 +1904,12 @@ function buildFoodPlan(profile, input, constraints, days) {
 }
 
 function buildRouteSummary(profile, days) {
-  const orderedRegions = [...new Set(days.map((day) => day.region))];
+  const orderedRegions = [...new Set(days.flatMap((day) => [
+    day.region,
+    ...day.scheduleItems
+      .filter((item) => item.type === "activity" && item.regionId)
+      .map((item) => regionName(profile, item.regionId))
+  ].filter(Boolean)))];
   const orderedStops = days.flatMap((day) => day.scheduleItems.filter((item) => item.type === "activity").map((item) => item.title));
   const totalEstimatedDriveMinutes = days.reduce((sum, day) => sum + day.dailyDriveMinutes, 0);
   const totalEstimatedDistanceMiles = Math.round(totalEstimatedDriveMinutes * 0.65);
@@ -1674,6 +2079,33 @@ function buildTripShapeOptions(profile, input, intelligence) {
       tradeoffs: ["May miss signature nearby experiences"],
       costImpact: "Predictable local cost range.",
       whyItFitsUser: "Best if the traveler prefers certainty, lower driving, and fewer hotel changes.",
+      confidence: "medium"
+    }));
+  }
+  if (isUrbanDestinationProfile(profile) && options.length < 3) {
+    const neighborhoodRegions = profile.regions
+      .filter((region) => /neighborhood|waterfront|market|district|arts|food|evening|old town|wharf|river/i.test(`${region.name} ${region.summary || ""} ${(region.tags || []).join(" ")}`))
+      .map((region) => region.name)
+      .slice(0, 4);
+    options.push(tripShapeOption({
+      id: "shape-neighborhood-evening-depth",
+      title: "Signature sights plus neighborhood evenings",
+      structureType: "Single-city depth",
+      routeSequence: [profile.canonicalName, ...(neighborhoodRegions.length ? neighborhoodRegions : coreRegions)],
+      overnightBases: [{ base: base?.name || profile.canonicalName, nights: Math.max(0, calculateTripNights(input.numberOfDays)) }],
+      hotelChanges: 0,
+      majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
+      totalEstimatedDriving: `${formatDuration(input.numberOfDays * 20)}-${formatDuration(input.numberOfDays * 45)} local movement`,
+      totalMajorDriving: input.numberOfDays * 32,
+      longestDrivingDay: "No intentional regional excursion unless explicitly approved",
+      fullSightseeingDays: maxSightseeingDays,
+      arrivalAssumptions: "Use arrival evening for a simple neighborhood or waterfront orientation, not heavy sightseeing.",
+      departureAssumptions: "Keep the final morning short and close to the base.",
+      experienceMix: `Balances first-time anchors with ${neighborhoodRegions.slice(0, 3).join(", ") || "walkable neighborhoods and evening areas"}.`,
+      advantages: ["More local texture", "Better evening flow", "Lower backtracking than scattered regional stops"],
+      tradeoffs: ["Less nature or out-of-city variety"],
+      costImpact: "Usually lower transport burden; dining choices drive cost more than attractions.",
+      whyItFitsUser: "A balanced urban trip benefits from famous sights by day and walkable neighborhoods in the evening.",
       confidence: "medium"
     }));
   }
@@ -1895,7 +2327,7 @@ export function validateTripPlan(plan) {
   if (hasUniformGenericPricing(plan)) {
     blocking.push(advisory("generic-pricing", "blocking", "budget", "Generic repeated pricing detected", "The itinerary uses repeated generic attraction price ranges instead of category-appropriate estimates.", "Regenerate with destination- and category-aware cost ranges."));
   }
-  if (hasRepeatedDurationPattern(plan)) {
+  if (isProviderGeneratedPlan(plan) && hasRepeatedDurationPattern(plan)) {
     blocking.push(advisory("generic-duration", "blocking", "schedule", "Repeated generic durations detected", "The itinerary repeats the same duration across unrelated primary activities.", "Regenerate with place-specific duration estimates."));
   }
   if (hasRepeatedMealPattern(plan)) {
@@ -1906,6 +2338,12 @@ export function validateTripPlan(plan) {
   }
   if (hasDuplicateDaytimeEvening(plan)) {
     blocking.push(advisory("duplicated-evening", "blocking", "evening", "Evening repeats daytime activity", "A daytime activity is reused as evening filler on the same day.", "Regenerate with distinct verified evening options."));
+  }
+  if (input.routeQualityRequired && hasUnverifiedArrivalRoute(plan)) {
+    blocking.push(advisory("arrival-route-unverified", "blocking", "route", "Arrival route was not verified", "Driving trips that require route quality must use a provider route estimate before scheduling arrival or departure days.", "Retry route estimation before building the detailed itinerary."));
+  }
+  if (hasImplausibleArrivalDrive(plan)) {
+    blocking.push(advisory("arrival-route-implausible", "blocking", "route", "Arrival route is implausible", "The arrival or return drive is unrealistically short for the selected origin and destination.", "Regenerate with a reliable route provider estimate."));
   }
   const rawLabel = plan.days.flatMap((day) => day.scheduleItems).find((item) => item.placeId && isRawPlaceLabel(item.title));
   if (rawLabel) {
@@ -1944,6 +2382,27 @@ export function validateTripPlan(plan) {
 
 function userRejectedBeach(input) {
   return /avoid beach|no beach|skip beach|not beach/.test(normalizeText(`${input.mustHavePlaces?.join(" ")} ${input.avoidPlaces?.join(" ")}`));
+}
+
+function hasUnverifiedArrivalRoute(plan) {
+  const travel = plan.days
+    .flatMap((day) => day.scheduleItems || [])
+    .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")));
+  if (!travel.length) return false;
+  return travel.some((item) => item.travelFromPrevious?.estimateType !== "provider-route-estimate");
+}
+
+function hasImplausibleArrivalDrive(plan) {
+  const input = plan.preferencesSnapshot || {};
+  const routeRequired = Boolean(input.routeQualityRequired);
+  const origin = normalizeText(input.origin || plan.origin);
+  const destination = normalizeText(input.destination || plan.destination);
+  const longKnownPair = /\b(charlotte north carolina|charlotte nc)\b/.test(origin) && /\b(washington|district of columbia|dc)\b/.test(destination);
+  if (!routeRequired && !longKnownPair) return false;
+  return plan.days
+    .flatMap((day) => day.scheduleItems || [])
+    .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")))
+    .some((item) => Number(item.travelFromPrevious?.durationMinutes || item.durationMinutes || 0) < 300);
 }
 
 function hasUniformGenericPricing(plan) {
@@ -2035,7 +2494,7 @@ export function compatibleAlternatives(plan, itemId) {
     .map(({ place, reasons }) => ({
       placeId: place.id,
       title: place.name,
-      description: place.shortDescription,
+      description: publicPlaceDescription(place.shortDescription),
       region: regionName(profile, place.regionId),
       category: place.categories[0] || "activity",
       duration: place.typicalDurationMinutes,
@@ -2363,6 +2822,8 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
   const dominantRegion = dominantRegionName(profile, activityItems) || region.name;
   const mountainTitle = mountainRegionalDayTitle(activityItems, eveningItems);
   if (mountainTitle) return mountainTitle;
+  const urbanTitle = urbanDayTitle(activityItems, eveningItems, dominantRegion);
+  if (urbanTitle && isUrbanDestinationProfile(profile)) return urbanTitle;
   if ((counts.beach + counts.waterfront) >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
     return `${dominantRegion} beach and waterfront`;
   }
@@ -2409,6 +2870,17 @@ function categoryCountsForTitle(items) {
   }, { beach: 0, waterfront: 0, nature: 0, culture: 0, entertainment: 0 });
 }
 
+function urbanDayTitle(activityItems, eveningItems = [], dominantRegion = "") {
+  const text = normalizeText([...activityItems, ...eveningItems].map((item) => `${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`).join(" "));
+  if (!text) return "";
+  if (/\b(capitol|library of congress|supreme court|botanic garden|eastern market)\b/.test(text)) return "Capitol Hill, Library, and market time";
+  if (/\b(lincoln memorial|washington monument|national mall|reflecting pool|vietnam veterans|world war ii|jefferson memorial|martin luther king jr memorial|tidal basin)\b/.test(text)) return "National Mall monuments and memorials";
+  if (/\b(georgetown|dupont|wharf|waterfront|kennedy center)\b/.test(text)) return "Georgetown, waterfront, and evening views";
+  if (/\b(arlington|alexandria|mount vernon)\b/.test(text)) return "Arlington and nearby historic neighborhoods";
+  if (/\b(portrait gallery|national gallery|american history|natural history|african american|holocaust|museum|smithsonian)\b/.test(text)) return `${dominantRegion} museums and culture`;
+  return "";
+}
+
 function dominantRegionName(profile, items) {
   const counts = frequency(items.map((item) => item.regionId).filter(Boolean));
   const [regionId] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
@@ -2441,17 +2913,18 @@ function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
     if (fromRegionId !== toRegionId && isMountainRegionalTransfer(profile, fromPlaceOrRegion, toPlaceOrRegion)) {
       durationMinutes = Math.max(durationMinutes, 25);
     }
+    const urbanTransfer = isUrbanDestinationProfile(profile) && distanceMiles <= 4.5 && !route?.tags?.includes("drive-only");
     return {
-      mode: "Drive",
+      mode: urbanTransfer ? "Walk/Metro" : "Drive",
       durationMinutes,
       distanceMiles: Math.max(0.5, Math.round(distanceMiles * 10) / 10),
       fromLabel: placeOrRegionLabel(profile, fromPlaceOrRegion, fromRegionId),
       toLabel: placeOrRegionLabel(profile, toPlaceOrRegion, toRegionId),
       estimateType: route ? "curated-coordinate-estimate" : "coordinate-plausibility-estimate",
-      note: `Estimated drive: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify live traffic before traveling.`
+      note: urbanTransfer ? `Walk, Metro, or short rideshare transfer: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify current transit and walking conditions.` : `Estimated drive: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify live traffic before traveling.`
     };
   }
-  if (fromRegionId === toRegionId) return { mode: "Drive", durationMinutes: 12, distanceMiles: 3, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "same-area-estimate", note: "Short same-area transfer estimate; verify exact location and parking." };
+  if (fromRegionId === toRegionId) return { mode: isUrbanDestinationProfile(profile) ? "Walk/Metro" : "Drive", durationMinutes: 12, distanceMiles: 3, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "same-area-estimate", note: isUrbanDestinationProfile(profile) ? "Short same-area walk, Metro, or rideshare transfer estimate; verify accessibility and transit conditions." : "Short same-area transfer estimate; verify exact location and parking." };
   const minutes = route?.estimatedDriveMinutes || 35;
   return { mode: "Drive", durationMinutes: minutes, distanceMiles: route?.estimatedDistanceMiles || Math.round(minutes * 0.7), fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "curated-region-estimate", note: `Estimated drive: about ${minutes} minutes. Verify live traffic before traveling.` };
 }
@@ -2534,7 +3007,13 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
 
 function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false) {
   const excluded = excludedIds instanceof Set ? excludedIds : new Set([excludedIds].filter(Boolean));
-  const byMealFit = (place) => isMealCandidate(place, mealType) && !excluded.has(place.id) && (allowReused ? (mealUsage.get(place.id) || 0) < 2 : (mealUsage.get(place.id) || 0) === 0);
+  const byMealFit = (place) => {
+    if (!isMealCandidate(place, mealType) || excluded.has(place.id)) return false;
+    const usage = mealUsage.get(place.id) || 0;
+    const classification = classifyPlaceForPlanning(place);
+    const maxUsage = classification.isFoodHall ? 1 : 2;
+    return allowReused ? usage < maxUsage : usage === 0;
+  };
   const regionMatches = profile.places
     .filter((place) => place.regionId === regionId)
     .filter(byMealFit)
@@ -2608,6 +3087,11 @@ function estimateDayBudget(input, items) {
 
 function costForPlace(place, classification = classifyPlaceForPlanning(place)) {
   const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  const admission = normalizeText(`${place.admissionStatus || ""} ${(place.pricingNotes || "")}`);
+  if (/\bfree admission|free entry|admission free|no admission charge|free public access\b/.test(admission)
+    || /\b(smithsonian|national mall|lincoln memorial|washington monument|national gallery of art|library of congress|united states capitol|us capitol|u s capitol|national portrait gallery|national museum of american history|national museum of natural history|national museum of african american history|united states botanic garden|u s botanic garden|national zoo)\b/.test(text)) {
+    return { low: 0, high: 0 };
+  }
   if (classification.isBeachOrWaterfront || classification.isBoardwalk || classification.isPier) {
     const high = /skywheel|cruise|water sport|watersport|fishing charter|parasail/.test(text) ? 80 : /state park|huntington|brookgreen|atalaya/.test(text) ? 35 : 20;
     return { low: Math.max(0, Number(place.estimatedCostLow || 0)), high: Math.max(Number(place.estimatedCostHigh || 0), high) };
@@ -2616,6 +3100,22 @@ function costForPlace(place, classification = classifyPlaceForPlanning(place)) {
   if (/skywheel/.test(text)) return { low: Math.max(15, Number(place.estimatedCostLow || 0)), high: Math.max(30, Number(place.estimatedCostHigh || 0)) };
   if (classification.isDinnerShow) return { low: Math.max(45, Number(place.estimatedCostLow || 0)), high: Math.max(95, Number(place.estimatedCostHigh || 0)) };
   return { low: Number(place.estimatedCostLow || 0), high: Number(place.estimatedCostHigh || 0) };
+}
+
+function isUrbanDestinationProfile(profile) {
+  const text = normalizeText([
+    profile.canonicalName,
+    profile.summary,
+    profile.destinationArchetype?.primaryArchetype,
+    ...(profile.regions || []).map((region) => `${region.name} ${(region.tags || []).join(" ")}`),
+    ...(profile.places || []).slice(0, 25).map((place) => `${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`)
+  ].join(" "));
+  return /\b(major city|capital|downtown|metro|urban|museum|historic district|neighborhood|national mall|capitol|smithsonian)\b/.test(text);
+}
+
+function isRegionalExcursionPlace(place) {
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return /\b(day trip|regional|suburban|airport|dulles|outside the city|long excursion|state park|national park|great falls|udvar hazy|mount vernon)\b/.test(text);
 }
 
 function beachExperienceFor(place, classification = classifyPlaceForPlanning(place)) {
@@ -2708,6 +3208,13 @@ function normalizeText(value) {
 
 function titleCase(value) {
   return String(value || "").replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function publicPlaceDescription(value) {
+  return String(value || "")
+    .replace(/\bbreakfast option\b/gi, "breakfast pick")
+    .replace(/\blunch option\b/gi, "lunch pick")
+    .replace(/\bdinner option\b/gi, "dinner pick");
 }
 
 function haversineMiles(lat1, lon1, lat2, lon2) {
