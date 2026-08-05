@@ -30,6 +30,12 @@ export async function openRouteServiceDestinationResearch(destination, trip = {}
   const selectedFeatures = selectDiversePoiFeatures(resilientFeatures, center, 34);
   const regions = buildRegions(destinationLocation, selectedFeatures);
   const places = selectedFeatures.map((feature, index) => placeFromPoiFeature(feature, regionForFeature(feature, regions, center), destinationName, index, center));
+  const existingPlaceNames = new Set(places.map((place) => place.name.toLowerCase()));
+  const namedFoodPlaces = foodFeatures
+    .filter((feature) => !existingPlaceNames.has(poiName(feature).toLowerCase()))
+    .slice(0, 12)
+    .map((feature, index) => placeFromPoiFeature(feature, regionForFeature(feature, regions, center), destinationName, places.length + index, center));
+  places.push(...namedFoodPlaces);
   const foodAreas = buildFoodAreas(foodFeatures, regions, destinationName);
   const scenicRoutes = buildScenicRoutes(regions);
   return {

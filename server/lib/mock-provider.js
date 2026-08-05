@@ -31,6 +31,20 @@ const destinationSeeds = {
   "los angeles": ["Santa Monica Pier", "Getty Center", "Griffith Observatory", "Venice Canals", "The Broad", "Grand Central Market", "LACMA area", "Malibu coast", "Little Tokyo", "Hollywood Bowl overlook"]
 };
 
+const restaurantSeeds = {
+  "new york": [["Katz's Delicatessen", ["lunch", "dinner"]], ["Russ & Daughters Cafe", ["breakfast", "lunch"]], ["Joe's Pizza", ["lunch", "dinner"]], ["Balthazar", ["breakfast", "dinner"]]],
+  "seattle": [["Pike Place Chowder", ["lunch", "dinner"]], ["Biscuit Bitch", ["breakfast"]], ["The Pink Door", ["lunch", "dinner"]], ["Portage Bay Cafe", ["breakfast", "lunch"]]],
+  "glacier": [["Eddie's Cafe", ["breakfast", "lunch"]], ["Belton Chalet Dining Room", ["dinner"]], ["Two Sisters Cafe", ["breakfast", "lunch"]], ["Highline Trading Post Grill", ["lunch"]]],
+  "maui": [["Mama's Fish House", ["dinner"]], ["Paia Fish Market", ["lunch", "dinner"]], ["Kihei Caffe", ["breakfast"]], ["Star Noodle", ["lunch", "dinner"]]],
+  "paris": [["Cafe de Flore", ["breakfast", "lunch"]], ["Chez Janou", ["lunch", "dinner"]], ["Breizh Cafe", ["lunch"]], ["Le Bouillon Pigalle", ["dinner"]]],
+  "tokyo": [["Tsukiji Sushiko", ["breakfast", "lunch"]], ["Ichiran Shibuya", ["lunch", "dinner"]], ["Ginza Kagari", ["dinner"]], ["Akihabara Gyoza Lou", ["lunch", "dinner"]]],
+  "iceland": [["Baejarins Beztu Pylsur", ["lunch", "dinner"]], ["Reykjavik Fish Restaurant", ["dinner"]], ["Sandholt Bakery", ["breakfast"]], ["Cafe Loki", ["lunch"]]],
+  "amalfi": [["Trattoria da Salvatore", ["lunch", "dinner"]], ["Da Adolfo Beach Restaurant", ["lunch"]], ["Ristorante La Marinella", ["dinner"]], ["Bar Positano Cafe", ["breakfast"]]],
+  "detroit": [["Slows Bar BQ", ["lunch", "dinner"]], ["Eastern Market Deli", ["breakfast", "lunch"]], ["Lafayette Coney Island", ["lunch", "dinner"]], ["Selden Standard", ["dinner"]]],
+  "charlotte": [["The Diamond Restaurant", ["breakfast", "lunch"]], ["Haberdish", ["lunch", "dinner"]], ["Amelie's French Bakery", ["breakfast"]], ["The Fig Tree Restaurant", ["dinner"]]],
+  "los angeles": [["Grand Central Market Eatery", ["lunch"]], ["Republique", ["breakfast", "lunch"]], ["Guelaguetza", ["lunch", "dinner"]], ["Providence", ["dinner"]]]
+};
+
 const regionNames = ["Central district", "Museum and culture area", "Waterfront or scenic area", "Local food district", "Historic neighborhood", "Outer day-trip area"];
 
 export function mockLocationSearch(query) {
@@ -65,6 +79,8 @@ export function mockDestinationResearch(destination, trip = {}) {
     typicalTravelMinutesToRegions: {}
   }));
   const places = seedPlaces.map((name, index) => placeFromSeed(name, regions[index % regions.length], canonicalName, index));
+  const restaurantPlaces = (restaurantSeeds[key] || []).map(([name, mealTypes], index) => restaurantFromSeed(name, regions[index % Math.min(2, regions.length)], canonicalName, index, mealTypes));
+  places.push(...restaurantPlaces);
   const foodAreas = regions.slice(0, 5).map((region, index) => ({
     id: `${region.id}-food`,
     name: `${region.name} dining area`,
@@ -159,6 +175,44 @@ function placeFromSeed(name, region, canonicalName, index) {
     priorityScore: 92 - index * 3,
     coordinates: { lat: region.centerCoordinates.lat + index * 0.002, lng: region.centerCoordinates.lng - index * 0.002 },
     backupForTags: category === "museum" ? ["weather", "rain"] : [],
+    sourceMetadata: {
+      provider: "mock",
+      providerPlaceId: slug(name),
+      retrievedName: name,
+      retrievedAt: new Date().toISOString(),
+      sourceUrl: "",
+      dataConfidence: "mock",
+      dataFreshness: "development-mock"
+    }
+  };
+}
+
+function restaurantFromSeed(name, region, canonicalName, index, mealTypes) {
+  return {
+    id: slug(name),
+    name,
+    regionId: region.id,
+    shortDescription: `${name} is a retrieved dining candidate for ${canonicalName}; confirm hours, menu, and dietary needs directly.`,
+    categories: ["restaurant", "food"],
+    tags: ["restaurant", ...mealTypes, "local dining"],
+    suitableFor: ["solo", "couple", "family", "senior"],
+    typicalDurationMinutes: 60,
+    minimumDurationMinutes: 40,
+    maximumDurationMinutes: 100,
+    estimatedCostLow: 12,
+    estimatedCostHigh: 45,
+    indoorOutdoor: "indoor",
+    weatherDependency: "low",
+    accessibility: "good",
+    dietaryRelevance: ["confirm dietary needs directly"],
+    openingTimeGuidance: "Confirm current opening hours before travel.",
+    bestTimeOfDay: mealTypes.includes("breakfast") ? "morning" : mealTypes.includes("dinner") ? "dinner" : "lunch",
+    reservationRecommended: mealTypes.includes("dinner"),
+    seasonalNotes: [],
+    conflictTags: [],
+    priorityScore: 75 - index * 2,
+    coordinates: { lat: region.centerCoordinates.lat + index * 0.0015, lng: region.centerCoordinates.lng - index * 0.0015 },
+    backupForTags: [],
     sourceMetadata: {
       provider: "mock",
       providerPlaceId: slug(name),

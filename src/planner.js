@@ -16,7 +16,7 @@ import {
   calculateTemplateSimilarityScore,
   critiquePlanDeterministically,
   evaluateDestinationOpportunityCoverage,
-  runBoundedRepairLoop,
+  isDisclosedStarterFallbackPlan,
   summarizeOpportunityGraph
 } from "./planning-quality.js";
 
@@ -113,7 +113,7 @@ export function generateTripPlan(trip, options = {}) {
   if (!normalized.startDate || !normalized.endDate || !normalized.numberOfDays) {
     return { status: "invalid", errors: [{ severity: "blocking", issue: "Trip dates are required before generating a plan.", action: "Edit Trip Basics" }], normalized };
   }
-  const destinationProfile = resolveDestinationProfile(normalized.destination);
+  const destinationProfile = (options.destinationProfileId && getDestinationProfile(options.destinationProfileId)) || resolveDestinationProfile(normalized.destination);
   if (!destinationProfile) return { status: "invalid", errors: [{ severity: "blocking", issue: "Destination is required before generating a plan.", action: "Edit Trip Basics" }], normalized };
 
   const constraints = buildTravelerConstraintProfile(normalized);
@@ -183,9 +183,18 @@ export function generateTripPlan(trip, options = {}) {
       unsupportedPreferences: normalized.unknownPreferences
     }
   };
-  const qualityCritique = critiquePlanDeterministically(plan, opportunityGraph);
+  const initialCritique = critiquePlanDeterministically(plan, opportunityGraph);
   const templateSimilarity = calculateTemplateSimilarityScore(plan);
-  const repairLoop = runBoundedRepairLoop(plan, qualityCritique);
+  const repairLoop = attemptBoundedRepair(plan, {
+    profile: destinationProfile,
+    input: normalized,
+    constraints,
+    opportunityGraph,
+    hotelBase,
+    budgetSummary,
+    tripShapeOptions
+  }, initialCritique);
+  const qualityCritique = repairLoop.finalCritique;
   plan.generationMetadata.qualityCritique = qualityCritique;
   plan.generationMetadata.templateSimilarity = templateSimilarity;
   plan.generationMetadata.repairLoop = repairLoop;
@@ -197,11 +206,88 @@ export function generateTripPlan(trip, options = {}) {
     templateSimilarity
   });
   const validation = validateTripPlan(plan);
-  if (validation.blocking.length) {
+  const rejected = validation.blocking.length > 0 || !qualityCritique.pass;
+  if (rejected) {
     plan.status = "needs-review";
     plan.advisories.push(...validation.blocking);
+    const criticAdvisory = !qualityCritique.pass && !validation.blocking.some((item) => item.id.startsWith("quality-critic-"))
+      ? [advisory("quality-critic-score", "blocking", "quality", "Quality critic score below threshold", `The independent planner critic scored this itinerary ${qualityCritique.score}/100 against a required threshold of ${qualityCritique.threshold}.`, "Regenerate with stronger candidate research; this plan was not shown to the traveler.")]
+      : [];
+    return { status: "quality-rejected", plan, errors: [...validation.blocking, ...criticAdvisory] };
   }
   return { status: "ready", plan };
+}
+
+function attemptBoundedRepair(plan, context, initialCritique) {
+  const { profile, input, constraints, opportunityGraph, hotelBase, budgetSummary, tripShapeOptions } = context;
+  const MAX_ATTEMPTS = 2;
+  const MECHANICALLY_REPAIRABLE = new Set(["universal-restaurant-dominance", "meal-repetition", "duplicated-daytime-evening"]);
+  if (initialCritique.pass) {
+    return { attempted: false, attempts: 0, repaired: false, finalCritique: initialCritique, blockedBy: [], reason: "Plan passed deterministic quality gate on first generation." };
+  }
+  const isMechanicallyRepairable = (critique) => critique.hardFailures.length > 0 && critique.hardFailures.every((failure) => MECHANICALLY_REPAIRABLE.has(failure));
+  if (!isMechanicallyRepairable(initialCritique)) {
+    return { attempted: false, attempts: 0, repaired: false, finalCritique: initialCritique, blockedBy: initialCritique.hardFailures, reason: "Hard failures require stronger destination research or candidate data; mechanical repair was not attempted." };
+  }
+  let critique = initialCritique;
+  let attempts = 0;
+  while (attempts < MAX_ATTEMPTS && !critique.pass && isMechanicallyRepairable(critique)) {
+    attempts += 1;
+    if (critique.hardFailures.includes("universal-restaurant-dominance") || critique.hardFailures.includes("meal-repetition")) {
+      repairMealDomination(plan, profile, input, constraints);
+    }
+    if (critique.hardFailures.includes("duplicated-daytime-evening")) {
+      repairDuplicateEveningItems(plan, profile, input, constraints);
+    }
+    plan.foodPlan = buildFoodPlan(profile, input, constraints, plan.days);
+    plan.routeSummary = buildRouteSummary(profile, plan.days);
+    plan.tripGuide = buildDetailedTripGuide(profile, input, constraints, plan.days, hotelBase, plan.routeSummary, budgetSummary, tripShapeOptions);
+    plan.overview = buildOverview(profile, input, plan.days, budgetSummary, plan.routeSummary);
+    critique = critiquePlanDeterministically(plan, opportunityGraph);
+  }
+  return {
+    attempted: true,
+    attempts,
+    repaired: critique.pass,
+    finalCritique: critique,
+    blockedBy: critique.pass ? [] : critique.hardFailures,
+    reason: critique.pass ? `Mechanically repaired meal or evening repetition within ${attempts} attempt(s).` : "Repair attempts exhausted without meeting the quality threshold; this plan will be rejected rather than shown."
+  };
+}
+
+function repairMealDomination(plan, profile, input, constraints) {
+  const mealUsage = new Map();
+  plan.days.forEach((day) => {
+    day.scheduleItems = day.scheduleItems.map((item) => {
+      if (!["breakfast", "lunch", "dinner"].includes(item.type) || item.locked) {
+        if (item.mealDetails?.primaryPlaceId) mealUsage.set(item.mealDetails.primaryPlaceId, (mealUsage.get(item.mealDetails.primaryPlaceId) || 0) + 1);
+        return item;
+      }
+      const regionId = item.regionId || item.neighborhood || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id;
+      const meal = mealRecommendation(profile, input, regionId, item.type, mealUsage);
+      if (meal.primaryPlaceId) mealUsage.set(meal.primaryPlaceId, (mealUsage.get(meal.primaryPlaceId) || 0) + 1);
+      return {
+        ...item,
+        title: meal.primary,
+        description: meal.text,
+        estimatedCostPerPerson: mealCost(input, item.type),
+        mealDetails: { ...(item.mealDetails || {}), restaurantName: meal.primary, primaryOption: meal.primary, primaryPlaceId: meal.primaryPlaceId, secondaryOption: meal.secondary, secondaryPlaceId: meal.secondaryPlaceId, cuisine: meal.cuisine, priceRange: meal.price, reservationGuidance: meal.reservation },
+        dietaryNotes: constraints.dietarySummary
+      };
+    });
+  });
+}
+
+function repairDuplicateEveningItems(plan, profile, input, constraints) {
+  plan.days.forEach((day, index) => {
+    const activityIds = new Set(day.scheduleItems.filter((item) => item.type === "activity" && item.placeId).map((item) => item.placeId));
+    day.scheduleItems = day.scheduleItems.map((item) => {
+      if (item.type !== "evening" || !item.placeId || !activityIds.has(item.placeId) || item.locked) return item;
+      const start = item.startTimeMinutes ?? 19 * 60;
+      const replacement = eveningItem(profile, input, constraints, item.regionId || day.scheduleItems[0]?.regionId, start, index, activityIds, new Map());
+      return { ...replacement, id: item.id, startTimeMinutes: item.startTimeMinutes, endTimeMinutes: item.startTimeMinutes + replacement.durationMinutes };
+    });
+  });
 }
 
 function buildHotelBase(profile, input, days) {
@@ -1133,7 +1219,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     ? Math.max(16 * 60, travelContext.arrivalMinutes + (longArrivalDrive ? 105 : 60))
     : 0;
   const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, arrivalActivityStart);
-  const firstRegion = places[0]?.regionId || "santa-monica";
+  const firstRegion = places[0]?.regionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
   if (isArrivalDay) {
     addMeal(items, "breakfast", breakfastStart, 45, "Pre-departure breakfast", {
       primary: "Breakfast before leaving or on the first route stop",
@@ -1405,8 +1491,8 @@ function tripTravelContext(profile, input) {
   const routeDistance = routeEstimate?.distanceMiles || Math.round(distance);
   const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : 13 * 60 + 30;
   return {
-    needsArrivalLogistics: Boolean(driving && input.origin && !sameDestination),
-    needsDepartureLogistics: Boolean(driving && input.origin && !sameDestination && input.numberOfDays > 1),
+    needsArrivalLogistics: Boolean(input.origin && !sameDestination),
+    needsDepartureLogistics: Boolean(input.origin && !sameDestination && input.numberOfDays > 1),
     transportMode: driving ? "drive" : "fly",
     departureMinutes: driving ? 8 * 60 : 9 * 60,
     arrivalMinutes,
@@ -1733,7 +1819,7 @@ export function regenerateMeals(plan) {
     draft.days.forEach((day) => {
       day.scheduleItems = day.scheduleItems.map((item) => {
         if (!["breakfast", "lunch", "dinner"].includes(item.type) || item.locked) return item;
-        const meal = mealRecommendation(profile, input, item.regionId || item.neighborhood || "santa-monica", item.type);
+        const meal = mealRecommendation(profile, input, item.regionId || item.neighborhood || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "", item.type);
         return { ...item, description: meal.text, mealDetails: { ...(item.mealDetails || {}), primaryOption: meal.primary, secondaryOption: meal.secondary, cuisine: meal.cuisine, priceRange: meal.price, reservationGuidance: meal.reservation }, dietaryNotes: constraints.dietarySummary };
       });
     });
@@ -2303,18 +2389,24 @@ function buildDetailedTripGuide(profile, input, constraints, days, hotelBase, ro
   };
 }
 
-export function validateTripPlan(plan) {
-  const blocking = [];
-  const profile = resolvePlanProfile(plan);
-  const input = plan.preferencesSnapshot || {};
-  const publicText = JSON.stringify({
+const INTERNAL_ID_KEYS = new Set(["id", "placeId", "regionId", "dayId", "itemId", "destinationProfileId", "sourceTripId", "originRegionId", "destinationRegionId", "candidateId"]);
+
+function publicFacingPlanText(plan) {
+  return JSON.stringify({
     overview: plan.overview,
     days: plan.days,
     foodPlan: plan.foodPlan,
     routeSummary: plan.routeSummary,
     hotelBase: plan.hotelBase,
     tripGuide: plan.tripGuide
-  });
+  }, (key, value) => (INTERNAL_ID_KEYS.has(key) ? undefined : value));
+}
+
+export function validateTripPlan(plan) {
+  const blocking = [];
+  const profile = resolvePlanProfile(plan);
+  const input = plan.preferencesSnapshot || {};
+  const publicText = publicFacingPlanText(plan);
   const internalLeak = internalOutputTerms().find((term) => publicText.toLowerCase().includes(term));
   if (internalLeak) blocking.push(advisory("internal-language", "blocking", "content", "Internal planning language leaked", "Generated itinerary includes internal provider or taxonomy wording.", "Regenerate with sanitized destination data."));
   if (plan.days.length !== plan.numberOfDays) blocking.push(advisory("day-count", "blocking", "dates", "Incorrect day count", "Generated day count does not match the inclusive trip length.", "Regenerate after fixing dates."));
@@ -2437,7 +2529,7 @@ function hasRepeatedMealPattern(plan) {
     return groups;
   }, {});
   if (Object.values(primaryByType).some((types) => types.size >= 3)) return true;
-  if (isProviderGeneratedPlan(plan) && meals.length >= 4 && concrete < Math.ceil(meals.length * 0.6)) return true;
+  if (isProviderGeneratedPlan(plan) && !isDisclosedStarterFallbackPlan(plan) && meals.length >= 4 && concrete < Math.ceil(meals.length * 0.6)) return true;
   const concreteNames = meals
     .filter((item) => item.mealDetails?.primaryPlaceId)
     .map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || ""))
@@ -2447,15 +2539,7 @@ function hasRepeatedMealPattern(plan) {
 
 function hasTemplatePublicLanguage(plan) {
   if (!isProviderGeneratedPlan(plan)) return false;
-  const text = JSON.stringify({
-    overview: plan.overview,
-    days: plan.days,
-    foodPlan: plan.foodPlan,
-    routeSummary: plan.routeSummary,
-    hotelBase: plan.hotelBase,
-    tripGuide: plan.tripGuide
-  });
-  return INTERNAL_PUBLIC_LANGUAGE_PATTERN.test(text);
+  return INTERNAL_PUBLIC_LANGUAGE_PATTERN.test(publicFacingPlanText(plan));
 }
 
 function hasDuplicateDaytimeEvening(plan) {
@@ -2803,7 +2887,7 @@ function rotate(values, seed) {
 }
 
 function regionName(profile, id) {
-  return profile.regions.find((region) => region.id === id)?.name || id;
+  return profile.regions.find((region) => region.id === id)?.name || "the local area";
 }
 
 function dayTitleFor(profile, input, intelligence, region, scheduleItems, index) {
@@ -3049,7 +3133,9 @@ function supportedMealTypes(classification) {
 
 function specificFoodAreaLabel(profile, area, regionId, mealType) {
   if (!area?.name) return `${regionName(profile, regionId)} ${mealType}`;
+  const mealNoun = mealType === "breakfast" ? "breakfast spots" : mealType === "lunch" ? "lunch spots" : "dinner spots";
   return area.name
+    .replace(/\brestaurants$/i, mealNoun)
     .replace(/restaurants and food halls/i, "verified dining candidates")
     .replace(/dining and breweries/i, "dinner candidates")
     .replace(/cafes, breweries, and casual food/i, "cafe and dinner candidates")

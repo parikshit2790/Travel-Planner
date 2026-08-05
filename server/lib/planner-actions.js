@@ -104,9 +104,28 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
       normalizedTrip.arrivalRouteEstimate = await estimateArrivalRouteForGeneration(normalizedTrip, registeredProfile, config);
       normalizedTrip.routeQualityRequired = true;
     }
-    const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics });
+    const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics, destinationProfileId: registeredProfile?.id });
     if (result?.plan?.generationMetadata) {
       result.plan.generationMetadata.sourceDiagnostics = sourceDiagnostics;
+    }
+    if (result.status === "quality-rejected") {
+      const critique = result.plan?.generationMetadata?.qualityCritique;
+      logPlannerEvent({
+        requestId,
+        action: "generate-trip",
+        mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live",
+        stage: "quality-rejected",
+        destination,
+        errorCode: "PLAN_QUALITY_REJECTED",
+        candidateCount: result.plan?.generationMetadata?.opportunityGraph?.nodeCount
+      });
+      return actionError(
+        422,
+        "PLAN_QUALITY_REJECTED",
+        `We could not build a reliable itinerary for this trip yet (quality score ${critique?.score ?? 0}/${critique?.threshold ?? 85}). Please retry; if this keeps happening, try a shorter trip or fewer must-have places.`,
+        true,
+        requestId
+      );
     }
     return { status: result.status === "ready" ? 200 : 422, body: result };
   } catch (error) {

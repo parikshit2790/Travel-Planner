@@ -302,7 +302,9 @@ function mockOpenRouteServiceFetch(url, options = {}, fixtures = {}) {
   if (options.method === "GET" || !options.method) assert.equal(parsed.searchParams.get("api_key"), secret);
   if (options.method === "POST") assert.equal(options.headers.Authorization, secret);
   if (parsed.pathname.includes("/geocode/autocomplete") || parsed.pathname.includes("/geocode/search")) {
-    return mockJson({ features: [geocodeFeature(parsed.searchParams.get("text") || "")] });
+    const text = parsed.searchParams.get("text") || "";
+    if (fixtures.thinPois && parsed.pathname.includes("/geocode/search")) return mockJson({ features: [] });
+    return mockJson({ features: [geocodeFeature(text)] });
   }
   if (parsed.pathname === "/pois") {
     const request = JSON.parse(options.body || "{}");
