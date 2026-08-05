@@ -217,18 +217,24 @@ export function evaluateDestinationOpportunityCoverage(graph, destinationProfile
   };
 }
 
-export function critiquePlanDeterministically(plan, graph = {}) {
-  const issues = [];
-  const hardFailures = [];
-  const allItems = (plan.days || []).flatMap((day) => day.scheduleItems || []);
-  const publicText = JSON.stringify({
+const INTERNAL_ID_KEYS = new Set(["id", "placeId", "regionId", "dayId", "itemId", "destinationProfileId", "sourceTripId", "originRegionId", "destinationRegionId", "candidateId"]);
+
+function publicFacingJsonText(plan) {
+  return JSON.stringify({
     overview: plan.overview,
     days: plan.days,
     foodPlan: plan.foodPlan,
     routeSummary: plan.routeSummary,
     hotelBase: plan.hotelBase,
     tripGuide: plan.tripGuide
-  }).toLowerCase();
+  }, (key, value) => (INTERNAL_ID_KEYS.has(key) ? undefined : value));
+}
+
+export function critiquePlanDeterministically(plan, graph = {}) {
+  const issues = [];
+  const hardFailures = [];
+  const allItems = (plan.days || []).flatMap((day) => day.scheduleItems || []);
+  const publicText = publicFacingJsonText(plan).toLowerCase();
 
   if (isProviderGeneratedPlan(plan) && /(google places|openrouteservice point-of-interest candidate|provider-found|provider-retrieved|culture-area|central-area|food-area|nature-area|central area day|google places .* candidate|core area|museums and historic sights|parks and outdoor stops|dining and evening area|stop to consider|breakfast option|lunch option|dinner option|no items in this tier|skipped a late evening activity)/.test(publicText)) {
     hardFailures.push("internal-or-template-language");
@@ -244,7 +250,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasFixedCostDominance(allItems)) issues.push("fixed-cost-dominance");
   if (hasRepeatedDaytimeEvening(plan)) hardFailures.push("duplicated-daytime-evening");
   if (hasRawPlaceLabel(allItems)) hardFailures.push("raw-place-label");
-  if (isProviderGeneratedPlan(plan) && hasUnverifiedMealDominance(mealItems)) hardFailures.push("meal-research-insufficient");
+  if (isProviderGeneratedPlan(plan) && !isDisclosedStarterFallbackPlan(plan) && hasUnverifiedMealDominance(mealItems)) hardFailures.push("meal-research-insufficient");
   if ((plan.days || []).some((day) => genericDayTitle(day.title))) issues.push("generic-day-title");
   if (hasMuseumDominance(plan)) hardFailures.push("category-concentration");
   if (hasSamePrimaryMealForMultipleDays(mealItems)) hardFailures.push("meal-repetition");
@@ -320,19 +326,6 @@ export function calculateTemplateSimilarityScore(plan) {
       maxCostShare > 0.7 ? "cost-template-risk" : "",
       maxTitlePatternShare > 0.7 ? "title-template-risk" : ""
     ].filter(Boolean)
-  };
-}
-
-export function runBoundedRepairLoop(plan, critique) {
-  if (critique.pass) {
-    return { attempted: false, attempts: 0, repaired: false, reason: "Plan passed deterministic quality gate." };
-  }
-  return {
-    attempted: true,
-    attempts: 1,
-    repaired: false,
-    blockedBy: critique.hardFailures,
-    reason: "Deterministic repair loop identified hard failures; caller should regenerate with stricter candidate filters instead of silently patching the public itinerary."
   };
 }
 
@@ -653,7 +646,7 @@ function publicPlanText(plan) {
     routeSummary: plan.routeSummary,
     hotelBase: plan.hotelBase,
     tripGuide: plan.tripGuide
-  }));
+  }, (key, value) => (INTERNAL_ID_KEYS.has(key) ? undefined : value)));
 }
 
 function hasMuseumDominance(plan) {
@@ -714,6 +707,11 @@ function hasUnverifiedMealDominance(mealItems) {
   if (mealItems.length < 4) return false;
   const backed = mealItems.filter((item) => item.mealDetails?.primaryPlaceId).length;
   return backed < Math.ceil(mealItems.length * 0.6);
+}
+
+export function isDisclosedStarterFallbackPlan(plan) {
+  const freshness = plan?.generationMetadata?.destinationProfileSnapshot?.sourceMetadata?.freshness || "";
+  return Boolean(plan?.generationMetadata?.usesGenericDestinationProfile) || /starter-fallback/i.test(freshness);
 }
 
 function isProviderGeneratedPlan(plan) {
