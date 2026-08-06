@@ -85,6 +85,12 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
   }
   const places = tourismCandidates.slice(0, 30);
   const regions = buildGoogleRegions(destinationLocation, places);
+  const existingPlaceIds = new Set(places.map((place) => place.id));
+  const namedFoodPlaces = foodCandidates.filter((place) => !existingPlaceIds.has(place.id));
+  const profilePlaces = [
+    ...places.map((place, index) => profilePlaceFromGooglePlace(place, regionForGooglePlace(place, regions, destinationLocation), destinationName, index)),
+    ...namedFoodPlaces.map((place, index) => profilePlaceFromGooglePlace(place, regionForGooglePlace(place, regions, destinationLocation), destinationName, places.length + index))
+  ];
   return {
     id: `google-${slug(destinationName)}`,
     canonicalName: destinationName,
@@ -106,14 +112,14 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
       maxRegionChangesPacked: 3
     },
     regions,
-    places: places.map((place, index) => profilePlaceFromGooglePlace(place, regionForGooglePlace(place, regions, destinationLocation), destinationName, index)),
+    places: profilePlaces,
     foodAreas: buildGoogleFoodAreas(foodCandidates, regions, destinationName),
     scenicRoutes: buildGoogleScenicRoutes(regions),
     sourceMetadata: {
       provider: "google",
       retrievedAt: new Date().toISOString(),
       freshness: "live-google-places",
-      candidateCount: places.length,
+      candidateCount: profilePlaces.length,
       sourceUrl: GOOGLE_SOURCE_URL
     }
   };
