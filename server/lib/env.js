@@ -22,9 +22,9 @@ export function providerConfig() {
     aiModel: cleanEnv(process.env.AI_MODEL || process.env.OPENAI_MODEL) || "gpt-5-mini",
     timeoutMs: providerTimeoutMs,
     googleRequestTimeoutMs: positiveNumber(process.env.GOOGLE_REQUEST_TIMEOUT_MS, providerTimeoutMs),
-    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 40000),
-    plannerRequestTimeoutMs: positiveNumber(process.env.PLANNER_REQUEST_TIMEOUT_MS, 55000),
-    frontendGenerationTimeoutMs: positiveNumber(process.env.FRONTEND_GENERATION_TIMEOUT_MS, 65000),
+    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 50000),
+    plannerRequestTimeoutMs: positiveNumber(process.env.PLANNER_REQUEST_TIMEOUT_MS, 58000),
+    frontendGenerationTimeoutMs: positiveNumber(process.env.FRONTEND_GENERATION_TIMEOUT_MS, 70000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
   };
 }
