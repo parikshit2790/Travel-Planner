@@ -10,7 +10,6 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
   if (!destinationName) throw aiProviderError("DESTINATION_REQUIRED", "Destination is required.", false, 400);
   const { response, json } = await postOpenAiResponse(config, {
       model: openAiModel(config),
-      tools: [{ type: "web_search_preview" }],
       input: [
         {
           role: "system",
@@ -29,7 +28,7 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
           schema: destinationProfileSchema()
         }
       },
-      max_output_tokens: 7000
+      max_output_tokens: 9000
     });
   if (!response.ok) {
     throw openAiErrorFromResponse(response, json, "AI destination research failed.");
@@ -151,25 +150,13 @@ function destinationPrompt(destinationName, trip) {
     `Travelers: adults ${trip?.adults ?? ""}, children ${trip?.children ?? ""}, seniors ${trip?.seniors ?? ""}`,
     `Transportation: ${trip?.transportation || "not provided"}`,
     `Pace: ${trip?.schedule?.pace || "Balanced"}`,
-    "Create a destination profile that a vacation planner can schedule directly.",
-    "Include 8-12 regions/neighborhoods, 24-36 places, 6-10 food areas, and 5-10 routes or nearby excursions.",
-    "If the destination is part of a connected vacation region, return regionalDestinationProfile with primaryDestination, gatewayTowns, metroOrTourismRegion, parkRelationship, majorGeographicZones, scenicCorridors, entertainmentZones, foodZones, realisticBaseOptions, nearbyDayTrips, overnightExtensions, and regionalConfidence.",
-    "For mountain, national-park, lake, coastal, island, wine-country, or resort regions, evaluate the connected tourism region rather than only the typed town. Do not silently add a second overnight base.",
-    "For national-park or mountain trips, include named scenic corridors and named trail/waterfall candidates as schedulable places. Do not use the park name alone as a generic activity.",
-    "Scenic routes should include start/end, drive distance, drive duration without stops, recommended stops, overlooks, hikes, waterfalls, parking notes, closure/weather cautions, daylight needs, offline-map needs, and full experience duration when known. If unknown, say to verify rather than invent.",
-    "For hikes and waterfalls, include trail name, trailhead, coordinates when known, parking, round-trip distance, elevation gain, estimated duration, difficulty, terrain, waterfall/viewpoint, crowd/early-start guidance, seasonal/weather sensitivity, traveler fit, backup, and source confidence when known.",
-    "Research breakfast, lunch, dinner, cafes/bakeries, packed-lunch/picnic support, and evening food separately. Do not repeat the same restaurant pair across a whole trip.",
-    "Build candidate pools from separate domains before ranking: signature attractions, history/culture, art/museums, neighborhoods, outdoors/parks/gardens, food, evenings/nightlife, sports/events, and regional day trips.",
-    "Places must include iconic must-dos, local neighborhoods, weather backups, food/market anchors, scenic/outdoor options, destination-defining experiences, and nearby day trips when appropriate.",
-    "For first-time balanced trips, prioritize destination-defining official-tourism and nationally/locally significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, parking, or generic local facilities.",
-    "Evaluate the broader metro and region, not only city-limits POIs. Include destination-worthy nearby towns, university districts, food neighborhoods, parks, and day trips when they genuinely improve the trip.",
-    "For each major attraction, use current status language: do not include discontinued tours, closed attractions, former venue identities, or stale public-access assumptions. If a former venue has changed identity, describe only its current visitor value.",
-    "Classify child-focused attractions, family entertainment centers, ordinary businesses, restaurants, food halls, bars, parks, museums, neighborhoods, easy day trips, long day trips, and overnight extensions clearly in categories/tags.",
-    "Do not use family entertainment centers, children-focused museums, ordinary businesses, hotels, schools, offices, parking, or generic search results as must-see stops unless the traveler explicitly requested them.",
-    "Food candidates must be actual restaurants, cafes, bakeries, food halls, bars/breweries, or dining venues. Do not list attractions as meal options merely because food exists onsite.",
-    "Regional attractions over about 90 minutes each way should be route options with tradeoffs, not simple same-day backups.",
-    "Never include internal provider wording such as candidate, Google Places, openrouteservice, category slug, central-area, culture-area, food-area, or raw taxonomy labels in names or descriptions.",
-    "For Paris, for example, this should include major first-time anchors, neighborhoods, Seine/walkable moments, food districts, and nearby Versailles/Giverny-style excursions when appropriate."
+    "Create a destination profile a vacation planner can schedule directly. One short sentence per description; keep the whole response compact and fast to generate.",
+    "Include 6-7 regions/neighborhoods, 14-18 places, 4-6 food areas, and 2-4 routes or nearby excursions.",
+    "Places must mix iconic must-dos, neighborhoods, weather backups, food/market anchors, outdoor options, and nearby day trips. Prioritize destination-defining, officially significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, or generic local facilities; skip family entertainment centers, hotels, and generic search-result businesses unless explicitly requested.",
+    "Food candidates must be actual named restaurants, cafes, bakeries, food halls, or bars/breweries covering breakfast, lunch, dinner, and cafes separately -- never an attraction, a neighborhood, or a generic 'area'. Do not repeat the same restaurant pair across the whole trip.",
+    "If this is a mountain, national-park, lake, coastal, island, wine-country, or resort destination with a connected tourism region, include a compact regionalDestinationProfile (primaryDestination, gatewayTowns, metroOrTourismRegion, nearbyDayTrips, overnightExtensions, regionalConfidence) and name real scenic corridors and trail/waterfall places instead of using the park name as one generic activity. Do not silently add a second overnight base.",
+    "This has no live web access, so only include well-established, long-standing places you are confident are still operating; skip anything you're unsure has closed, renamed, or changed recently. Use current-status language: no discontinued tours or stale former-venue identities.",
+    "Never include internal provider wording (candidate, Google Places, openrouteservice, category slug, central-area, culture-area, food-area, raw taxonomy labels) in any name or description."
   ].join("\n");
 }
 

@@ -25,7 +25,7 @@ function setHappyOpenAiFetch() {
       assert.equal(options.headers.Authorization, `Bearer ${secret}`);
       const request = JSON.parse(options.body);
       assert.equal(request.model, "gpt-5-mini");
-      if (JSON.stringify(request).includes("web_search_preview")) {
+      if (request.text?.format?.name === "route_mosaic_destination_profile") {
         return mockJson({ output_text: JSON.stringify(parisProfile()) });
       }
       return mockJson({ output_text: JSON.stringify({ ok: true, provider: "openai" }) });
