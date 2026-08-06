@@ -630,6 +630,11 @@ export function syncTravelersToCounts(trip) {
     trip.childrenAges = "";
     trip.seniors = 0;
     trip.samePreferences = true;
+  } else if (trip.groupType === "Couple trip") {
+    trip.adults = 2;
+    trip.children = 0;
+    trip.childrenAges = "";
+    trip.seniors = 0;
   }
 
   const total = travelerTotal(trip);
