@@ -125,6 +125,45 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
   };
 }
 
+const INTEREST_KEYWORDS = {
+  hiking: /hik|trail|summit|overlook|ridge/i,
+  "water activities": /lake|river|water|kayak|paddle|falls?\b|waterfall|beach|boat/i,
+  "national park": /national park|state park|forest|wilderness/i,
+  mountain: /mountain|blue ridge|peak|ridge|summit/i
+};
+
+export async function discoverRegionalExtensions(primaryLocation, candidateCityNames, interestLabels, config, { maxDriveMinutes = 240, maxCandidates = 2 } = {}) {
+  const interests = (interestLabels || []).map((label) => String(label || "").toLowerCase());
+  const activeKeywordPatterns = Object.entries(INTEREST_KEYWORDS)
+    .filter(([key]) => interests.some((label) => label.includes(key)))
+    .map(([, pattern]) => pattern);
+  const results = [];
+  for (const cityName of (candidateCityNames || []).slice(0, maxCandidates)) {
+    try {
+      const candidateProfile = await googleDestinationResearch(cityName, {}, config);
+      const candidateCenter = candidateProfile.regions[0]?.centerCoordinates;
+      if (!primaryLocation || !candidateCenter) continue;
+      const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
+      if (!route?.durationMinutes || route.durationMinutes > maxDriveMinutes) continue;
+      const rankedPlaces = [...candidateProfile.places].sort((a, b) => {
+        const boost = (place) => activeKeywordPatterns.some((pattern) => pattern.test(`${place.name} ${place.shortDescription} ${(place.tags || []).join(" ")}`)) ? 1000 : 0;
+        return (boost(b) + b.priorityScore) - (boost(a) + a.priorityScore);
+      });
+      results.push({
+        cityName,
+        canonicalName: candidateProfile.canonicalName,
+        centerCoordinates: candidateCenter,
+        route,
+        places: rankedPlaces.slice(0, 10),
+        foodAreas: candidateProfile.foodAreas.slice(0, 3)
+      });
+    } catch {
+      continue;
+    }
+  }
+  return results;
+}
+
 export async function googleRouteEstimate(origin, destination, mode = "driving", config) {
   const originCoordinates = await resolveRouteCoordinates(origin, config);
   const destinationCoordinates = await resolveRouteCoordinates(destination, config);
@@ -217,7 +256,7 @@ async function healthOperation(requestId, provider, operation, callback) {
   }
 }
 
-async function resolveDestination(destination, config) {
+export async function resolveDestination(destination, config) {
   const locations = await googleLocationSearch(destination, config);
   return locations[0] || null;
 }
