@@ -177,8 +177,9 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
   if (!raw || typeof raw !== "object") return null;
   const canonicalName = clean(raw.canonicalName) || fallbackName;
   const regions = normalizeRegions(raw.regions, canonicalName);
-  const places = normalizePlaces(raw.places, regions);
+  const basePlaces = normalizePlaces(raw.places, regions);
   const foodAreas = normalizeFoodAreas(raw.foodAreas, regions);
+  const places = mergeFoodAreasIntoPlaces(basePlaces, foodAreas);
   const scenicRoutes = normalizeRoutes(raw.scenicRoutes, regions);
   if (regions.length < 4 || places.length < 8 || foodAreas.length < 3) return null;
   return {
@@ -216,6 +217,48 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
       sourceUrl: OPENAI_SOURCE_URL
     }
   };
+}
+
+function mergeFoodAreasIntoPlaces(places, foodAreas) {
+  const existingNames = new Set(places.map((place) => place.name.toLowerCase()));
+  const foodPlaces = foodAreas
+    .filter((area) => !existingNames.has(area.name.toLowerCase()))
+    .map((area, index) => ({
+      id: slug(`food-${area.name}-${index}`),
+      name: area.name,
+      regionId: area.regionId,
+      shortDescription: area.shortDescription || `${area.name} is a dining option; confirm menu, hours, and dietary fit directly.`,
+      categories: ["restaurant", "food"],
+      tags: ["restaurant", ...(area.mealTypes?.length ? area.mealTypes : ["lunch", "dinner"]), ...(area.cuisines || []).slice(0, 2)],
+      suitableFor: ["solo", "couple", "family", "senior"],
+      typicalDurationMinutes: 70,
+      minimumDurationMinutes: 40,
+      maximumDurationMinutes: 120,
+      estimatedCostLow: area.budgetLevels?.includes("budget") ? 10 : 20,
+      estimatedCostHigh: area.budgetLevels?.includes("premium") ? 90 : 50,
+      indoorOutdoor: "indoor",
+      weatherDependency: "low",
+      accessibility: "moderate",
+      dietaryRelevance: area.dietarySupport?.length ? area.dietarySupport : ["confirm dietary needs directly"],
+      openingTimeGuidance: "Confirm current opening hours before travel.",
+      bestTimeOfDay: area.mealTypes?.includes("breakfast") ? "morning" : area.mealTypes?.includes("dinner") ? "dinner" : "lunch",
+      reservationRecommended: area.mealTypes?.includes("dinner"),
+      seasonalNotes: [],
+      conflictTags: [],
+      priorityScore: 72 - index,
+      coordinates: null,
+      backupForTags: [],
+      sourceMetadata: {
+        provider: "openai",
+        providerPlaceId: slug(`food-${area.name}-${index}`),
+        retrievedName: area.name,
+        retrievedAt: new Date().toISOString(),
+        sourceUrl: OPENAI_SOURCE_URL,
+        dataConfidence: "ai-assisted",
+        dataFreshness: "ai-assisted-destination-research"
+      }
+    }));
+  return [...places, ...foodPlaces];
 }
 
 function normalizeRegions(value, canonicalName) {
