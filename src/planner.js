@@ -2120,20 +2120,21 @@ function buildTripShapeOptions(profile, input, intelligence) {
   ];
   if (overnight && input.numberOfDays >= 4) {
     const overnightRoundTrip = Number(overnight.routeFeasibility?.estimatedRoundTripMinutes || 0);
+    const overnightBaseName = (profile.regions.find((region) => region.id === overnight.place.regionId)?.name) || overnight.place.name;
     options.push(tripShapeOption({
       id: "shape-regional-extension",
       title: "Regional extension with one optional second base",
       structureType: "One base plus one overnight extension",
-      routeSequence: [profile.canonicalName, overnight.place.name, profile.canonicalName],
+      routeSequence: [profile.canonicalName, overnightBaseName, profile.canonicalName],
       overnightBases: [
         { base: base?.name || profile.canonicalName, nights: Math.max(1, calculateTripNights(input.numberOfDays) - 1) },
-        { base: overnight.place.name, nights: 1 }
+        { base: overnightBaseName, nights: 1 }
       ],
       hotelChanges: 1,
-      majorTransferDays: [`Transfer to ${overnight.place.name}`, `Return from ${overnight.place.name}`],
+      majorTransferDays: [`Transfer to ${overnightBaseName}`, `Return from ${overnightBaseName}`],
       totalEstimatedDriving: `${formatDuration(overnightRoundTrip + 90)} plus local driving`,
       totalMajorDriving: overnightRoundTrip,
-      longestDrivingDay: `${overnight.place.name}, about ${formatDuration(overnightRoundTrip)}`,
+      longestDrivingDay: `${overnightBaseName}, about ${formatDuration(overnightRoundTrip)} (via ${overnight.place.name})`,
       fullSightseeingDays: Math.max(1, maxSightseeingDays - 1),
       arrivalAssumptions: "Primary destination first, then extension after the trip has momentum.",
       departureAssumptions: "Return to the departure base before the final travel day unless open-jaw travel is confirmed.",

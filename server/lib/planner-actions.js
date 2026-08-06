@@ -2,7 +2,7 @@ import { registerGeneratedDestinationProfile } from "../../src/destination-data.
 import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
-import { googleDestinationResearch, googleRouteEstimate } from "./google-provider.js";
+import { discoverRegionalExtensions, googleDestinationResearch, googleRouteEstimate, resolveDestination } from "./google-provider.js";
 import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
 import { openAiDestinationResearch } from "./openai-destination-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
@@ -239,18 +239,98 @@ function handleWeatherSummary({ destination = "", startDate = "", endDate = "" }
 }
 
 async function researchDestination(destination, trip, config) {
+  let profile;
   if (config.aiProvider === "openai" && config.aiApiKey) {
     try {
-      return await openAiDestinationResearch(destination, trip, config);
+      profile = await openAiDestinationResearch(destination, trip, config);
     } catch (error) {
       if (!config.placeProvider || config.placeProvider === "mock") throw error;
       console.warn("[RouteMosaic planner] AI destination research fallback", JSON.stringify({ code: error?.code || "AI_DESTINATION_RESEARCH_FAILED", destination: canonicalLogName(destination) }));
     }
   }
-  if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
-  if (config.placeProvider === "google") return googleDestinationResearch(destination, trip, config);
-  if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
-  throw new Error("Place provider is not implemented in this build.");
+  if (!profile) {
+    if (config.placeProvider === "mock") return mockDestinationResearch(destination, trip);
+    if (config.placeProvider === "google") profile = await googleDestinationResearch(destination, trip, config);
+    else if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
+    else throw new Error("Place provider is not implemented in this build.");
+  }
+  return addRegionalExtensions(profile, trip, config);
+}
+
+async function addRegionalExtensions(profile, trip, config) {
+  const candidateCities = profile.regionalDestinationProfile?.regionalCandidateCities;
+  const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
+  const hasGoogleAccess = Boolean(config.googleMapsApiKey || config.placeApiKey);
+  if (!candidateCities?.length || tripDays < 4 || !hasGoogleAccess) return profile;
+  try {
+    const primaryLocation = await resolveDestination(profile.canonicalName, config);
+    if (!primaryLocation) return profile;
+    const maxDriveMinutes = Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 240;
+    const interestLabels = [
+      ...(trip?.preferences || []).map((item) => item?.label || item),
+      ...(trip?.activity?.hiking ? [trip.activity.hiking] : [])
+    ].filter(Boolean);
+    const extensions = await discoverRegionalExtensions(
+      { latitude: primaryLocation.latitude, longitude: primaryLocation.longitude },
+      candidateCities,
+      interestLabels,
+      config,
+      { maxDriveMinutes, maxCandidates: 2 }
+    );
+    return mergeRegionalExtensionsIntoProfile(profile, extensions);
+  } catch (error) {
+    console.warn("[RouteMosaic planner] Regional extension discovery skipped", JSON.stringify({ code: error?.code || "REGIONAL_EXTENSION_FAILED" }));
+    return profile;
+  }
+}
+
+export function mergeRegionalExtensionsIntoProfile(profile, extensions) {
+  if (!extensions.length) return profile;
+  const baseRegionId = profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id;
+  const merged = { ...profile, regions: [...profile.regions], places: [...profile.places], foodAreas: [...profile.foodAreas], scenicRoutes: [...profile.scenicRoutes] };
+  extensions.forEach((extension) => {
+    const regionId = `regional-ext-${slug(extension.canonicalName)}`;
+    const isOvernightScale = extension.route.durationMinutes >= 90;
+    merged.regions.push({
+      id: regionId,
+      name: extension.canonicalName,
+      summary: `Regional extension about ${Math.round(extension.route.durationMinutes / 60 * 10) / 10} hours (${Math.round(extension.route.distanceMiles)} miles) from ${profile.canonicalName}.`,
+      centerCoordinates: extension.centerCoordinates,
+      tags: ["regional", isOvernightScale ? "overnight-extension" : "day-trip"],
+      neighboringRegionIds: baseRegionId ? [baseRegionId] : [],
+      typicalTravelMinutesToRegions: {}
+    });
+    extension.places.forEach((place) => {
+      merged.places.push({
+        ...place,
+        id: `regional-${regionId}-${place.id}`,
+        regionId,
+        categories: [...place.categories, isOvernightScale ? "overnight-extension" : "day-trip", "regional"],
+        tags: [...place.tags, "Regional extension"]
+      });
+    });
+    extension.foodAreas.forEach((area) => {
+      merged.foodAreas.push({ ...area, id: `regional-${regionId}-${area.id}`, regionId });
+    });
+    if (baseRegionId) {
+      merged.scenicRoutes.push({
+        id: `regional-route-${regionId}`,
+        name: `${profile.canonicalName} to ${extension.canonicalName}`,
+        originRegionId: baseRegionId,
+        destinationRegionId: regionId,
+        estimatedDriveMinutes: Math.round(extension.route.durationMinutes),
+        estimatedDistanceMiles: Math.round(extension.route.distanceMiles),
+        tags: ["regional", "measured-route"],
+        bestTimeOfDay: "morning",
+        notes: "Drive time measured from live route data; verify traffic before departure."
+      });
+    }
+  });
+  return merged;
+}
+
+function slug(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "region";
 }
 
 async function estimateRoute(origin, destination, mode, config) {
