@@ -380,7 +380,7 @@ function BrandIcon() {
 }
 
 function Brand() {
-  return `<div class="brand">${BrandIcon()}<div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></div>`;
+  return `<button type="button" class="brand" data-action="goHome" aria-label="Go to Trip Basics">${BrandIcon()}<div><strong>RouteMosaic</strong><small>Personalized trip builder</small></div></button>`;
 }
 
 function renderStaticInfoPage() {
@@ -3005,6 +3005,16 @@ async function ensureDestinationIntelligence() {
 }
 
 function action(name) {
+  if (name === "goHome") {
+    ui.openRestrictionTravelerId = null;
+    ui.restrictionSearch = "";
+    state.activeStep = 1;
+    state.plan = null;
+    state.planStatus = "";
+    state.planStale = false;
+    state.planError = null;
+    state.savedTripsOpen = false;
+  }
   if (name === "loadSampleTrip") {
     const hasMeaningfulData = Boolean(String(state.trip.from || state.trip.destination || state.trip.description || "").trim() || state.trip.preferences.length || state.trip.food.diet.length || state.trip.food.restrictions.length);
     if (hasMeaningfulData && !confirm("Load the sample trip and replace your current unsaved entries?")) return;
