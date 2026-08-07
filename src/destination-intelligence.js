@@ -356,6 +356,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isCity = categories.has("city") || has(/\b(city of|downtown [a-z]+|nearby city|university town|college town)\b/);
   const isHotel = has(/\b(hotel|motel|inn|suites|lodging|resort|accommodation)\b/);
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
+  const isSensitiveOrExplicitContent = has(/\b(nude beach|nudist|clothing[- ]optional|swingers?|strip club|gentlemen s club|adult entertainment club|sex shop)\b/);
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
   const breakfastSignalText = `${name} ${categoryText} ${description}`;
@@ -405,6 +406,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isChildrenFocused,
     isFamilyFocused,
     isAdultFocused: isBar || has(/\b(cocktail|wine|brewery|distillery|nightlife|fine dining)\b/),
+    isSensitiveOrExplicitContent,
     isMuseum,
     isPark,
     isNeighborhood,
