@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createTripDraft, syncTravelersToCounts } from "../src/domain.js";
 import { handleLocationAction } from "../server/lib/location-actions.js";
-import { handlePlannerAction } from "../server/lib/planner-actions.js";
+import { handlePlannerAction, planRejectionMessage } from "../server/lib/planner-actions.js";
 import { handleProviderHealthAction } from "../server/lib/provider-health-actions.js";
 import plannerHandler from "../api/planner.js";
 import providerHealthHandler from "../api/provider-health.js";
@@ -199,6 +199,20 @@ const plannerBadMethod = await invokePlanner("GET");
 assert.equal(plannerBadMethod.statusCode, 405);
 assert.match(plannerBadMethod.headers["Content-Type"], /application\/json/);
 assert.equal(plannerBadMethod.body.error.code, "METHOD_NOT_ALLOWED");
+
+const hardFailureMessage = planRejectionMessage({ pass: false, score: 95, threshold: 85, hardFailures: ["category-concentration"] }, []);
+assert.ok(!/95\/85/.test(hardFailureMessage), "A hard-failure rejection must never be phrased as a score-vs-threshold failure");
+assert.ok(hardFailureMessage.includes("category-concentration"), "The hard failure code should be visible in the message");
+
+const scoreFailureMessage = planRejectionMessage({ pass: false, score: 60, threshold: 85, hardFailures: [] }, []);
+assert.ok(scoreFailureMessage.includes("60") && scoreFailureMessage.includes("85"), "A genuine below-threshold score should state the actual score and threshold");
+
+const nonCriticBlockerMessage = planRejectionMessage(
+  { pass: true, score: 97, threshold: 85, hardFailures: [] },
+  [{ id: "arrival-route-implausible", title: "Arrival route is implausible" }]
+);
+assert.ok(!/97\/85/.test(nonCriticBlockerMessage), "A passing critic score must never be presented as the failure reason");
+assert.ok(nonCriticBlockerMessage.includes("Arrival route is implausible"), "The actual blocking constraint should be named");
 
 console.log("API gateway tests passed");
 

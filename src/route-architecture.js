@@ -76,7 +76,7 @@ export function resetRouteApproval(trip) {
 export function generateRouteArchitectureOptions(trip) {
   ensureRouteArchitecture(trip);
   const signature = routeInputSignature(trip);
-  const destination = normalizePlaceName(trip.destinationDisplay || trip.destination || "Destination");
+  const rawDestination = normalizePlaceName(trip.destinationDisplay || trip.destination || "Destination");
   const origin = normalizePlaceName(trip.fromDisplay || trip.from || "Origin");
   const days = Math.max(1, Number(trip.days || 1));
   const nights = calculateTripNights(days);
@@ -84,25 +84,37 @@ export function generateRouteArchitectureOptions(trip) {
   const maxHotelChanges = parseIntegerPreference(prefs.maxHotelChanges, 1);
   const maxTransferMinutes = parseHoursToMinutes(prefs.maxTransferDriveTime) || 180;
   const maxDayTripMinutes = parseHoursToMinutes(prefs.maxDayTripDriveTime) || 120;
-  const candidates = candidateStops(trip, destination);
-  const depth = estimateDestinationDepth(trip, candidates);
+  const allCandidates = candidateStops(trip, rawDestination);
+  const depth = estimateDestinationDepth(trip, allCandidates);
+
+  // A country/state/broad region cannot be a hotel base. When the traveler named
+  // specific places to include, anchor the trip on the first one they listed instead
+  // of using the broad destination text directly as a lodging base.
+  const explicitCandidates = allCandidates.filter((item) => item.explicit);
+  const primaryFromRefinement = depth.destinationScope === "regional-or-broad" && explicitCandidates.length ? explicitCandidates[0] : null;
+  const destination = primaryFromRefinement ? primaryFromRefinement.name : rawDestination;
+  const candidates = primaryFromRefinement
+    ? allCandidates.filter((item) => item.name.toLowerCase() !== primaryFromRefinement.name.toLowerCase())
+    : allCandidates;
+  const remainingExplicit = candidates.filter((item) => item.explicit);
+
   const options = [];
 
   if (["one-city", "one-base-day-trips", "recommend"].includes(prefs.tripStructure)) {
-    options.push(oneCityOption({ trip, origin, destination, days, nights, depth, signature }));
+    options.push(oneCityOption({ trip, origin, destination, days, nights, depth, signature, primaryFromRefinement, remainingExplicit }));
   }
 
   if (["one-base-day-trips", "recommend"].includes(prefs.tripStructure) && maxDayTripMinutes >= 60) {
-    options.push(dayTripOption({ trip, origin, destination, days, nights, candidates, depth, maxDayTripMinutes, signature }));
+    options.push(dayTripOption({ trip, destination, days, nights, candidates, depth, maxDayTripMinutes, signature, primaryFromRefinement, remainingExplicit }));
   }
 
   if (["multi-city", "recommend"].includes(prefs.tripStructure) && maxHotelChanges > 0) {
     const scored = candidates
       .map((candidate) => ({ candidate, score: destinationExpansionScore(trip, destination, candidate, depth) }))
       .filter((item) => item.score.total >= 58 && item.score.transferBurdenMinutes <= maxTransferMinutes)
-      .sort((a, b) => b.score.total - a.score.total);
-    const best = scored[0];
-    if (best) options.push(multiCityOption({ trip, origin, destination, days, nights, stop: best.candidate, score: best.score, maxHotelChanges, signature }));
+      .sort((a, b) => Number(b.candidate.explicit) - Number(a.candidate.explicit) || b.score.total - a.score.total);
+    const stops = scored.slice(0, maxHotelChanges);
+    if (stops.length) options.push(multiCityOption({ trip, destination, days, nights, stops, maxHotelChanges, signature, primaryFromRefinement, remainingExplicit }));
   }
 
   const filtered = options
@@ -111,7 +123,22 @@ export function generateRouteArchitectureOptions(trip) {
     .slice(0, 3)
     .map((option, index) => ({ ...option, rank: index + 1, recommended: index === 0 || option.recommended }));
 
-  return filtered.length ? filtered : [oneCityOption({ trip, origin, destination, days, nights, depth, signature })];
+  return filtered.length ? filtered : [oneCityOption({ trip, origin, destination, days, nights, depth, signature, primaryFromRefinement, remainingExplicit })];
+}
+
+// Every explicit "Cities or Regions to Include" entry must end up accounted for on
+// every option: as the primary base, an additional overnight base, a day trip, or
+// explicitly excluded with a human-readable reason. Nothing may silently disappear.
+function refinementCoverage({ primaryFromRefinement, remainingExplicit, usedAsBase = [], usedAsDayTrip = [], excludedReason }) {
+  const used = new Set([...usedAsBase, ...usedAsDayTrip].map((name) => name.toLowerCase()));
+  const excludedRefinements = remainingExplicit
+    .filter((item) => !used.has(item.name.toLowerCase()))
+    .map((item) => ({ name: item.name, reason: excludedReason }));
+  return {
+    includedRefinements: [...(primaryFromRefinement ? [primaryFromRefinement.name] : []), ...usedAsBase],
+    dayTripRefinements: usedAsDayTrip,
+    excludedRefinements
+  };
 }
 
 export function approveRouteOption(trip, optionId) {
@@ -156,7 +183,9 @@ export function routeInputSignature(trip) {
 export function estimateDestinationDepth(trip, candidates = []) {
   const days = Math.max(1, Number(trip.days || 1));
   const destination = normalizePlaceName(trip.destinationDisplay || trip.destination || "");
-  const broad = /\b(california|michigan|texas|florida|europe|japan|italy|southern california|northern michigan)\b/i.test(destination);
+  const geocodedType = String(trip.destinationLocation?.locationType || "");
+  const broad = ["Country", "State or region", "State", "Region"].includes(geocodedType)
+    || (!geocodedType && /\b(california|michigan|texas|florida|europe|japan|italy|southern california|northern michigan)\b/i.test(destination));
   const explicitRegions = splitList(trip.destinationRegions).length + splitList(trip.routePreferences?.placesInMind).length;
   const interestCount = (trip.preferences || []).filter((pref) => pref.category === "experiences").length;
   let attractionCapacity = broad ? 8 : 6;
@@ -194,7 +223,12 @@ export function destinationExpansionScore(trip, primaryDestination, candidate, d
   return { total, addedExperienceValue, uniqueness, transferBurden, transferBurdenMinutes, lodgingBurden, routeCompatibility, interestMatch, budgetImpact, dayCountFit };
 }
 
-function oneCityOption({ trip, origin, destination, days, nights, depth, signature }) {
+function oneCityOption({ trip, origin, destination, days, nights, depth, signature, primaryFromRefinement, remainingExplicit }) {
+  const coverage = refinementCoverage({
+    primaryFromRefinement,
+    remainingExplicit,
+    excludedReason: "Not included in this single-base option; see the multi-city or day-trip options to include it."
+  });
   return {
     id: uid("route"),
     tripShapeType: "single-city",
@@ -216,12 +250,19 @@ function oneCityOption({ trip, origin, destination, days, nights, depth, signatu
     benefits: ["No hotel changes", "Deeper coverage of the primary destination", "More flexible backup days"],
     tradeoffs: ["Less regional variety", "Some cross-town travel may still be required"],
     assumptions: depth.reasons,
-    inputSignature: signature
+    inputSignature: signature,
+    ...coverage
   };
 }
 
-function dayTripOption({ trip, destination, days, nights, candidates, maxDayTripMinutes, signature }) {
+function dayTripOption({ trip, destination, days, nights, candidates, maxDayTripMinutes, signature, primaryFromRefinement, remainingExplicit }) {
   const dayTrips = candidates.filter((candidate) => (candidate.driveMinutes || 90) <= maxDayTripMinutes).slice(0, 3);
+  const coverage = refinementCoverage({
+    primaryFromRefinement,
+    remainingExplicit,
+    usedAsDayTrip: dayTrips.filter((item) => item.explicit).map((item) => item.name),
+    excludedReason: `Estimated travel time exceeds your day-trip comfort of ${Math.round(maxDayTripMinutes / 60)} hour(s), or only the top 3 closest day-trip candidates are shown.`
+  });
   return {
     id: uid("route"),
     tripShapeType: "one-base-day-trips",
@@ -243,36 +284,57 @@ function dayTripOption({ trip, destination, days, nights, candidates, maxDayTrip
     benefits: ["One hotel base", "Nearby variety", "Easy to cut day trips if tired"],
     tradeoffs: ["Longer individual driving days", "Day trips must return before evening plans"],
     assumptions: ["Day trips stay within the selected day-trip driving comfort.", "Nearby cities remain optional until approved."],
-    inputSignature: signature
+    inputSignature: signature,
+    ...coverage
   };
 }
 
-function multiCityOption({ trip, destination, days, nights, stop, score, maxHotelChanges, signature }) {
-  const secondBaseNights = Math.max(1, Math.min(2, nights - 2));
-  const primaryNights = Math.max(1, nights - secondBaseNights);
+function distributeStopNights(totalNights, stopCount) {
+  if (stopCount <= 0) return { primaryNights: totalNights, stopNights: [] };
+  const stopNights = [];
+  let remaining = totalNights;
+  for (let index = 0; index < stopCount; index += 1) {
+    const nightsForStop = Math.max(1, Math.min(2, Math.floor(remaining / (stopCount - index + 1))));
+    stopNights.push(nightsForStop);
+    remaining -= nightsForStop;
+  }
+  return { primaryNights: Math.max(1, remaining), stopNights };
+}
+
+function multiCityOption({ trip, destination, days, nights, stops, maxHotelChanges, signature, primaryFromRefinement, remainingExplicit }) {
+  const { primaryNights, stopNights } = distributeStopNights(nights, stops.length);
+  const stopNames = stops.map((item) => item.candidate.name);
+  const totalTransferMinutes = stops.reduce((sum, item) => sum + item.score.transferBurdenMinutes, 0);
+  const coverage = refinementCoverage({
+    primaryFromRefinement,
+    remainingExplicit,
+    usedAsBase: stopNames,
+    excludedReason: `Adding this as another overnight base would exceed your current hotel-change comfort (${maxHotelChanges}) or estimated transfer-time comfort; increase either preference or drop another city to include it.`
+  });
   return {
     id: uid("route"),
     tripShapeType: "multi-city",
-    title: `${destination} + ${stop.name}`,
+    title: `${destination} + ${stopNames.join(" + ")}`,
     recommended: trip.routePreferences.tripStructure === "multi-city" || (!estimateDestinationDepth(trip).canFillTripStrongly && maxHotelChanges > 0),
     destinationScope: "multi-base",
     primaryDestination: destination,
-    sequence: [destination, stop.name],
-    hotelBases: [tripBase(destination, primaryNights, trip), tripBase(stop.name, secondBaseNights, trip)],
-    nightsPerBase: [{ base: destination, nights: primaryNights }, { base: stop.name, nights: secondBaseNights }],
-    transferDays: [`Transfer from ${destination} to ${stop.name}`],
-    majorDriveDays: [`${destination} to ${stop.name}`],
+    sequence: [destination, ...stopNames],
+    hotelBases: [tripBase(destination, primaryNights, trip), ...stops.map((item, index) => tripBase(item.candidate.name, stopNights[index], trip))],
+    nightsPerBase: [{ base: destination, nights: primaryNights }, ...stops.map((item, index) => ({ base: item.candidate.name, nights: stopNights[index] }))],
+    transferDays: stops.map((item) => `Transfer to ${item.candidate.name}`),
+    majorDriveDays: stops.map((item) => `${destination} to ${item.candidate.name}`),
     dayTripCandidates: [],
-    hotelChanges: 1,
-    approximateTransferTime: formatMinutes(score.transferBurdenMinutes),
-    totalMajorDriving: formatMinutes(score.transferBurdenMinutes),
-    confidence: Math.min(88, Math.max(62, score.total)),
-    whyMatches: `Adds ${stop.name} because its expansion score (${score.total}) justifies the transfer burden for this trip.`,
+    hotelChanges: stops.length,
+    approximateTransferTime: formatMinutes(totalTransferMinutes),
+    totalMajorDriving: formatMinutes(totalTransferMinutes),
+    confidence: Math.min(88, Math.max(62, Math.round(stops.reduce((sum, item) => sum + item.score.total, 0) / stops.length))),
+    whyMatches: `Adds ${stopNames.join(", ")} because ${stops.length > 1 ? "their expansion scores justify" : `its expansion score (${stops[0].score.total}) justifies`} the transfer burden for this trip.`,
     benefits: ["More regional variety", "Different neighborhoods or scenery", "Better fit for explicitly requested nearby places"],
-    tradeoffs: ["One hotel change", "Luggage/check-out/check-in time required", "Less time in the primary destination"],
-    assumptions: ["No unapproved third city is included.", "The transfer day must include hotel checkout, luggage, and check-in buffers."],
-    expansionScore: score,
-    inputSignature: signature
+    tradeoffs: [`${stops.length} hotel change${stops.length === 1 ? "" : "s"}`, "Luggage/check-out/check-in time required", "Less time in the primary destination"],
+    assumptions: ["No unapproved additional city is included.", "Each transfer day must include hotel checkout, luggage, and check-in buffers."],
+    expansionScores: stops.map((item) => item.score),
+    inputSignature: signature,
+    ...coverage
   };
 }
 

@@ -74,6 +74,38 @@ zeroChanges.routePreferences.maxHotelChanges = "0";
 options = generateRouteArchitectureOptions(zeroChanges);
 assert.ok(options.every((option) => option.hotelChanges === 0), "Zero hotel changes must exclude multi-base options");
 
+const japan = trip({
+  destination: "Japan",
+  destinationDisplay: "Japan",
+  destinationLocation: { locationType: "Country" },
+  days: 5,
+  startDate: "2026-10-05",
+  endDate: "2026-10-10",
+  destinationRegions: "Tokyo, Osaka, Kyoto, Mount Fuji",
+  description: "Let RouteMosaic recommend the best structure."
+});
+japan.routePreferences.tripStructure = "recommend";
+japan.routePreferences.maxHotelChanges = "1";
+options = generateRouteArchitectureOptions(japan);
+assert.ok(options.length, "Japan trip must produce route options");
+options.forEach((option) => {
+  assert.notEqual(option.primaryDestination, "Japan", "A country must never be used directly as a hotel base");
+  option.hotelBases.forEach((base) => assert.notEqual(base.canonicalName, "Japan", "A country must never appear as a hotel base"));
+  option.nightsPerBase.forEach((entry) => assert.notEqual(entry.base, "Japan", "Nights must never be assigned directly to a country"));
+});
+const requestedNames = ["Tokyo", "Osaka", "Kyoto", "Mount Fuji"];
+options.forEach((option) => {
+  const accountedFor = new Set([
+    ...option.includedRefinements,
+    ...option.dayTripRefinements,
+    ...option.excludedRefinements.map((item) => item.name)
+  ].map((name) => name.toLowerCase()));
+  requestedNames.forEach((name) => {
+    assert.ok(accountedFor.has(name.toLowerCase()), `${name} must be included, a day trip, or explicitly excluded with a reason on option "${option.title}" -- it must never silently disappear`);
+  });
+  option.excludedRefinements.forEach((item) => assert.ok(item.reason && item.reason.length > 10, `Excluded refinement ${item.name} must carry a real reason`));
+});
+
 const smallCity = trip({
   destination: "Smallville",
   destinationDisplay: "Smallville",
