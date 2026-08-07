@@ -1234,7 +1234,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       cuisine: "Flexible",
       price: moneyRange(mealCost(input, "breakfast").low, mealCost(input, "breakfast").high),
       reservation: "No reservation needed for a simple travel-morning breakfast."
-    }, firstRegion, input, constraints);
+    }, firstRegion, input, constraints, null, true);
     items.push(arrivalTravelItem(profile, input, travelContext));
     addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage), firstRegion, input, constraints, mealUsage);
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
@@ -1288,7 +1288,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       cuisine: "Flexible",
       price: moneyRange(mealCost(input, "dinner").low, mealCost(input, "dinner").high),
       reservation: "Keep this flexible unless you already know your arrival time."
-    }, "", input, constraints);
+    }, "", input, constraints, null, true);
   } else {
     addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage), dinnerRegion, input, constraints, mealUsage);
     const eveningStart = constraints.dinnerMinutes + (input.pace === "Relaxed" ? 105 : 90);
@@ -1397,12 +1397,13 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   return Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
 }
 
-function addMeal(items, type, start, duration, title, recommendation, regionId, input, constraints, mealUsage = null) {
+function addMeal(items, type, start, duration, title, recommendation, regionId, input, constraints, mealUsage = null, structurallyUnbacked = false) {
   const meal = typeof recommendation === "string" ? { text: recommendation, primary: "", secondary: "", cuisine: "", price: "", reservation: "" } : recommendation;
   if (mealUsage && meal.primaryPlaceId) mealUsage.set(meal.primaryPlaceId, (mealUsage.get(meal.primaryPlaceId) || 0) + 1);
   items.push({
     id: uid("item"),
     type,
+    structurallyUnbacked,
     startTimeMinutes: start,
     endTimeMinutes: start + duration,
     durationMinutes: duration,
@@ -2493,15 +2494,17 @@ function hasUnverifiedArrivalRoute(plan) {
 
 function hasImplausibleArrivalDrive(plan) {
   const input = plan.preferencesSnapshot || {};
-  const routeRequired = Boolean(input.routeQualityRequired);
-  const origin = normalizeText(input.origin || plan.origin);
-  const destination = normalizeText(input.destination || plan.destination);
-  const longKnownPair = /\b(charlotte north carolina|charlotte nc)\b/.test(origin) && /\b(washington|district of columbia|dc)\b/.test(destination);
-  if (!routeRequired && !longKnownPair) return false;
+  if (!input.routeQualityRequired) return false;
   return plan.days
     .flatMap((day) => day.scheduleItems || [])
     .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")))
-    .some((item) => Number(item.travelFromPrevious?.durationMinutes || item.durationMinutes || 0) < 300);
+    .some((item) => {
+      const durationMinutes = Number(item.travelFromPrevious?.durationMinutes || item.durationMinutes || 0);
+      const distanceMiles = Number(item.travelFromPrevious?.distanceMiles || 0);
+      if (!durationMinutes || !distanceMiles) return false;
+      const impliedMph = distanceMiles / (durationMinutes / 60);
+      return impliedMph > 90;
+    });
 }
 
 function hasUniformGenericPricing(plan) {

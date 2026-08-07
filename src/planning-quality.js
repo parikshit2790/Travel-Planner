@@ -240,7 +240,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
     hardFailures.push("internal-or-template-language");
   }
   if ((plan.days || []).length !== Number(plan.numberOfDays || 0)) hardFailures.push("day-count-mismatch");
-  const mealItems = allItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const mealItems = allItems.filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type) && !item.structurallyUnbacked);
   const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || item.title)).filter(Boolean);
   const repeatedMeal = mostCommonCount(mealNames);
   if (hasSameVenueForAllMealTypes(mealItems)) hardFailures.push("universal-restaurant-dominance");
