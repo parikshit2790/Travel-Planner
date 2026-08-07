@@ -1081,8 +1081,14 @@ function isActivityCandidateForSchedule(item, profile, input) {
   if (classification.isOrdinaryBusiness || classification.isStaleOrClosedAttraction || classification.isChildrenFocused) return false;
   if (classification.isRestaurant || classification.isFoodHall || classification.isBar) return false;
   if (classification.isDinnerShow) return false;
+  if (classification.isSensitiveOrExplicitContent && !preferencesRequestSensitiveContent(input)) return false;
   if (isGenericParkContainer(item.place, profile)) return false;
   return true;
+}
+
+function preferencesRequestSensitiveContent(input) {
+  const text = normalizeText((input.preferences || []).map((pref) => pref.label || pref).join(" "));
+  return /\b(nude beach|nudist|clothing[- ]optional)\b/.test(text);
 }
 
 function destinationDayThemes(profile, input, intelligence = null) {
@@ -1545,7 +1551,7 @@ function isTimeSensitiveClosed(place, startMinutes) {
 }
 
 function arrivalTravelItem(profile, input, context) {
-  const duration = context.originDriveMinutes;
+  const duration = context.transportMode === "drive" ? context.originDriveMinutes : Math.max(120, context.arrivalMinutes - context.departureMinutes);
   const description = context.transportMode === "drive"
     ? `Drive from ${input.origin || "your origin"} to ${profile.canonicalName}; includes conservative fuel, restroom, meal, parking, and arrival buffer. Assumes an ${formatTime(context.departureMinutes)} departure because no exact departure time was entered.`
     : `Arrival logistics for ${profile.canonicalName}; includes airport or station buffer, luggage, rental car or transfer pickup, and hotel approach time.`;
@@ -1568,7 +1574,7 @@ function arrivalTravelItem(profile, input, context) {
 }
 
 function departureTravelItem(profile, input, context) {
-  const duration = Math.max(60, context.originDriveMinutes);
+  const duration = context.transportMode === "drive" ? Math.max(60, context.originDriveMinutes) : Math.max(120, context.arrivalMinutes - context.departureMinutes);
   const start = Math.max(12 * 60 + 30, 18 * 60 - duration);
   const description = context.transportMode === "drive"
     ? `Return drive toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
@@ -2907,8 +2913,6 @@ function dayTitleFor(profile, input, intelligence, region, scheduleItems, index)
   const dominantRegion = dominantRegionName(profile, activityItems) || region.name;
   const mountainTitle = mountainRegionalDayTitle(activityItems, eveningItems);
   if (mountainTitle) return mountainTitle;
-  const urbanTitle = urbanDayTitle(activityItems, eveningItems, dominantRegion);
-  if (urbanTitle && isUrbanDestinationProfile(profile)) return urbanTitle;
   if ((counts.beach + counts.waterfront) >= Math.max(1, Math.ceil(activityItems.length * 0.5))) {
     return `${dominantRegion} beach and waterfront`;
   }
@@ -2953,17 +2957,6 @@ function categoryCountsForTitle(items) {
     if (/music|show|theater|theatre|market|district|brewery|nightlife/.test(text)) counts.entertainment += 1;
     return counts;
   }, { beach: 0, waterfront: 0, nature: 0, culture: 0, entertainment: 0 });
-}
-
-function urbanDayTitle(activityItems, eveningItems = [], dominantRegion = "") {
-  const text = normalizeText([...activityItems, ...eveningItems].map((item) => `${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`).join(" "));
-  if (!text) return "";
-  if (/\b(capitol|library of congress|supreme court|botanic garden|eastern market)\b/.test(text)) return "Capitol Hill, Library, and market time";
-  if (/\b(lincoln memorial|washington monument|national mall|reflecting pool|vietnam veterans|world war ii|jefferson memorial|martin luther king jr memorial|tidal basin)\b/.test(text)) return "National Mall monuments and memorials";
-  if (/\b(georgetown|dupont|wharf|waterfront|kennedy center)\b/.test(text)) return "Georgetown, waterfront, and evening views";
-  if (/\b(arlington|alexandria|mount vernon)\b/.test(text)) return "Arlington and nearby historic neighborhoods";
-  if (/\b(portrait gallery|national gallery|american history|natural history|african american|holocaust|museum|smithsonian)\b/.test(text)) return `${dominantRegion} museums and culture`;
-  return "";
 }
 
 function dominantRegionName(profile, items) {
