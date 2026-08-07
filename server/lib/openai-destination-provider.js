@@ -152,6 +152,7 @@ function destinationPrompt(destinationName, trip) {
     `Pace: ${trip?.schedule?.pace || "Balanced"}`,
     "Create a destination profile a vacation planner can schedule directly. One short sentence per description; keep the whole response compact and fast to generate.",
     "Include 6-7 regions/neighborhoods, 14-18 places, 4-6 food areas, and 2-4 routes or nearby excursions.",
+    "Each region's name must be a real geographic area, neighborhood, or district (for example 'Downtown', 'South Beach', 'Uptown') -- never the name of a single attraction, museum, restaurant, or business. Day summaries and meal labels reuse this name verbatim, so an attraction name here will misleadingly appear on unrelated days.",
     "Places must mix iconic must-dos, neighborhoods, weather backups, food/market anchors, outdoor options, and nearby day trips. Prioritize destination-defining, officially significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, or generic local facilities; skip family entertainment centers, hotels, and generic search-result businesses unless explicitly requested.",
     "Food candidates must be actual named restaurants, cafes, bakeries, food halls, or bars/breweries covering breakfast, lunch, dinner, and cafes separately -- never an attraction, a neighborhood, or a generic 'area'. Do not repeat the same restaurant pair across the whole trip.",
     "Every destination type (including major cities) sits within a broader travel region. If the trip is 4+ days, include a compact regionalDestinationProfile (primaryDestination, gatewayTowns, metroOrTourismRegion, nearbyDayTrips, overnightExtensions, regionalConfidence) naming real, well-known nearby destinations worth a day trip or a one-night extension within roughly a 4-hour drive -- for example a major city's nearest mountains, coast, or a famous regional draw, not just in-city options. Also include regionalCandidateCities: an array of up to 3 of the single strongest options as plain geocodable \"City, State\" or \"City, Country\" names only (for example \"Asheville, NC\"), ranked best first -- no descriptions, just the names, so they can be looked up directly. For mountain, national-park, lake, coastal, island, wine-country, or resort destinations specifically, also name real scenic corridors and trail/waterfall places instead of using the park name as one generic activity. Do not silently add a second overnight base -- extensions are optional information for the traveler to approve.",
@@ -177,8 +178,9 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
   if (!raw || typeof raw !== "object") return null;
   const canonicalName = clean(raw.canonicalName) || fallbackName;
   const regions = normalizeRegions(raw.regions, canonicalName);
-  const places = normalizePlaces(raw.places, regions);
+  const basePlaces = normalizePlaces(raw.places, regions);
   const foodAreas = normalizeFoodAreas(raw.foodAreas, regions);
+  const places = mergeFoodAreasIntoPlaces(basePlaces, foodAreas);
   const scenicRoutes = normalizeRoutes(raw.scenicRoutes, regions);
   if (regions.length < 4 || places.length < 8 || foodAreas.length < 3) return null;
   return {
@@ -216,6 +218,48 @@ function normalizeAiDestinationProfile(raw, fallbackName) {
       sourceUrl: OPENAI_SOURCE_URL
     }
   };
+}
+
+function mergeFoodAreasIntoPlaces(places, foodAreas) {
+  const existingNames = new Set(places.map((place) => place.name.toLowerCase()));
+  const foodPlaces = foodAreas
+    .filter((area) => !existingNames.has(area.name.toLowerCase()))
+    .map((area, index) => ({
+      id: slug(`food-${area.name}-${index}`),
+      name: area.name,
+      regionId: area.regionId,
+      shortDescription: area.shortDescription || `${area.name} is a dining option; confirm menu, hours, and dietary fit directly.`,
+      categories: ["restaurant", "food"],
+      tags: ["restaurant", ...(area.mealTypes?.length ? area.mealTypes : ["lunch", "dinner"]), ...(area.cuisines || []).slice(0, 2)],
+      suitableFor: ["solo", "couple", "family", "senior"],
+      typicalDurationMinutes: 70,
+      minimumDurationMinutes: 40,
+      maximumDurationMinutes: 120,
+      estimatedCostLow: area.budgetLevels?.includes("budget") ? 10 : 20,
+      estimatedCostHigh: area.budgetLevels?.includes("premium") ? 90 : 50,
+      indoorOutdoor: "indoor",
+      weatherDependency: "low",
+      accessibility: "moderate",
+      dietaryRelevance: area.dietarySupport?.length ? area.dietarySupport : ["confirm dietary needs directly"],
+      openingTimeGuidance: "Confirm current opening hours before travel.",
+      bestTimeOfDay: area.mealTypes?.includes("breakfast") ? "morning" : area.mealTypes?.includes("dinner") ? "dinner" : "lunch",
+      reservationRecommended: area.mealTypes?.includes("dinner"),
+      seasonalNotes: [],
+      conflictTags: [],
+      priorityScore: 72 - index,
+      coordinates: null,
+      backupForTags: [],
+      sourceMetadata: {
+        provider: "openai",
+        providerPlaceId: slug(`food-${area.name}-${index}`),
+        retrievedName: area.name,
+        retrievedAt: new Date().toISOString(),
+        sourceUrl: OPENAI_SOURCE_URL,
+        dataConfidence: "ai-assisted",
+        dataFreshness: "ai-assisted-destination-research"
+      }
+    }));
+  return [...places, ...foodPlaces];
 }
 
 function normalizeRegions(value, canonicalName) {
