@@ -119,13 +119,7 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
         errorCode: "PLAN_QUALITY_REJECTED",
         candidateCount: result.plan?.generationMetadata?.opportunityGraph?.nodeCount
       });
-      return actionError(
-        422,
-        "PLAN_QUALITY_REJECTED",
-        `We could not build a reliable itinerary for this trip yet (quality score ${critique?.score ?? 0}/${critique?.threshold ?? 85}). Please retry; if this keeps happening, try a shorter trip or fewer must-have places.`,
-        true,
-        requestId
-      );
+      return actionError(422, "PLAN_QUALITY_REJECTED", planRejectionMessage(critique, result.errors || []), true, requestId);
     }
     return { status: result.status === "ready" ? 200 : 422, body: result };
   } catch (error) {
@@ -133,6 +127,22 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
     logPlannerEvent({ requestId, action: "generate-trip", mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live", stage: "error", destination, errorCode: code });
     return actionError(error?.status || 500, code, error?.message || "We could not build this trip.", error?.retryable ?? true, requestId);
   }
+}
+
+export function planRejectionMessage(critique, errors) {
+  const hardFailures = critique?.hardFailures || [];
+  const criticPassed = Boolean(critique?.pass);
+  const nonCriticBlockers = errors.filter((item) => !String(item?.id || "").startsWith("quality-critic-"));
+  if (hardFailures.length) {
+    return `We found a strong itinerary structure, but it failed a required quality check (${hardFailures.join(", ")}). Please retry; if this keeps happening, try a shorter trip or fewer must-have places.`;
+  }
+  if (!criticPassed) {
+    return `We could not build a reliable itinerary for this trip yet (it scored ${critique?.score ?? 0} out of a required ${critique?.threshold ?? 85}). Please retry; if this keeps happening, try a shorter trip or fewer must-have places.`;
+  }
+  if (nonCriticBlockers.length) {
+    return `We found a strong itinerary, but one or more required trip constraints could not be satisfied (${nonCriticBlockers.map((item) => item.title || item.id).join(", ")}). Please retry, or adjust the trip and try again.`;
+  }
+  return "We could not build a reliable itinerary for this trip yet. Please retry.";
 }
 
 function shouldRequireArrivalRoute(trip, profile, config) {

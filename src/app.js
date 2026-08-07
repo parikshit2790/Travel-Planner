@@ -1314,8 +1314,21 @@ function routeOptionCard(option, selectedId) {
       <div><strong>Benefits</strong><ul>${option.benefits.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
       <div><strong>Tradeoffs</strong><ul>${option.tradeoffs.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
     </div>
+    ${requestedDestinationsCoverage(option)}
     <button class="${selected ? "primary" : ""}" data-action="selectRouteOption:${esc(option.id)}">${selected ? "Selected" : "Select Option"}</button>
   </article>`;
+}
+
+function requestedDestinationsCoverage(option) {
+  const hasRefinements = (option.includedRefinements?.length || 0) > 0 || (option.dayTripRefinements?.length || 0) > 0 || (option.excludedRefinements?.length || 0) > 0;
+  if (!hasRefinements) return "";
+  return `<div class="route-columns">
+    <div><strong>Your requested destinations</strong><ul>
+      ${(option.includedRefinements || []).map((name) => `<li>${esc(name)} — included as an overnight base</li>`).join("")}
+      ${(option.dayTripRefinements || []).map((name) => `<li>${esc(name)} — day trip</li>`).join("")}
+      ${(option.excludedRefinements || []).map((item) => `<li>${esc(item.name)} — not included: ${esc(item.reason)}</li>`).join("")}
+    </ul></div>
+  </div>`;
 }
 
 function approvedRoutePreview(option) {
