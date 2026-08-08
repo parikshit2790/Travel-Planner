@@ -1435,6 +1435,7 @@ function addMeal(items, type, start, duration, title, recommendation, regionId, 
       cuisine: meal.cuisine,
       openingHours: meal.openingHours || "Hours not verified; confirm directly before relying on this meal.",
       routeDetour: meal.routeDetour || "Placed near the day route area.",
+      anchorDistanceMiles: Number.isFinite(meal.anchorDistanceMiles) ? meal.anchorDistanceMiles : null,
       priceLevel: meal.priceLevel || meal.price || "",
       dietaryFit: meal.dietaryFit || constraints.dietarySummary,
       reservationNeed: meal.reservationNeed || meal.reservation || "",
@@ -3097,6 +3098,11 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
   const routeMinutes = primaryPlace ? estimateTravel(profile, regionId, primaryPlace.regionId).durationMinutes : 0;
   const classification = primaryPlace ? classifyPlaceForPlanning(primaryPlace, profile, input) : null;
+  const anchorDistanceMiles = anchorPlace && primaryPlace
+    && Number.isFinite(anchorPlace.latitude) && Number.isFinite(anchorPlace.longitude)
+    && Number.isFinite(primaryPlace.latitude) && Number.isFinite(primaryPlace.longitude)
+    ? Math.round(haversineMiles(Number(anchorPlace.latitude), Number(anchorPlace.longitude), Number(primaryPlace.latitude), Number(primaryPlace.longitude)) * 10) / 10
+    : null;
   return {
     primary,
     secondary,
@@ -3109,6 +3115,7 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     mealTypesServed: supportedMealTypes(classification),
     openingHours: primaryPlace?.openingTimeGuidance || "Hours not verified; confirm directly before relying on this meal.",
     routeDetour: primaryPlace ? `${routeMinutes <= 15 ? "Minimal" : `${routeMinutes} min`} detour from the current route cluster.` : "Placed by dining area, not a verified restaurant.",
+    anchorDistanceMiles,
     priceLevel: price,
     dietaryFit: "Restaurant must confirm dietary and allergy needs directly.",
     reservationNeed: reservation,
