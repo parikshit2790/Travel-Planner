@@ -1251,10 +1251,10 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       reservation: "No reservation needed for a simple travel-morning breakfast."
     }, firstRegion, input, constraints, null, true);
     items.push(arrivalTravelItem(profile, input, travelContext));
-    addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage), firstRegion, input, constraints, mealUsage);
+    addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
   } else {
-    addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage), firstRegion, input, constraints, mealUsage);
+    addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
   }
   let cursor = activityStart;
   const dayPlaces = isDepartureDay
@@ -1273,7 +1273,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       cursor += travel.durationMinutes + buffers;
     }
     if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30) {
-      const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage);
+      const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage, place);
       addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), lunchRecommendation, place.regionId, input, constraints, parkRouteDay ? null : mealUsage);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
     }
@@ -1284,7 +1284,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   });
   if (!items.some((item) => item.type === "lunch")) {
     const lunchRegion = places[0]?.regionId || firstRegion;
-    const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage);
+    const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage, places[0]);
     addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
@@ -1305,7 +1305,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       reservation: "Keep this flexible unless you already know your arrival time."
     }, "", input, constraints, null, true);
   } else {
-    addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage), dinnerRegion, input, constraints, mealUsage);
+    addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1)), dinnerRegion, input, constraints, mealUsage);
     const eveningStart = constraints.dinnerMinutes + (input.pace === "Relaxed" ? 105 : 90);
     const usedActivityIds = new Set([
       ...dayPlaces.map((place) => place.id),
@@ -3085,12 +3085,12 @@ function mealTitle(profile, regionId, mealType) {
   return `${region} dinner`;
 }
 
-function mealRecommendation(profile, input, regionId, mealType, mealUsage = new Map()) {
+function mealRecommendation(profile, input, regionId, mealType, mealUsage = new Map(), anchorPlace = null) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
   const cuisine = (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item)))) || (input.food.cuisine || [])[0] || "local";
-  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true);
+  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, false, anchorPlace) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true, anchorPlace);
   const excluded = new Set([primaryPlace?.id].filter(Boolean));
-  const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true);
+  const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true, anchorPlace) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true, anchorPlace);
   const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
   const secondary = secondaryPlace?.name || secondaryFoodOption(profile, area, regionId);
   const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
@@ -3116,7 +3116,12 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   };
 }
 
-function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false) {
+function mealQualityScore(place) {
+  const classification = classifyPlaceForPlanning(place);
+  return Number(place.priorityScore || 0) - (classification.isThinResearchAttraction ? 40 : 0);
+}
+
+function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false, anchorPlace = null) {
   const excluded = excludedIds instanceof Set ? excludedIds : new Set([excludedIds].filter(Boolean));
   // A regional-extension place (a day-trip or overnight-extension city, often
   // an hour or more away) must never be recommended as a meal for an ordinary
@@ -3131,17 +3136,34 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
     const maxUsage = classification.isFoodHall ? 1 : 2;
     return allowReused ? usage < maxUsage : usage === 0;
   };
+  const anchorCoordinates = anchorPlace && Number.isFinite(anchorPlace.latitude) && Number.isFinite(anchorPlace.longitude)
+    ? { lat: Number(anchorPlace.latitude), lng: Number(anchorPlace.longitude) }
+    : null;
+  const distanceToAnchor = (place) => anchorCoordinates && Number.isFinite(place.latitude) && Number.isFinite(place.longitude)
+    ? haversineMiles(anchorCoordinates.lat, anchorCoordinates.lng, Number(place.latitude), Number(place.longitude))
+    : null;
   const regionMatches = profile.places
     .filter((place) => place.regionId === regionId)
     .filter(byMealFit)
-    .sort((a, b) => (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || b.priorityScore - a.priorityScore);
+    .sort((a, b) => {
+      const usageDiff = (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0);
+      if (usageDiff) return usageDiff;
+      const distanceA = distanceToAnchor(a);
+      const distanceB = distanceToAnchor(b);
+      // Only let proximity override priority when the gap is large enough to
+      // matter for a same-region meal choice; small gaps stay decided by
+      // destination quality so a slightly closer weak candidate cannot beat
+      // a clearly stronger one a few blocks further away.
+      if (distanceA !== null && distanceB !== null && Math.abs(distanceA - distanceB) > 1.5) return distanceA - distanceB;
+      return mealQualityScore(b) - mealQualityScore(a);
+    });
   if (regionMatches.length) return regionMatches[0];
   return profile.places
     .filter(byMealFit)
     .sort((a, b) => {
       const routeA = estimateTravel(profile, regionId, a.regionId).durationMinutes;
       const routeB = estimateTravel(profile, regionId, b.regionId).durationMinutes;
-      return routeA - routeB || (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || b.priorityScore - a.priorityScore;
+      return routeA - routeB || (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || mealQualityScore(b) - mealQualityScore(a);
     })[0] || null;
 }
 
