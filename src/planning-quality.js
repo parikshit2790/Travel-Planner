@@ -576,9 +576,16 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
     && /\b(museum|gallery|art|history|culture)\b/.test(publicText)
     && /\b(neighborhood|district|market|waterfront|wharf|promenade|monument|memorial|national mall)\b/.test(publicText);
   if (publicUrbanBalance && included.length >= requiredIncluded) return false;
+  // Requiring all three categories (culture + neighborhood + outdoor) among a
+  // destination's own top signature attractions is fragile: many genuinely
+  // strong, diverse candidate sets (e.g. LA's Getty/Griffith Park/Dodger
+  // Stadium/Hollywood Walk of Fame) simply don't happen to include a single
+  // POI explicitly labeled "neighborhood" or "district" -- that's about how
+  // the destination's landmarks are typed, not evidence the plan is thin.
+  // Two of the three categories is still meaningful evidence against a
+  // single-category-dominated plan.
   const categoriesPresent = [hasCulture, hasNeighborhood, hasOutdoor].filter(Boolean).length;
-  if (tripDays <= 2) return included.length < requiredIncluded || categoriesPresent < 2;
-  return included.length < requiredIncluded || !(hasCulture && hasNeighborhood && hasOutdoor);
+  return included.length < requiredIncluded || categoriesPresent < 2;
 }
 
 function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
@@ -598,18 +605,17 @@ function hasStaleAttractionRecommendation(plan) {
 function regionalDestinationQuality(plan, graph = {}) {
   const hardFailures = [];
   const issues = [];
-  const profile = plan?.generationMetadata?.destinationProfileSnapshot || {};
-  const regional = plan?.generationMetadata?.destinationIntelligence?.regionalDestinationProfile
-    || plan?.generationMetadata?.destinationProfile?.regionalDestinationProfile
-    || profile.regionalDestinationProfile
-    || null;
   const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
   const publicText = publicPlanText(plan);
-  const regionalText = normalizeText(JSON.stringify(regional || {}));
-  const namedGatewayRegion = /\b(gatlinburg|pigeon forge|sevierville|smoky mountains|great smoky mountains|national park gateway)\b/;
-  const applies = /^(mountain|national-park)$/.test(archetype)
-    || namedGatewayRegion.test(regionalText)
-    || namedGatewayRegion.test(publicText);
+  // This block's vocabulary (scenicTerms/hikeTerms/gatewayTerms below) is
+  // specific to Great Smoky Mountains-style gateway destinations, so it must
+  // only fire for destinations actually classified that way. A loose
+  // substring match against arbitrary regional/plan text (previously also
+  // checked here) is too easy for an unrelated destination to trip by
+  // coincidence -- e.g. any city whose regional day-trip suggestions happen
+  // to mention a national park -- so this now relies solely on the
+  // deliberately-computed archetype classification.
+  const applies = /^(mountain|national-park)$/.test(archetype);
   const mealItems = (plan.days || []).flatMap((day) => day.scheduleItems || []).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
   const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "")).filter(Boolean);
   const uniqueMeals = new Set(mealNames);
@@ -687,7 +693,11 @@ function hasMuseumDominance(plan) {
   if (outdoorOrNeighborhood.length >= Math.max(3, museumItems.length)) return false;
   if (museumItems.length >= 3 && museumItems.length / activityItems.length > 0.42) return true;
   if (museumItems.length >= 2 && outdoorOrNeighborhood.length === 0) return true;
-  return (plan.days || []).some((day) => (day.scheduleItems || []).filter((item) => item.type === "activity" && /\b(museum|gallery|exhibition)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`)).length >= 3);
+  // Some real destinations (e.g. a historic district with several distinct,
+  // worthwhile museums close together) legitimately cluster museums into one
+  // route-efficient day without the overall trip being museum-dominated.
+  // Require a clearer single-day glut before flagging it.
+  return (plan.days || []).some((day) => (day.scheduleItems || []).filter((item) => item.type === "activity" && /\b(museum|gallery|exhibition)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`)).length >= 4);
 }
 
 function explicitMuseumIntent(plan) {
