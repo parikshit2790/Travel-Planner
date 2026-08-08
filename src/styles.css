@@ -120,7 +120,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .step-1 .top::after { content: ""; position: absolute; inset: 0; z-index: 0; background:
   radial-gradient(ellipse at 52% 92%, rgb(22 119 210 / 0.13), transparent 32%),
   linear-gradient(90deg, rgb(255 255 255 / 0) 0%, rgb(255 255 255 / 0.2) 48%, rgb(255 255 255 / 0.66) 78%),
-  repeating-radial-gradient(circle at 72% 56%, rgb(255 122 26 / 0.34) 0 2px, transparent 2px 18px);
+  repeating-radial-gradient(circle at 72% 56%, rgb(255 122 26 / 0.08) 0 1px, transparent 1px 26px);
   pointer-events: none;
 }
 .top > div { position: relative; z-index: 2; max-width: min(760px, calc(100% - 520px)); }
