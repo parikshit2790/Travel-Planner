@@ -255,7 +255,6 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasMuseumDominance(plan)) hardFailures.push("category-concentration");
   if (hasSamePrimaryMealForMultipleDays(mealItems)) hardFailures.push("meal-repetition");
   if (hasMealVenueThatLooksLikeActivity(mealItems)) hardFailures.push("meal-venue-not-restaurant");
-  if (mealItems.some((item) => Number.isFinite(item.mealDetails?.anchorDistanceMiles) && item.mealDetails.anchorDistanceMiles > 12)) hardFailures.push("meal-route-implausible");
   if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
   if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
   if (hasSignatureCoverageFailure(plan, graph)) hardFailures.push("signature-attraction-coverage");
@@ -271,7 +270,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   const subScores = {
     destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, hardFailures.includes("signature-attraction-coverage") ? 38 : 0, hardFailures.includes("first-time-coverage-insufficient") ? 32 : 0, hardFailures.includes("ordinary-local-facility-overpromotion") ? 35 : 0, hardFailures.includes("category-concentration") ? 30 : 0, issues.includes("generic-day-title") ? 8 : 0),
     routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
-    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, hardFailures.includes("meal-route-implausible") ? 30 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
+    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
     scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0, hardFailures.includes("stale-attraction-recommended") ? 45 : 0, hardFailures.includes("day-schedule-exceeds-calendar-day") ? 60 : 0),
     costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
     languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0),

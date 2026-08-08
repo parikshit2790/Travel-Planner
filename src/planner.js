@@ -1678,7 +1678,7 @@ function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityI
   const candidates = profile.places
     .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
     .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
-    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow)
+    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue)
     .filter(({ place, classification }) => Number(place.typicalDurationMinutes || 0) < 150 || classification.isBoardwalk || classification.isBeachOrWaterfront || classification.isBar || /evening|nightlife|dessert|rooftop|dinner|promenade|district|walk/i.test(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`))
     .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
     .sort((a, b) => {
@@ -3074,6 +3074,13 @@ function coordinatesFor(profile, placeOrRegion) {
   return region?.centerCoordinates || null;
 }
 
+function preciseCoordinatesFor(place) {
+  if (!place || typeof place !== "object") return null;
+  if (Number.isFinite(place.coordinates?.lat) && Number.isFinite(place.coordinates?.lng)) return place.coordinates;
+  if (Number.isFinite(place.latitude) && Number.isFinite(place.longitude)) return { lat: Number(place.latitude), lng: Number(place.longitude) };
+  return null;
+}
+
 function placeOrRegionLabel(profile, placeOrRegion, regionId) {
   if (typeof placeOrRegion === "object" && placeOrRegion?.name) return placeOrRegion.name;
   return regionName(profile, regionId);
@@ -3098,10 +3105,10 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
   const routeMinutes = primaryPlace ? estimateTravel(profile, regionId, primaryPlace.regionId).durationMinutes : 0;
   const classification = primaryPlace ? classifyPlaceForPlanning(primaryPlace, profile, input) : null;
-  const anchorDistanceMiles = anchorPlace && primaryPlace
-    && Number.isFinite(anchorPlace.latitude) && Number.isFinite(anchorPlace.longitude)
-    && Number.isFinite(primaryPlace.latitude) && Number.isFinite(primaryPlace.longitude)
-    ? Math.round(haversineMiles(Number(anchorPlace.latitude), Number(anchorPlace.longitude), Number(primaryPlace.latitude), Number(primaryPlace.longitude)) * 10) / 10
+  const anchorPreciseCoordinates = preciseCoordinatesFor(anchorPlace);
+  const primaryPreciseCoordinates = preciseCoordinatesFor(primaryPlace);
+  const anchorDistanceMiles = anchorPreciseCoordinates && primaryPreciseCoordinates
+    ? Math.round(haversineMiles(anchorPreciseCoordinates.lat, anchorPreciseCoordinates.lng, primaryPreciseCoordinates.lat, primaryPreciseCoordinates.lng) * 10) / 10
     : null;
   return {
     primary,
@@ -3143,12 +3150,13 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
     const maxUsage = classification.isFoodHall ? 1 : 2;
     return allowReused ? usage < maxUsage : usage === 0;
   };
-  const anchorCoordinates = anchorPlace && Number.isFinite(anchorPlace.latitude) && Number.isFinite(anchorPlace.longitude)
-    ? { lat: Number(anchorPlace.latitude), lng: Number(anchorPlace.longitude) }
-    : null;
-  const distanceToAnchor = (place) => anchorCoordinates && Number.isFinite(place.latitude) && Number.isFinite(place.longitude)
-    ? haversineMiles(anchorCoordinates.lat, anchorCoordinates.lng, Number(place.latitude), Number(place.longitude))
-    : null;
+  const anchorCoordinates = coordinatesFor(profile, anchorPlace);
+  const distanceToAnchor = (place) => {
+    const placeCoordinates = coordinatesFor(profile, place);
+    return anchorCoordinates && placeCoordinates
+      ? haversineMiles(anchorCoordinates.lat, anchorCoordinates.lng, placeCoordinates.lat, placeCoordinates.lng)
+      : null;
+  };
   const regionMatches = profile.places
     .filter((place) => place.regionId === regionId)
     .filter(byMealFit)
