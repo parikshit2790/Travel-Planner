@@ -117,7 +117,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
   border: 1px solid rgb(255 255 255 / 0.72);
   box-shadow: 0 26px 60px rgb(47 128 160 / 0.22);
 }
-.step-1 .top::after { content: ""; position: absolute; inset: 0; background:
+.step-1 .top::after { content: ""; position: absolute; inset: 0; z-index: 0; background:
   radial-gradient(ellipse at 52% 92%, rgb(22 119 210 / 0.13), transparent 32%),
   linear-gradient(90deg, rgb(255 255 255 / 0) 0%, rgb(255 255 255 / 0.2) 48%, rgb(255 255 255 / 0.66) 78%),
   repeating-radial-gradient(circle at 72% 56%, rgb(255 122 26 / 0.34) 0 2px, transparent 2px 18px);
