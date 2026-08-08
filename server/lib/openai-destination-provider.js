@@ -142,6 +142,11 @@ function openAiErrorFromResponse(response, json, fallbackMessage) {
 }
 
 function destinationPrompt(destinationName, trip) {
+  const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
+  // A longer trip needs enough distinct real restaurants to avoid repeating the
+  // same handful across many days; scale the requested food-area count instead
+  // of leaving every trip length with the same small fixed pool.
+  const foodAreaTarget = tripDays >= 7 ? "8-10" : "4-6";
   return [
     `Destination: ${destinationName}`,
     `Origin: ${trip?.fromDisplay || trip?.from || "not provided"}`,
@@ -151,7 +156,7 @@ function destinationPrompt(destinationName, trip) {
     `Transportation: ${trip?.transportation || "not provided"}`,
     `Pace: ${trip?.schedule?.pace || "Balanced"}`,
     "Create a destination profile a vacation planner can schedule directly. One short sentence per description; keep the whole response compact and fast to generate.",
-    "Include 6-7 regions/neighborhoods, 14-18 places, 4-6 food areas, and 2-4 routes or nearby excursions.",
+    `Include 6-7 regions/neighborhoods, 14-18 places, ${foodAreaTarget} food areas, and 2-4 routes or nearby excursions.`,
     "Each region's name must be a real geographic area, neighborhood, or district (for example 'Downtown', 'South Beach', 'Uptown') -- never the name of a single attraction, museum, restaurant, or business. Day summaries and meal labels reuse this name verbatim, so an attraction name here will misleadingly appear on unrelated days.",
     "Places must mix iconic must-dos, neighborhoods, weather backups, food/market anchors, outdoor options, and nearby day trips. Prioritize destination-defining, officially significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, or generic local facilities; skip family entertainment centers, hotels, and generic search-result businesses unless explicitly requested.",
     "Food candidates must be actual named restaurants, cafes, bakeries, food halls, or bars/breweries covering breakfast, lunch, dinner, and cafes separately -- never an attraction, a neighborhood, or a generic 'area'. Do not repeat the same restaurant pair across the whole trip.",

@@ -71,15 +71,21 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
   const destinationLocation = locationFromTrip(trip) || (await resolveDestination(destination, config));
   if (!destinationLocation) throw googleProviderError("DESTINATION_RESEARCH_FAILED", "Destination could not be resolved.", false, 502);
   const destinationName = destinationLocation.canonicalName || String(destination || "").trim();
+  // A longer trip needs more meal slots filled with real, non-repeating
+  // restaurants than a fixed small candidate pool can sustain -- scale the
+  // restaurant fetch and candidate count with trip length.
+  const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
+  const restaurantFetchCount = tripDays >= 7 ? 20 : 10;
+  const foodCandidateLimit = tripDays >= 7 ? 16 : 8;
   const [attractions, nearby, restaurants] = await Promise.all([
     googleTextSearch(`best tourist attractions and museums in ${destinationName}`, config, placeFieldMask(), 20),
     googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, 20),
-    googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), 10)
+    googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount)
   ]);
   const tourismCandidates = dedupeBy([...attractions, ...nearby], (place) => place.id)
     .filter(isTourismPlace)
     .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a));
-  const foodCandidates = dedupeBy(restaurants, (place) => place.id).filter(isFoodPlace).slice(0, 8);
+  const foodCandidates = dedupeBy(restaurants, (place) => place.id).filter(isFoodPlace).slice(0, foodCandidateLimit);
   if (!tourismCandidates.length) {
     throw googleProviderError("INVALID_PROVIDER_RESPONSE", "Destination research did not find reliable tourism candidates.", true, 502);
   }
