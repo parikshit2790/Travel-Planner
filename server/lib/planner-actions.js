@@ -44,7 +44,7 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
   if (config.production && errors.length) {
     return actionError(503, "PROVIDER_CONFIGURATION_REQUIRED", "Trip generation is temporarily unavailable. Please try again later.", true, requestId);
   }
-  const destination = String(trip?.destinationDisplay || trip?.destination || "").trim();
+  const destination = String(trip?.approvedTripShape?.primaryDestination || trip?.destinationDisplay || trip?.destination || "").trim();
   if (!destination) return actionError(400, "DESTINATION_REQUIRED", "Destination is required.", false, requestId);
   if (config.placeProvider === "mock" && !hasMockDestinationData(destination)) {
     logPlannerEvent({ requestId, action: "research-destination", mode: "mock", stage: "blocked", destination, errorCode: "MOCK_DESTINATION_UNAVAILABLE", durationMs: Date.now() - startedAt });
@@ -97,6 +97,10 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
   }
   try {
     const normalizedTrip = normalizeTripForPlanning(trip);
+    if (normalizedTrip.approvedTripShape?.primaryDestination) {
+      normalizedTrip.destination = normalizedTrip.approvedTripShape.primaryDestination;
+      normalizedTrip.destinationDisplay = normalizedTrip.approvedTripShape.primaryDestination;
+    }
     const registeredProfile = destinationProfile ? registerGeneratedDestinationProfile(destinationProfile) : null;
     const sourceDiagnostics = buildPlanningSourceDiagnostics(config, registeredProfile);
     assertProductionPlanningSafety(config, registeredProfile, sourceDiagnostics);
@@ -268,14 +272,26 @@ async function researchDestination(destination, trip, config) {
 }
 
 async function addRegionalExtensions(profile, trip, config) {
-  const candidateCities = profile.regionalDestinationProfile?.regionalCandidateCities;
+  // Bases the traveler explicitly approved in Trip Shape (e.g. "Osaka" in an
+  // approved "Tokyo -> Osaka" route) must be researched regardless of what the
+  // AI itself suggested as regional candidates -- an approved base is a
+  // requirement, not a same-day-drive-comfort suggestion.
+  const approvedCities = (trip?.approvedTripShape?.hotelBases || []).slice(1).map((base) => base.canonicalName).filter(Boolean);
+  const suggestedCities = profile.regionalDestinationProfile?.regionalCandidateCities || [];
+  const candidateCities = [...new Set([...approvedCities, ...suggestedCities])];
   const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
   const hasGoogleAccess = Boolean(config.googleMapsApiKey || config.placeApiKey);
-  if (!candidateCities?.length || tripDays < 4 || !hasGoogleAccess) return profile;
+  if (!candidateCities.length || tripDays < 4 || !hasGoogleAccess) return profile;
   try {
     const primaryLocation = await resolveDestination(profile.canonicalName, config);
     if (!primaryLocation) return profile;
-    const maxDriveMinutes = Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 240;
+    // An approved overnight base is reached once (by whatever transport mode fits
+    // the trip -- often rail or air for international multi-city routes), not
+    // driven to and from on the same day, so it must not be filtered out by the
+    // traveler's day-trip driving-comfort preference.
+    const maxDriveMinutes = approvedCities.length
+      ? Math.max(600, Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 0)
+      : Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 240;
     const interestLabels = [
       ...(trip?.preferences || []).map((item) => item?.label || item),
       ...(trip?.activity?.hiking ? [trip.activity.hiking] : [])
@@ -285,7 +301,7 @@ async function addRegionalExtensions(profile, trip, config) {
       candidateCities,
       interestLabels,
       config,
-      { maxDriveMinutes, maxCandidates: 2 }
+      { maxDriveMinutes, maxCandidates: Math.max(2, approvedCities.length) }
     );
     return mergeRegionalExtensionsIntoProfile(profile, extensions);
   } catch (error) {
