@@ -149,12 +149,19 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
         const boost = (place) => activeKeywordPatterns.some((pattern) => pattern.test(`${place.name} ${place.shortDescription} ${(place.tags || []).join(" ")}`)) ? 1000 : 0;
         return (boost(b) + b.priorityScore) - (boost(a) + a.priorityScore);
       });
+      // A pure priority-score ranking is dominated by attractions, which silently
+      // drops every restaurant candidate before it ever reaches this extension
+      // region -- guarantee a handful of real named restaurants survive so the
+      // region has schedulable meal candidates, not just sightseeing stops.
+      const isFoodPlace = (place) => place.categories?.includes("restaurant") || place.categories?.includes("food");
+      const nonFoodPlaces = rankedPlaces.filter((place) => !isFoodPlace(place));
+      const foodPlaces = rankedPlaces.filter(isFoodPlace);
       results.push({
         cityName,
         canonicalName: candidateProfile.canonicalName,
         centerCoordinates: candidateCenter,
         route,
-        places: rankedPlaces.slice(0, 10),
+        places: [...nonFoodPlaces.slice(0, 7), ...foodPlaces.slice(0, 3)],
         foodAreas: candidateProfile.foodAreas.slice(0, 3)
       });
     } catch {
