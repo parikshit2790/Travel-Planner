@@ -1,18 +1,38 @@
 import { createRequestId, parseActionRequest, requireActionPost, sendActionError, sendSuccess } from "../server/lib/action-response.js";
 import { handlePlannerAction } from "../server/lib/planner-actions.js";
+import { checkRateLimit, clientIpFrom } from "../server/lib/rate-limit.js";
 
 export const config = { maxDuration: 60 };
+
+const AI_ACTIONS = new Set(["research-destination", "generate-trip"]);
 
 export default async function handler(req, res) {
   const requestId = createRequestId("planner");
   const startedAt = Date.now();
   if (!requireActionPost(req, res)) return;
+  const clientIp = clientIpFrom(req);
+  const endpointLimit = checkRateLimit(`planner:${clientIp}`, { maxRequests: 60, windowMs: 15 * 60 * 1000 });
+  if (!endpointLimit.allowed) {
+    logPlannerRoute({ requestId, action: "", stage: "rate-limited", status: 429, durationMs: Date.now() - startedAt });
+    res.setHeader("Retry-After", String(endpointLimit.retryAfterSeconds));
+    sendActionError(res, 429, "RATE_LIMITED", "Too many requests. Please wait a few minutes and try again.", { retryable: true, requestId });
+    return;
+  }
   try {
     const { action, payload } = parseActionRequest(req);
     if (!action) {
       logPlannerRoute({ requestId, action: "", stage: "rejected", status: 400, durationMs: Date.now() - startedAt });
       sendActionError(res, 400, "ACTION_REQUIRED", "Planner action is required.", { requestId });
       return;
+    }
+    if (AI_ACTIONS.has(action)) {
+      const aiLimit = checkRateLimit(`planner-ai:${clientIp}`, { maxRequests: 15, windowMs: 15 * 60 * 1000 });
+      if (!aiLimit.allowed) {
+        logPlannerRoute({ requestId, action, stage: "rate-limited", status: 429, durationMs: Date.now() - startedAt });
+        res.setHeader("Retry-After", String(aiLimit.retryAfterSeconds));
+        sendActionError(res, 429, "RATE_LIMITED", "Too many trip-generation requests. Please wait a few minutes and try again.", { retryable: true, requestId });
+        return;
+      }
     }
     logPlannerRoute({ requestId, action, stage: "start", origin: payload?.trip?.fromDisplay || payload?.trip?.from, destination: payload?.trip?.destinationDisplay || payload?.trip?.destination });
     const result = await handlePlannerAction(action, payload, { requestId });

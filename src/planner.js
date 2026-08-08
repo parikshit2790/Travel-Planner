@@ -1393,7 +1393,7 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   if (/short stop|viewpoint|landmark|capitol|market/.test(text)) adjusted = Math.min(adjusted, 75);
   if (classification.isMuseum) adjusted = Math.max(90, adjusted);
   if (classification.isPark || classification.isBeachOrWaterfront) adjusted = Math.max(70, adjusted);
-  adjusted += ((seed % 3) - 1) * 10;
+  adjusted += ((seed % 5) - 2) * 8;
   return Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
 }
 
@@ -2519,9 +2519,13 @@ function hasUniformGenericPricing(plan) {
 function hasRepeatedDurationPattern(plan) {
   const durations = plan.days.flatMap((day) => day.scheduleItems).filter((item) => item.type === "activity").map((item) => item.durationMinutes);
   if (durations.length < 5) return false;
-  if (maxShare(frequency(durations)) > 0.4) return true;
-  for (let index = 2; index < durations.length; index += 1) {
-    if (durations[index] === durations[index - 1] && durations[index] === durations[index - 2]) return true;
+  // Real attraction durations cluster around a handful of plausible round
+  // numbers (60/90/120 minutes), so a short run of matching values is weak
+  // evidence of templating on its own -- require a clearer pattern (a
+  // majority share, or a longer consecutive run) before flagging it.
+  if (maxShare(frequency(durations)) > 0.6) return true;
+  for (let index = 3; index < durations.length; index += 1) {
+    if (durations[index] === durations[index - 1] && durations[index] === durations[index - 2] && durations[index] === durations[index - 3]) return true;
   }
   return false;
 }

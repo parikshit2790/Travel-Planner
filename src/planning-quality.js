@@ -533,6 +533,10 @@ function hasMealVenueThatLooksLikeActivity(mealItems) {
   });
 }
 
+function tripDaysFor(plan) {
+  return Number(plan?.numberOfDays || plan?.days?.length || 0);
+}
+
 function hasSignatureCoverageFailure(plan, graph = {}) {
   const nodes = destinationDefiningNodes(graph);
   if (!nodes.length) return false;
@@ -540,7 +544,11 @@ function hasSignatureCoverageFailure(plan, graph = {}) {
   const topLocal = nodes.filter((node) => !/overnight|long-day-trip|not-practical/.test(node.geographicScope || "")).slice(0, 5);
   const includedTopLocal = topLocal.filter((node) => publicText.includes(normalizeText(node.canonicalName)));
   if (topLocal[0]?.firstTimeVisitorValue?.score >= 90 && !includedTopLocal.length) return true;
-  if (topLocal.length >= 4 && includedTopLocal.length < Math.min(2, topLocal.length)) return true;
+  // A short trip has far fewer schedule slots to include signature stops than a
+  // long one; requiring the same absolute coverage count regardless of trip
+  // length unfairly rejects otherwise-solid short trips.
+  const requiredTopLocal = tripDaysFor(plan) <= 2 ? 1 : 2;
+  if (topLocal.length >= 4 && includedTopLocal.length < Math.min(requiredTopLocal, topLocal.length)) return true;
   return false;
 }
 
@@ -549,11 +557,17 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
   if (nodes.length < 4) return false;
   const publicText = publicPlanText(plan);
   const included = nodes.slice(0, 10).filter((node) => publicText.includes(normalizeText(node.canonicalName)));
+  const tripDays = tripDaysFor(plan);
+  // A 2-day trip realistically has room for only ~3-4 major activity slots
+  // total, so requiring 2+ confirmed signature-attraction inclusions can be
+  // stricter than the trip's own schedule capacity allows.
+  const requiredIncluded = tripDays <= 2 ? 1 : Math.min(3, nodes.length);
   const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
   if (/mountain|national park/.test(archetype)) {
     const hasScenicOrTrail = included.some((node) => /\b(outdoor|park|trail|mountain|waterfall|scenic|overlook|corridor|parkway|kuwohi|gap|cove|fork|river road)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
     const hasGatewayOrEntertainment = included.some((node) => /\b(neighborhood|district|downtown|gateway|entertainment|theme park|island|dollywood|anakeesta|skypark|gatlinburg|pigeon forge)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
-    return included.length < Math.min(3, nodes.length) || !(hasScenicOrTrail && hasGatewayOrEntertainment);
+    if (tripDays <= 2) return included.length < requiredIncluded || !(hasScenicOrTrail || hasGatewayOrEntertainment);
+    return included.length < requiredIncluded || !(hasScenicOrTrail && hasGatewayOrEntertainment);
   }
   const hasCulture = included.some((node) => /museum|culture|historic|landmark|civil|human rights|national/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
   const hasNeighborhood = included.some((node) => /neighborhood|district|market|beltline|public market|food hall/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
@@ -561,16 +575,19 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
   const publicUrbanBalance = /\b(capitol|library of congress|civic|government|cathedral|parliament|city hall)\b/.test(publicText)
     && /\b(museum|gallery|art|history|culture)\b/.test(publicText)
     && /\b(neighborhood|district|market|waterfront|wharf|promenade|monument|memorial|national mall)\b/.test(publicText);
-  if (publicUrbanBalance && included.length >= Math.min(3, nodes.length)) return false;
-  return included.length < Math.min(3, nodes.length) || !(hasCulture && hasNeighborhood && hasOutdoor);
+  if (publicUrbanBalance && included.length >= requiredIncluded) return false;
+  const categoriesPresent = [hasCulture, hasNeighborhood, hasOutdoor].filter(Boolean).length;
+  if (tripDays <= 2) return included.length < requiredIncluded || categoriesPresent < 2;
+  return included.length < requiredIncluded || !(hasCulture && hasNeighborhood && hasOutdoor);
 }
 
 function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
   const publicText = publicPlanText(plan);
   const definingNames = new Set(destinationDefiningNodes(graph).slice(0, 8).map((node) => normalizeText(node.canonicalName)));
   const includedDefining = [...definingNames].filter((name) => publicText.includes(name)).length;
+  const requiredDefining = tripDaysFor(plan) <= 2 ? 1 : 3;
   const ordinaryNodes = (graph.nodes || []).filter((node) => Number(node.ordinaryLocalFacilityPenalty?.score || 0) >= 50 || (node.rejectionReasons || []).includes("ordinary-business"));
-  return ordinaryNodes.some((node) => publicText.includes(normalizeText(node.canonicalName)) && includedDefining < 3);
+  return ordinaryNodes.some((node) => publicText.includes(normalizeText(node.canonicalName)) && includedDefining < requiredDefining);
 }
 
 function hasStaleAttractionRecommendation(plan) {
