@@ -3092,8 +3092,14 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
 
 function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false) {
   const excluded = excludedIds instanceof Set ? excludedIds : new Set([excludedIds].filter(Boolean));
+  // A regional-extension place (a day-trip or overnight-extension city, often
+  // an hour or more away) must never be recommended as a meal for an ordinary
+  // day back in the primary destination -- only when the day itself is that
+  // extension region should its own local restaurants be eligible.
+  const targetIsExtensionRegion = String(regionId || "").startsWith("regional-ext-");
   const byMealFit = (place) => {
     if (!isMealCandidate(place, mealType) || excluded.has(place.id)) return false;
+    if (!targetIsExtensionRegion && (place.categories || []).includes("regional")) return false;
     const usage = mealUsage.get(place.id) || 0;
     const classification = classifyPlaceForPlanning(place);
     const maxUsage = classification.isFoodHall ? 1 : 2;
