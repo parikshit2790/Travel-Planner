@@ -2531,7 +2531,7 @@ function hasRepeatedDurationPattern(plan) {
 }
 
 function hasRepeatedMealPattern(plan) {
-  const meals = plan.days.flatMap((day) => day.scheduleItems).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
+  const meals = plan.days.flatMap((day) => day.scheduleItems).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type) && !item.structurallyUnbacked);
   const names = meals.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "")).filter(Boolean);
   const concrete = meals.filter((item) => item.mealDetails?.primaryPlaceId).length;
   const primaryByType = meals.reduce((groups, item) => {

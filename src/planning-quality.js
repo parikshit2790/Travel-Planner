@@ -576,9 +576,16 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
     && /\b(museum|gallery|art|history|culture)\b/.test(publicText)
     && /\b(neighborhood|district|market|waterfront|wharf|promenade|monument|memorial|national mall)\b/.test(publicText);
   if (publicUrbanBalance && included.length >= requiredIncluded) return false;
+  // Requiring all three categories (culture + neighborhood + outdoor) among a
+  // destination's own top signature attractions is fragile: many genuinely
+  // strong, diverse candidate sets (e.g. LA's Getty/Griffith Park/Dodger
+  // Stadium/Hollywood Walk of Fame) simply don't happen to include a single
+  // POI explicitly labeled "neighborhood" or "district" -- that's about how
+  // the destination's landmarks are typed, not evidence the plan is thin.
+  // Two of the three categories is still meaningful evidence against a
+  // single-category-dominated plan.
   const categoriesPresent = [hasCulture, hasNeighborhood, hasOutdoor].filter(Boolean).length;
-  if (tripDays <= 2) return included.length < requiredIncluded || categoriesPresent < 2;
-  return included.length < requiredIncluded || !(hasCulture && hasNeighborhood && hasOutdoor);
+  return included.length < requiredIncluded || categoriesPresent < 2;
 }
 
 function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
