@@ -878,6 +878,21 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     const dailyDriveMinutes = scheduleItems.filter((item) => item.type === "travel").reduce((sum, item) => sum + item.durationMinutes, 0);
     if (dailyDriveMinutes > input.maxDrivingMinutes) warnings.push(`Estimated driving exceeds your ${Math.round(input.maxDrivingMinutes / 60)} hour daily preference.`);
     const dailyBudget = estimateDayBudget(input, scheduleItems);
+    const contentItems = scheduleItems.filter((item) => item.type === "activity" || item.type === "evening");
+    const actualRegionIds = [...new Set(contentItems.map((item) => item.regionId).filter(Boolean))];
+    const summaryRegionNames = (actualRegionIds.length ? actualRegionIds : themeRegions).map((id) => regionName(profile, id));
+    const isLogisticsOnlyDay = contentItems.length === 0;
+    const isMultiRegionDay = actualRegionIds.length > 1;
+    const summary = isLogisticsOnlyDay
+      ? `A lighter ${input.pace.toLowerCase()} day for checkout, travel logistics, and a final meal before departure.`
+      : isMultiRegionDay
+        ? `A ${input.pace.toLowerCase()} day spanning ${summaryRegionNames.join(" and ")}, with about ${Math.round(dailyDriveMinutes)} minutes of driving between stops.`
+        : `A ${input.pace.toLowerCase()} day focused on ${summaryRegionNames.join(" and ")}, grouped to avoid unnecessary cross-city travel.`;
+    const generationReasoningSummary = isLogisticsOnlyDay
+      ? `Kept the day light for checkout and departure logistics, with time for a final meal.`
+      : isMultiRegionDay
+        ? `Selected activities across ${summaryRegionNames.join(" + ")} that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`
+        : `Grouped ${summaryRegionNames.join(" + ")} stops for route efficiency and selected activities that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`;
     return {
       id: uid("day"),
       dayNumber: index + 1,
@@ -885,7 +900,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
       title: dayTitleFor(profile, input, intelligence, region, scheduleItems, index),
       theme: dayThemeLabel(themeRegions, intelligence),
       region: region.name,
-      summary: `A ${input.pace.toLowerCase()} day grouped around ${themeRegions.map((id) => regionName(profile, id)).join(" and ")} to reduce unnecessary cross-city travel.`,
+      summary,
       weatherPlanningNote: weatherNote(scheduleItems, date),
       scheduleItems,
       backupOptions: backups,
@@ -893,7 +908,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
       dailyDriveMinutes,
       warnings,
       locked: false,
-      generationReasoningSummary: `Grouped ${themeRegions.map((id) => regionName(profile, id)).join(" + ")} stops for route efficiency and selected activities that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`
+      generationReasoningSummary
     };
   });
 }
@@ -1496,7 +1511,10 @@ function tripTravelContext(profile, input) {
   const liveDriveMinutes = routeEstimate && driving ? routeEstimate.durationMinutes : 0;
   const driveMinutes = liveDriveMinutes || (distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150);
   const routeDistance = routeEstimate?.distanceMiles || Math.round(distance);
-  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : 13 * 60 + 30;
+  const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
+  const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
+  const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
+  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : Math.min(23 * 60, 9 * 60 + flyMinutes);
   return {
     needsArrivalLogistics: Boolean(input.origin && !sameDestination),
     needsDepartureLogistics: Boolean(input.origin && !sameDestination && input.numberOfDays > 1),
@@ -1568,7 +1586,11 @@ function arrivalTravelItem(profile, input, context) {
       provider: context.routeSource,
       checkedAt: context.routeCheckedAt,
       confidence: context.routeConfidence,
-      note: context.estimateType === "provider-route-estimate" ? "Provider route estimate with a conservative arrival buffer; verify live traffic before departure." : "Conservative arrival-day estimate; verify live traffic or flight times."
+      note: context.estimateType === "provider-route-estimate"
+        ? "Provider route estimate with a conservative arrival buffer; verify live traffic before departure."
+        : context.estimateType === "coordinate-arrival-estimate"
+        ? "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking."
+        : "No distance data available; verify actual flight or drive times before booking."
     },
     replaceable: false
   };
@@ -1592,7 +1614,11 @@ function departureTravelItem(profile, input, context) {
       provider: context.routeSource,
       checkedAt: context.routeCheckedAt,
       confidence: context.routeConfidence,
-      note: context.estimateType === "provider-route-estimate" ? "Provider route estimate with a conservative return buffer; verify live traffic before departure." : "Conservative departure-day estimate; verify live traffic or flight times."
+      note: context.estimateType === "provider-route-estimate"
+        ? "Provider route estimate with a conservative return buffer; verify live traffic before departure."
+        : context.estimateType === "coordinate-arrival-estimate"
+        ? "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking."
+        : "No distance data available; verify actual flight or drive times before booking."
     },
     replaceable: false
   };

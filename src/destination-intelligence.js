@@ -197,11 +197,16 @@ export function buildDestinationArchetype(profile, input = {}, opportunities = [
 
 export function localSignificanceScore(place, profile) {
   const text = textFor(place);
+  const description = normalizeText(place.shortDescription || "");
+  const isThinResearchDescription = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
+  const isGamblingVenue = /\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/.test(text);
   let score = Number(place.priorityScore || 60);
   if (/signature|major|essential|famous|iconic|must see|must do|official tourism|hall of fame|museum|landmark|national|civil rights|aquarium|botanical|history center|historic site|historic district|olympic park|beltline|public market|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access|national park|scenic corridor|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|dollywood|the island in pigeon forge|anakeesta|skypark|ober gatlinburg|grotto falls|laurel falls|rainbow falls|abrams falls|gatlinburg trail/.test(text)) score += 18;
   if (/food hall|market|rooftop|local|neighborhood|arts district|live music/.test(text)) score += 10;
   if (/day-trip|regional|mountain|lake|waterfall|state park|scenic|coastal|beach|waterfront|cruise|kayak|paddleboard|fishing/.test(text)) score += 12;
   if (/backup|generic|area$|walk$|candidate|starter planning/.test(text)) score -= 20;
+  if (isThinResearchDescription) score -= 45;
+  if (isGamblingVenue) score -= 35;
   if (ordinaryLocalFacilityPenaltyFor(place, {}).score >= 60) score -= 28;
   if (profile.id.startsWith("generic-")) score -= 10;
   return Math.max(0, Math.round(score));
@@ -357,6 +362,8 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isHotel = has(/\b(hotel|motel|inn|suites|lodging|resort|accommodation)\b/);
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const isSensitiveOrExplicitContent = has(/\b(nude beach|nudist|clothing[- ]optional|swingers?|strip club|gentlemen s club|adult entertainment club|sex shop)\b/);
+  const isGamblingVenue = has(/\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/);
+  const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
   const breakfastSignalText = `${name} ${categoryText} ${description}`;
@@ -366,8 +373,8 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const servesDinner = (isRestaurant || isFoodHall) && !eveningOnlyFoodArea && !breakfastOrCafeFocused && (isFoodHall || has(/\b(dinner|restaurant|bistro|grill|tavern|bar|brewery|food hall|dining|kitchen|pizzeria|bbq|barbecue|seafood|steakhouse)\b/) || !has(/\b(breakfast only)\b/));
   const travelerFit = travelerFitFor(place, input, { isChildrenFocused, isFamilyFocused, isEntertainmentCenter, isBar, isPark });
   const ordinaryLocalFacilityPenalty = ordinaryLocalFacilityPenaltyFor(place, { isMuseum, isPark, isNeighborhood, isRestaurant, isFoodHall, isBar, isEntertainmentCenter, isOrdinaryBusiness });
-  const destinationSignificance = destinationSignificanceFor(place, profile, { isRestaurant, isMuseum, isPark, isNeighborhood, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, ordinaryLocalFacilityPenalty, routeScope });
-  const firstTimeVisitorValue = firstTimeVisitorValueFor(place, profile, { isRestaurant, isFoodHall, isBar, isMuseum, isPark, isNeighborhood, isFamilyFocused, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, ordinaryLocalFacilityPenalty, routeScope });
+  const destinationSignificance = destinationSignificanceFor(place, profile, { isRestaurant, isMuseum, isPark, isNeighborhood, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, isGamblingVenue, isThinResearchAttraction, ordinaryLocalFacilityPenalty, routeScope });
+  const firstTimeVisitorValue = firstTimeVisitorValueFor(place, profile, { isRestaurant, isFoodHall, isBar, isMuseum, isPark, isNeighborhood, isFamilyFocused, isEntertainmentCenter, isOrdinaryBusiness, isStaleOrClosedAttraction, isGamblingVenue, isThinResearchAttraction, ordinaryLocalFacilityPenalty, routeScope });
   const currentStatusConfidence = currentStatusConfidenceFor(place, isStaleOrClosedAttraction);
   const primaryType = primaryTypeFor({ isRestaurant, isFoodHall, isBar, isEntertainmentCenter, isChildrenFocused, isMuseum, isPark, isNeighborhood, isCity, isHotel, categories, text });
   const secondaryTypes = [...new Set([
@@ -407,6 +414,8 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isFamilyFocused,
     isAdultFocused: isBar || has(/\b(cocktail|wine|brewery|distillery|nightlife|fine dining)\b/),
     isSensitiveOrExplicitContent,
+    isGamblingVenue,
+    isThinResearchAttraction,
     isMuseum,
     isPark,
     isNeighborhood,
@@ -418,7 +427,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isOrdinaryBusiness,
     isOrdinaryLocalFacility: ordinaryLocalFacilityPenalty.score >= 60,
     isStaleOrClosedAttraction,
-    isBackupCompatible: !isOrdinaryBusiness && !isStaleOrClosedAttraction && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
+    isBackupCompatible: !isOrdinaryBusiness && !isStaleOrClosedAttraction && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !isGamblingVenue && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
     servesBreakfast,
     servesLunch,
     servesDinner,
@@ -530,6 +539,8 @@ function destinationSignificanceFor(place, profile, flags) {
   if (flags.isRestaurant && !flags.isNeighborhood) score -= 4;
   if (flags.isEntertainmentCenter && !/the island in pigeon forge|dollywood|skypark|anakeesta|ober gatlinburg/.test(text)) score -= 25;
   if (flags.isDinnerShow) score -= 20;
+  if (flags.isGamblingVenue) score -= 40;
+  if (flags.isThinResearchAttraction) score -= 55;
   if (flags.isOrdinaryBusiness) score -= 80;
   if (flags.ordinaryLocalFacilityPenalty?.score) score -= Math.round(flags.ordinaryLocalFacilityPenalty.score * 0.55);
   if (flags.isStaleOrClosedAttraction) score -= 140;
@@ -562,6 +573,8 @@ export function firstTimeVisitorValueFor(place, profile = {}, flags = {}) {
   if (flags.routeScope === "long-day-trip") score -= 10;
   if (flags.routeScope === "overnight-recommended") score -= 16;
   if (flags.isEntertainmentCenter) score -= 20;
+  if (flags.isGamblingVenue) score -= 35;
+  if (flags.isThinResearchAttraction) score -= 55;
   if (flags.isOrdinaryBusiness) score -= 80;
   if (flags.ordinaryLocalFacilityPenalty?.score) score -= flags.ordinaryLocalFacilityPenalty.score;
   if (flags.isStaleOrClosedAttraction) score -= 140;
