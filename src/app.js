@@ -297,7 +297,23 @@ function formatShortDateRange(startValue, endValue) {
   return `${shortMonthName(start.month)} ${start.day}, ${start.year}–${shortMonthName(end.month)} ${end.day}, ${end.year}`;
 }
 
+let lastRenderedViewKey = "";
+
 function render() {
+  renderView();
+  // Switching wizard steps, entering the plan view, or navigating to a
+  // static page previously left the scroll position wherever it was on the
+  // prior (often taller) page, leaving a blank gap above the new content
+  // until the user manually scrolled up. Reset scroll only on an actual view
+  // change, not on every re-render (e.g. while typing).
+  const viewKey = `${window.location.pathname}|${state.activeStep}|${state.planStatus}|${Boolean(state.plan)}`;
+  if (viewKey !== lastRenderedViewKey) {
+    lastRenderedViewKey = viewKey;
+    window.scrollTo(0, 0);
+  }
+}
+
+function renderView() {
   if (isStaticInfoRoute()) {
     renderStaticInfoPage();
     return;
@@ -1039,7 +1055,7 @@ function tripSnapshotFacts(trip, issueCount) {
 }
 
 function snapshotItem(item) {
-  return `<article class="snapshot-item ${item.real ? "real" : "empty"}">
+  return `<article class="snapshot-item ${item.real ? "real" : "empty"}" title="${esc(item.label)}: ${esc(item.value)}">
     <span aria-hidden="true">${iconSvg(item.icon)}</span>
     <div><strong>${esc(item.label)}</strong><small>${esc(item.value)}</small></div>
   </article>`;
@@ -2987,7 +3003,6 @@ async function buildTripPlanAction(name) {
       ui.toast = result.plan.generationMetadata.usesGenericDestinationProfile
         ? "Starter trip plan generated. Some destination intelligence is limited right now."
         : "Trip plan generated.";
-      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
     } else {
       state.planStatus = result.status;
       state.planError = result;

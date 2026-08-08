@@ -82,10 +82,20 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
     googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, 20),
     googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount)
   ]);
+  // Unlike the nearby search (already geo-bounded by radius), a text search
+  // like "best restaurants in X" can return loosely-related results from a
+  // different city entirely if Google's text relevance ranking is loose --
+  // seen live as a Houston result inside a Baton Rouge search. Reject any
+  // candidate too far from the resolved destination to plausibly belong to it.
+  const withinDestinationRadius = (place) => {
+    const location = placeLocation(place);
+    return !location || distanceMiles(destinationLocation, location) <= 40;
+  };
   const tourismCandidates = dedupeBy([...attractions, ...nearby], (place) => place.id)
     .filter(isTourismPlace)
+    .filter(withinDestinationRadius)
     .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a));
-  const foodCandidates = dedupeBy(restaurants, (place) => place.id).filter(isFoodPlace).slice(0, foodCandidateLimit);
+  const foodCandidates = dedupeBy(restaurants, (place) => place.id).filter(isFoodPlace).filter(withinDestinationRadius).slice(0, foodCandidateLimit);
   if (!tourismCandidates.length) {
     throw googleProviderError("INVALID_PROVIDER_RESPONSE", "Destination research did not find reliable tourism candidates.", true, 502);
   }

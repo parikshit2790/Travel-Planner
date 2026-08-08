@@ -158,6 +158,7 @@ function destinationPrompt(destinationName, trip) {
     "Create a destination profile a vacation planner can schedule directly. One short sentence per description; keep the whole response compact and fast to generate.",
     `Include 6-7 regions/neighborhoods, 14-18 places, ${foodAreaTarget} food areas, and 2-4 routes or nearby excursions.`,
     "Each region's name must be a real geographic area, neighborhood, or district (for example 'Downtown', 'South Beach', 'Uptown') -- never the name of a single attraction, museum, restaurant, or business. Day summaries and meal labels reuse this name verbatim, so an attraction name here will misleadingly appear on unrelated days.",
+    "Every place, food area, and route's regionId field must exactly equal the id of one of the regions you defined (not the region's display name, and not a new value) -- assign it to whichever region that place is actually, geographically located in. Before finalizing, re-check every regionId against your own regions list; a well-known landmark placed in the wrong region (for example a French Quarter landmark tagged with a different neighborhood's id) is a serious error.",
     "Places must mix iconic must-dos, neighborhoods, weather backups, food/market anchors, outdoor options, and nearby day trips. Prioritize destination-defining, officially significant experiences over ordinary suburban parks, farms, recreation centers, schools, offices, or generic local facilities; skip family entertainment centers, hotels, and generic search-result businesses unless explicitly requested.",
     "Food candidates must be actual named restaurants, cafes, bakeries, food halls, or bars/breweries covering breakfast, lunch, dinner, and cafes separately -- never an attraction, a neighborhood, or a generic 'area'. Do not repeat the same restaurant pair across the whole trip.",
     "Every destination type (including major cities) sits within a broader travel region. If the trip is 4+ days, include a compact regionalDestinationProfile (primaryDestination, gatewayTowns, metroOrTourismRegion, nearbyDayTrips, overnightExtensions, regionalConfidence) naming real, well-known nearby destinations worth a day trip or a one-night extension within roughly a 4-hour drive -- for example a major city's nearest mountains, coast, or a famous regional draw, not just in-city options. Also include regionalCandidateCities: an array of up to 3 of the single strongest options as plain geocodable \"City, State\" or \"City, Country\" names only (for example \"Asheville, NC\"), ranked best first -- no descriptions, just the names, so they can be looked up directly. For mountain, national-park, lake, coastal, island, wine-country, or resort destinations specifically, also name real scenic corridors and trail/waterfall places instead of using the park name as one generic activity. Do not silently add a second overnight base -- extensions are optional information for the traveler to approve.",
@@ -283,7 +284,7 @@ function normalizeRegions(value, canonicalName) {
 function normalizePlaces(value, regions) {
   const list = Array.isArray(value) ? value : [];
   return list.filter((item) => item?.name).slice(0, 36).map((item, index) => {
-    const regionId = regionIdFor(item.regionId, regions, index);
+    const regionId = regionIdFor(item.regionId, regions, index, `${item.name || ""} ${item.shortDescription || ""}`);
     const categories = strings(item.categories, 8);
     return {
       id: slug(item.id || item.name || `place-${index + 1}`),
@@ -328,7 +329,7 @@ function normalizeFoodAreas(value, regions) {
   return list.filter((item) => item?.name).slice(0, 12).map((item, index) => ({
     id: slug(item.id || item.name || `food-${index + 1}`),
     name: cleanPublicPlanningText(item.name),
-    regionId: regionIdFor(item.regionId, regions, index),
+    regionId: regionIdFor(item.regionId, regions, index, item.name || ""),
     cuisines: strings(item.cuisines, 10),
     mealTypes: strings(item.mealTypes, 5),
     budgetLevels: strings(item.budgetLevels, 5),
@@ -460,9 +461,34 @@ function destinationProfileSchema() {
   };
 }
 
-function regionIdFor(value, regions, index) {
+function regionIdFor(value, regions, index, contentText = "") {
   const id = slug(value || "");
   if (regions.some((region) => region.id === id)) return id;
+  // A place's stated regionId often doesn't exactly slug-match a region's own
+  // id field -- the model may reference a region by its descriptive name
+  // (e.g. "Garden District") while that region's id field is something else
+  // entirely. Falling straight through to an index-based fallback here
+  // silently scrambles real places into geographically wrong regions (seen
+  // live: St. Louis Cathedral, a French Quarter landmark, assigned to
+  // "garden-district"). Try matching against region names, then a loose
+  // substring match, before giving up.
+  const byName = regions.find((region) => slug(region.name) === id);
+  if (byName) return byName.id;
+  const fuzzy = value && regions.find((region) => region.id.includes(id) || id.includes(region.id) || slug(region.name).includes(id) || id.includes(slug(region.name)));
+  if (fuzzy) return fuzzy.id;
+  // Coordinates are never available here (the model has no live web access
+  // and never provides real ones), so as a last resort before an arbitrary
+  // assignment, check whether the place's own name/description names a
+  // region -- a place's description very often naturally mentions its real
+  // neighborhood even when the model's separate regionId field is wrong.
+  const text = String(contentText || "").toLowerCase();
+  if (text) {
+    const contentMatch = regions.find((region) => {
+      const regionWords = slug(region.name).split("-").filter((word) => word.length > 3);
+      return regionWords.length > 0 && regionWords.every((word) => text.includes(word));
+    });
+    if (contentMatch) return contentMatch.id;
+  }
   return regions[index % regions.length]?.id || regions[0]?.id || "central-area";
 }
 

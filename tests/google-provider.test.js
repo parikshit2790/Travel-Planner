@@ -174,25 +174,30 @@ function predictionFor(input) {
   return { placePrediction: { placeId: `place-${slug(name)}`, text: { text: name }, structuredFormat: { mainText: { text: name.split(",")[0] } }, types: ["locality"] } };
 }
 
+function cityCoordinatesFor(id) {
+  const text = String(id || "").toLowerCase();
+  if (text.includes("austin")) return ["Austin", "Texas", "United States", 30.2672, -97.7431];
+  if (text.includes("houston")) return ["Houston", "Texas", "United States", 29.7604, -95.3698];
+  if (text.includes("charlotte")) return ["Charlotte", "North Carolina", "United States", 35.2271, -80.8431];
+  if (text.includes("dallas")) return ["Dallas", "Texas", "United States", 32.7767, -96.797];
+  if (text.includes("detroit")) return ["Detroit", "Michigan", "United States", 42.3314, -83.0458];
+  return ["Raleigh", "North Carolina", "United States", 35.7796, -78.6382];
+}
+
 function placeForId(id) {
-  const city = id.includes("austin") ? ["Austin", "Texas", "United States", 30.2672, -97.7431]
-    : id.includes("houston") ? ["Houston", "Texas", "United States", 29.7604, -95.3698]
-    : id.includes("charlotte") ? ["Charlotte", "North Carolina", "United States", 35.2271, -80.8431]
-    : id.includes("dallas") ? ["Dallas", "Texas", "United States", 32.7767, -96.797]
-    : id.includes("detroit") ? ["Detroit", "Michigan", "United States", 42.3314, -83.0458]
-    : ["Raleigh", "North Carolina", "United States", 35.7796, -78.6382];
+  const city = cityCoordinatesFor(id);
   return googlePlace(city[0], city[1], city[2], city[3], city[4], ["locality"], 4.6, 1200);
 }
 
 function tourismPlaces(query) {
-  const city = canonicalFor(query).split(",")[0];
+  const [city, state, country, lat, lng] = cityCoordinatesFor(canonicalFor(query));
   return [
-    googlePlace(`${city} Museum of Art`, "North Carolina", "United States", 35.78, -78.64, ["museum", "tourist_attraction"], 4.8, 5300),
-    googlePlace(`${city} Historic District`, "North Carolina", "United States", 35.79, -78.65, ["historical_landmark", "tourist_attraction"], 4.7, 2400),
-    googlePlace(`${city} Botanical Garden`, "North Carolina", "United States", 35.8, -78.66, ["botanical_garden", "park", "tourist_attraction"], 4.6, 1900),
-    googlePlace(`${city} Food Hall`, "North Carolina", "United States", 35.81, -78.67, ["restaurant", "cafe"], 4.5, 1300),
-    googlePlace(`${city} Performing Arts Center`, "North Carolina", "United States", 35.82, -78.68, ["performing_arts_theater", "tourist_attraction"], 4.6, 1500),
-    googlePlace(`${city} Nearby State Park`, "North Carolina", "United States", 36.05, -78.9, ["park", "tourist_attraction"], 4.8, 3000)
+    googlePlace(`${city} Museum of Art`, state, country, lat + 0.01, lng + 0.01, ["museum", "tourist_attraction"], 4.8, 5300),
+    googlePlace(`${city} Historic District`, state, country, lat + 0.02, lng + 0.02, ["historical_landmark", "tourist_attraction"], 4.7, 2400),
+    googlePlace(`${city} Botanical Garden`, state, country, lat + 0.03, lng + 0.03, ["botanical_garden", "park", "tourist_attraction"], 4.6, 1900),
+    googlePlace(`${city} Food Hall`, state, country, lat + 0.04, lng + 0.04, ["restaurant", "cafe"], 4.5, 1300),
+    googlePlace(`${city} Performing Arts Center`, state, country, lat + 0.05, lng + 0.05, ["performing_arts_theater", "tourist_attraction"], 4.6, 1500),
+    googlePlace(`${city} Nearby State Park`, state, country, lat + 0.25, lng + 0.25, ["park", "tourist_attraction"], 4.8, 3000)
   ];
 }
 
