@@ -75,12 +75,21 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
   // restaurants than a fixed small candidate pool can sustain -- scale the
   // restaurant fetch and candidate count with trip length.
   const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
-  const restaurantFetchCount = tripDays >= 7 ? 20 : 10;
-  const foodCandidateLimit = tripDays >= 7 ? 16 : 8;
-  const [attractions, nearby, restaurants] = await Promise.all([
+  const restaurantFetchCount = tripDays >= 7 ? 20 : 14;
+  // A single "best restaurants...food halls" query is dominated by generic,
+  // broadly-touristy results (food courts, malls, chains) because that
+  // framing is exactly what surfaces mainstream Google results. A second
+  // query framed around local/authentic/neighborhood dining pulls a
+  // genuinely different slice of Google's index -- this is what actually
+  // brings in cultural and neighborhood-specific restaurants, not just a
+  // bigger number of the same kind of place.
+  const localRestaurantFetchCount = tripDays >= 7 ? 16 : 12;
+  const foodCandidateLimit = tripDays >= 7 ? 24 : 16;
+  const [attractions, nearby, restaurants, localRestaurants] = await Promise.all([
     googleTextSearch(`best tourist attractions and museums in ${destinationName}`, config, placeFieldMask(), 20),
     googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, 20),
-    googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount)
+    googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount),
+    googleTextSearch(`local authentic restaurants and neighborhood eateries in ${destinationName}`, config, placeFieldMask(), localRestaurantFetchCount)
   ]);
   // Unlike the nearby search (already geo-bounded by radius), a text search
   // like "best restaurants in X" can return loosely-related results from a
@@ -95,7 +104,11 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
     .filter(isTourismPlace)
     .filter(withinDestinationRadius)
     .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a));
-  const foodCandidates = dedupeBy(restaurants, (place) => place.id).filter(isFoodPlace).filter(withinDestinationRadius).slice(0, foodCandidateLimit);
+  const foodCandidates = dedupeBy([...restaurants, ...localRestaurants], (place) => place.id)
+    .filter(isFoodPlace)
+    .filter(withinDestinationRadius)
+    .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))
+    .slice(0, foodCandidateLimit);
   if (!tourismCandidates.length) {
     throw googleProviderError("INVALID_PROVIDER_RESPONSE", "Destination research did not find reliable tourism candidates.", true, 502);
   }
@@ -593,9 +606,30 @@ function googlePlaceScore(place) {
   return rating * 15 + Math.min(35, count / 75) + tourismBoost;
 }
 
+const GENERIC_PLACE_TYPES = new Set([
+  "restaurant", "food", "point_of_interest", "establishment", "food_store",
+  "meal_takeaway", "meal_delivery", "tourist_attraction", "store", "landmark"
+]);
+
+function specificTypeLabel(place) {
+  const candidates = [place?.primaryType, ...(place?.types || [])].filter(Boolean);
+  const specific = candidates.find((type) => !GENERIC_PLACE_TYPES.has(type));
+  return specific ? titleCase(specific).toLowerCase() : "";
+}
+
 function googleDescription(place, destinationName, category) {
   const editorial = place?.editorialSummary?.text;
   if (editorial) return `${editorial} Verify current hours, tickets, and access before travel.`;
+  const name = displayText(place.displayName);
+  const specificType = specificTypeLabel(place);
+  const rating = Number(place?.rating || 0);
+  const reviewCount = Number(place?.userRatingCount || 0);
+  const ratingClause = rating >= 3.5 && reviewCount >= 15
+    ? `, rated ${rating.toFixed(1)} from ${reviewCount >= 1000 ? `${Math.round(reviewCount / 100) / 10}k+` : `${reviewCount}+`} Google reviews`
+    : "";
+  if (specificType) {
+    return `${name} is a ${specificType} in ${destinationName}${ratingClause}. Verify current hours, menu, and availability directly before relying on this pick.`;
+  }
   return `${displayText(place.displayName)} is a ${titleCase(category)} visitor stop for ${destinationName}. Verify current hours, tickets, access, and availability before travel.`;
 }
 

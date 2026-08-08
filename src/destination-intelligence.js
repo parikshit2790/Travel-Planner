@@ -198,7 +198,7 @@ export function buildDestinationArchetype(profile, input = {}, opportunities = [
 export function localSignificanceScore(place, profile) {
   const text = textFor(place);
   const description = normalizeText(place.shortDescription || "");
-  const isThinResearchDescription = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
+  const isThinResearchDescription = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isGamblingVenue = /\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/.test(text);
   let score = Number(place.priorityScore || 60);
   if (/signature|major|essential|famous|iconic|must see|must do|official tourism|hall of fame|museum|landmark|national|civil rights|aquarium|botanical|history center|historic site|historic district|olympic park|beltline|public market|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access|national park|scenic corridor|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|dollywood|the island in pigeon forge|anakeesta|skypark|ober gatlinburg|grotto falls|laurel falls|rainbow falls|abrams falls|gatlinburg trail/.test(text)) score += 18;
@@ -363,7 +363,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const isSensitiveOrExplicitContent = has(/\b(nude beach|nudist|clothing[- ]optional|swingers?|strip club|gentlemen s club|adult entertainment club|sex shop)\b/);
   const isGamblingVenue = has(/\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/);
-  const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
+  const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
   const breakfastSignalText = `${name} ${categoryText} ${description}`;
