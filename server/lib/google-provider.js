@@ -297,6 +297,100 @@ export async function resolveDestination(destination, config) {
   return locations[0] || null;
 }
 
+// AI-sourced destination research (openai-destination-provider.js) discovers
+// real, well-chosen places and neighborhoods but has no access to a mapping
+// service, so it cannot supply trustworthy coordinates -- a language model
+// asked for latitude/longitude is a guess, not a lookup. Downstream routing
+// math (estimateTravel) silently falls back to region-center coordinates,
+// or worse to a near-zero clamped distance, whenever a place's own
+// coordinates are missing. This grounds each AI-sourced place against real
+// Google Places data without changing which places were chosen or how
+// they're described -- only their physical location gets filled in.
+export async function groundPlacesWithCoordinates(profile, destinationName, config) {
+  const places = Array.isArray(profile?.places) ? profile.places : [];
+  const hasCoordinates = (value) => Number.isFinite(value?.lat) && Number.isFinite(value?.lng);
+  const needsGrounding = places.filter((place) => !hasCoordinates(place.coordinates));
+  if (!needsGrounding.length) return profile;
+  const lightFieldMask = "places.id,places.location";
+  const results = await Promise.allSettled(
+    needsGrounding.map((place) => googleTextSearch(`${place.name}, ${destinationName}`, config, lightFieldMask, 1))
+  );
+  needsGrounding.forEach((place, index) => {
+    const outcome = results[index];
+    if (outcome.status !== "fulfilled" || !outcome.value?.length) return;
+    const location = placeLocation(outcome.value[0]);
+    if (location) place.coordinates = location;
+  });
+  (profile.regions || []).forEach((region) => {
+    if (hasCoordinates(region.centerCoordinates)) return;
+    const grounded = places.filter((place) => place.regionId === region.id && hasCoordinates(place.coordinates));
+    if (!grounded.length) return;
+    region.centerCoordinates = {
+      lat: grounded.reduce((sum, place) => sum + place.coordinates.lat, 0) / grounded.length,
+      lng: grounded.reduce((sum, place) => sum + place.coordinates.lng, 0) / grounded.length
+    };
+  });
+  return profile;
+}
+
+// AI destination research asks the model to invent a small, fixed number of
+// food areas (4-6 for a typical trip) with no grounding at all, which is the
+// same "too few, too generic" pattern already fixed for the Google-primary
+// path -- just never applied here since this path only runs when OpenAI
+// research is primary. Supplements (never replaces) the AI-chosen food
+// picks with real, named restaurants from Google, deduped against what the
+// AI already found and assigned to the nearest existing (now-grounded)
+// region by real distance.
+export async function supplementFoodCandidates(profile, destinationName, tripDays, config) {
+  const regions = Array.isArray(profile?.regions) ? profile.regions : [];
+  const existingPlaces = Array.isArray(profile?.places) ? profile.places : [];
+  const hasCoordinates = (value) => Number.isFinite(value?.lat) && Number.isFinite(value?.lng);
+  const destinationLocation = regions.map((region) => region.centerCoordinates).find(hasCoordinates)
+    || existingPlaces.map((place) => place.coordinates).find(hasCoordinates);
+  if (!destinationLocation || !regions.length) return profile;
+  const fetchCount = tripDays >= 7 ? 16 : 12;
+  const localFetchCount = tripDays >= 7 ? 14 : 10;
+  const [restaurants, localRestaurants] = await Promise.all([
+    googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), fetchCount),
+    googleTextSearch(`local authentic restaurants and neighborhood eateries in ${destinationName}`, config, placeFieldMask(), localFetchCount)
+  ]);
+  const existingNames = new Set(existingPlaces.map((place) => normalizePlaceNameForDedupe(place.name)));
+  const withinDestinationRadius = (place) => {
+    const location = placeLocation(place);
+    return !location || distanceMiles(destinationLocation, location) <= 40;
+  };
+  const candidates = dedupeBy([...restaurants, ...localRestaurants], (place) => place.id)
+    .filter(isFoodPlace)
+    .filter(withinDestinationRadius)
+    .filter((place) => !existingNames.has(normalizePlaceNameForDedupe(displayText(place.displayName))))
+    .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))
+    .slice(0, tripDays >= 7 ? 14 : 10);
+  if (!candidates.length) return profile;
+  const nearestRegionFor = (place) => {
+    const location = placeLocation(place);
+    if (!location) return regions[0];
+    let best = regions[0];
+    let bestDistance = Infinity;
+    for (const region of regions) {
+      if (!hasCoordinates(region.centerCoordinates)) continue;
+      const distance = distanceMiles(region.centerCoordinates, location);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = region;
+      }
+    }
+    return best;
+  };
+  const startIndex = existingPlaces.length;
+  const supplementedPlaces = candidates.map((place, index) => profilePlaceFromGooglePlace(place, nearestRegionFor(place), destinationName, startIndex + index));
+  profile.places = [...existingPlaces, ...supplementedPlaces];
+  return profile;
+}
+
+function normalizePlaceNameForDedupe(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 async function googlePlaceDetails(placeId, config) {
   return googlePlacesRequest(`/places/${encodeURIComponent(placeId)}`, {
     config,

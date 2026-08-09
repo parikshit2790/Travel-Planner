@@ -1257,10 +1257,14 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
   }
   let cursor = activityStart;
+  // On a long-drive arrival day, dinner comes first (a tired traveler eats,
+  // then maybe takes a short walk -- not the other way around), so the
+  // single evening-friendly activity is handled separately below instead of
+  // through the normal pre-dinner activity loop.
   const dayPlaces = isDepartureDay
     ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1)
     : isArrivalDay
-      ? places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1)
+      ? (longArrivalDrive ? [] : places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1))
       : places;
   let previousScheduledPlace = null;
   dayPlaces.forEach((place, index) => {
@@ -1288,32 +1292,61 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
-  if (!isDepartureDay && input.pace !== "Packed") {
+  // A long-drive arrival day is already at or past a reasonable dinner hour
+  // by the time check-in and the single evening-friendly activity finish;
+  // a separate "reset and free time" block on top of that just pushes
+  // dinner (and anything after it) later for no reason.
+  if (!isDepartureDay && !longArrivalDrive && input.pace !== "Packed") {
     items.push(simpleItem("freeTime", afterActivities, input.pace === "Relaxed" ? 90 : 60, "Reset and free time", "A buffer window to rest, freshen up, or handle traffic without compressing dinner."));
   }
   const dinnerRegion = places.at(-1)?.regionId || firstRegion;
   if (isDepartureDay) {
     items.push(simpleItem("lodging", 10 * 60, 30, "Hotel checkout", "Check out, load bags, and keep the final day lighter so the return trip is not rushed."));
-    items.push(departureTravelItem(profile, input, travelContext));
-    const returnDinnerStart = Math.max(constraints.dinnerMinutes, departureTravelItem(profile, input, travelContext).endTimeMinutes + 30);
-    addMeal(items, "dinner", returnDinnerStart, input.pace === "Relaxed" ? 90 : 75, `${input.origin || "Return city"} dinner after return`, {
-      primary: `Dinner near ${input.origin || "your return area"}`,
-      secondary: "Choose a restaurant close to the final arrival point",
-      text: `After the return trip, choose dinner near ${input.origin || "the final arrival point"} and keep the evening close to where you arrive.`,
-      cuisine: "Flexible",
-      price: moneyRange(mealCost(input, "dinner").low, mealCost(input, "dinner").high),
-      reservation: "Keep this flexible unless you already know your arrival time."
-    }, "", input, constraints, null, true);
+    const departureItem = departureTravelItem(profile, input, travelContext);
+    items.push(departureItem);
+    // A long return drive that already lands late in the evening should end
+    // the trip at arrival, not force a generic "dinner after return" block
+    // that can land near or after midnight.
+    const returnDinnerCutoff = 21 * 60 + 30;
+    if (departureItem.endTimeMinutes < returnDinnerCutoff) {
+      const returnDinnerStart = Math.max(constraints.dinnerMinutes, departureItem.endTimeMinutes + 30);
+      addMeal(items, "dinner", returnDinnerStart, input.pace === "Relaxed" ? 90 : 75, `${input.origin || "Return city"} dinner after return`, {
+        primary: `Dinner near ${input.origin || "your return area"}`,
+        secondary: "Choose a restaurant close to the final arrival point",
+        text: `After the return trip, choose dinner near ${input.origin || "the final arrival point"} and keep the evening close to where you arrive.`,
+        cuisine: "Flexible",
+        price: moneyRange(mealCost(input, "dinner").low, mealCost(input, "dinner").high),
+        reservation: "Keep this flexible unless you already know your arrival time."
+      }, "", input, constraints, null, true);
+    }
   } else {
-    addMeal(items, "dinner", constraints.dinnerMinutes, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1)), dinnerRegion, input, constraints, mealUsage);
-    const eveningStart = constraints.dinnerMinutes + (input.pace === "Relaxed" ? 105 : 90);
-    const usedActivityIds = new Set([
-      ...dayPlaces.map((place) => place.id),
-      ...items.map((item) => item.placeId).filter(Boolean)
-    ]);
-    const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds, eveningUsage);
-    if (evening?.placeId) eveningUsage.set(evening.placeId, (eveningUsage.get(evening.placeId) || 0) + 1);
-    if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
+    const dinnerStart = Math.max(constraints.dinnerMinutes, cursor);
+    addMeal(items, "dinner", dinnerStart, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1)), dinnerRegion, input, constraints, mealUsage);
+    // Arrival day already gets at most one light evening-friendly activity
+    // via dayPlaces above (or none, on a long-drive day). Stacking a second,
+    // independent evening block on top -- blind to how late the day already
+    // ran -- is what produces post-midnight sightseeing after a long drive.
+    if (!longArrivalDrive) {
+      const eveningStart = dinnerStart + (input.pace === "Relaxed" ? 105 : 90);
+      const usedActivityIds = new Set([
+        ...dayPlaces.map((place) => place.id),
+        ...items.map((item) => item.placeId).filter(Boolean)
+      ]);
+      const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds, eveningUsage);
+      if (evening?.placeId) eveningUsage.set(evening.placeId, (eveningUsage.get(evening.placeId) || 0) + 1);
+      if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
+    } else if (isArrivalDay) {
+      // A tired traveler eats first; only add a short optional walk after
+      // dinner, and only if it can realistically finish at a reasonable
+      // hour -- never stack a second full evening outing on top of dinner
+      // after a drive this long.
+      const walkPlace = places.find((place) => isArrivalEveningFriendly(place));
+      const walkStart = dinnerStart + (input.pace === "Relaxed" ? 90 : 75) + 20;
+      if (walkPlace && walkStart <= 21 * 60) {
+        const walkActivity = activityItem(walkPlace, walkStart, constraints, 0);
+        if (walkActivity.endTimeMinutes <= 22 * 60) items.push(walkActivity);
+      }
+    }
   }
   return sortAndFormat(items);
 }

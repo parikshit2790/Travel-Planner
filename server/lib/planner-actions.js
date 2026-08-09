@@ -2,7 +2,7 @@ import { registerGeneratedDestinationProfile } from "../../src/destination-data.
 import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
-import { discoverRegionalExtensions, googleDestinationResearch, googleRouteEstimate, resolveDestination } from "./google-provider.js";
+import { discoverRegionalExtensions, googleDestinationResearch, googleRouteEstimate, groundPlacesWithCoordinates, resolveDestination, supplementFoodCandidates } from "./google-provider.js";
 import { hasMockDestinationData, mockDestinationResearch, mockRouteEstimate } from "./mock-provider.js";
 import { openAiDestinationResearch } from "./openai-destination-provider.js";
 import { openRouteServiceDestinationResearch, openRouteServiceRouteEstimate } from "./openrouteservice-provider.js";
@@ -257,6 +257,20 @@ async function researchDestination(destination, trip, config) {
   if (config.aiProvider === "openai" && config.aiApiKey) {
     try {
       profile = await openAiDestinationResearch(destination, trip, config);
+      const hasGoogleAccess = Boolean(config.googleMapsApiKey || config.placeApiKey);
+      if (profile && hasGoogleAccess) {
+        try {
+          profile = await groundPlacesWithCoordinates(profile, profile.canonicalName || destination, config);
+        } catch (error) {
+          console.warn("[RouteMosaic planner] Coordinate grounding failed, continuing with ungrounded profile", JSON.stringify({ code: error?.code || "COORDINATE_GROUNDING_FAILED", destination: canonicalLogName(destination) }));
+        }
+        try {
+          const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
+          profile = await supplementFoodCandidates(profile, profile.canonicalName || destination, tripDays, config);
+        } catch (error) {
+          console.warn("[RouteMosaic planner] Food candidate supplement failed, continuing with AI-only food picks", JSON.stringify({ code: error?.code || "FOOD_SUPPLEMENT_FAILED", destination: canonicalLogName(destination) }));
+        }
+      }
     } catch (error) {
       if (!config.placeProvider || config.placeProvider === "mock") throw error;
       console.warn("[RouteMosaic planner] AI destination research fallback", JSON.stringify({ code: error?.code || "AI_DESTINATION_RESEARCH_FAILED", destination: canonicalLogName(destination) }));
