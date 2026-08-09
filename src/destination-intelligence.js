@@ -427,7 +427,11 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isOrdinaryBusiness,
     isOrdinaryLocalFacility: ordinaryLocalFacilityPenalty.score >= 60,
     isStaleOrClosedAttraction,
-    isBackupCompatible: !isOrdinaryBusiness && !isStaleOrClosedAttraction && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !isGamblingVenue && !["long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
+    // A meal venue is not a valid backup for a sightseeing activity (only
+    // for another meal), and a genuine regional/day-trip destination -- even
+    // an "easy" one -- is a substantial outing on its own, not a quick
+    // stand-in for a local activity that fell through.
+    isBackupCompatible: !isOrdinaryBusiness && !isStaleOrClosedAttraction && !isChildrenFocused && !isEntertainmentCenter && !isDinnerShow && !isGamblingVenue && !isRestaurant && !isFoodHall && !["easy-day-trip", "long-day-trip", "overnight-recommended", "impractical"].includes(routeScope),
     servesBreakfast,
     servesLunch,
     servesDinner,

@@ -1711,7 +1711,13 @@ function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityI
   const candidates = profile.places
     .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
     .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
-    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue)
+    // A restaurant tagged "evening" (meaning it's a good dinner spot) trips
+    // the isEveningAnchor keyword match, which would schedule it as a
+    // standalone 90-minute sightseeing block right after dinner instead of
+    // being the meal itself. Still allow a bar/restaurant combo through via
+    // isBar, since that's a legitimate nightlife stop, not a meal masquerading
+    // as an activity.
+    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue && !((classification.isRestaurant || classification.isFoodHall) && !classification.isBar))
     .filter(({ place, classification }) => Number(place.typicalDurationMinutes || 0) < 150 || classification.isBoardwalk || classification.isBeachOrWaterfront || classification.isBar || /evening|nightlife|dessert|rooftop|dinner|promenade|district|walk/i.test(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`))
     .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
     .sort((a, b) => {
@@ -3126,10 +3132,34 @@ function mealTitle(profile, regionId, mealType) {
   return `${region} dinner`;
 }
 
+const CUISINE_KEYWORDS = [
+  "french", "italian", "mediterranean", "mexican", "chinese", "japanese", "indian", "thai",
+  "vietnamese", "spanish", "greek", "korean", "cuban", "caribbean", "southern", "seafood",
+  "steakhouse", "barbecue", "bbq", "pizza", "sushi", "peruvian", "ethiopian", "lebanese",
+  "moroccan", "turkish", "german", "irish", "fusion", "tapas", "ramen", "dim sum",
+  "brazilian", "argentine", "cajun", "creole", "farm to table", "vegan", "vegetarian",
+  "gastropub", "steak", "bakery", "bistro", "brasserie", "trattoria", "cantina"
+];
+
+function cuisineFromPlace(place) {
+  if (!place) return "";
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return CUISINE_KEYWORDS.find((keyword) => new RegExp(`\\b${keyword}\\b`).test(text)) || "";
+}
+
 function mealRecommendation(profile, input, regionId, mealType, mealUsage = new Map(), anchorPlace = null) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
-  const cuisine = (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item)))) || (input.food.cuisine || [])[0] || "local";
   const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, false, anchorPlace) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true, anchorPlace);
+  // The selected restaurant's own real cuisine (from its name/description/
+  // Google place types) is a much stronger signal than the traveler's
+  // stated cuisine interest, which is often unset -- falling back straight
+  // to "local" regardless of what the venue actually serves is why a French
+  // bistro or a Mediterranean restaurant both showed up as "Cuisine fit:
+  // Local" even after real, diverse restaurants were being selected.
+  const cuisine = cuisineFromPlace(primaryPlace)
+    || (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item))))
+    || (input.food.cuisine || [])[0]
+    || "local";
   const excluded = new Set([primaryPlace?.id].filter(Boolean));
   const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true, anchorPlace) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true, anchorPlace);
   const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
