@@ -198,10 +198,10 @@ export function buildDestinationArchetype(profile, input = {}, opportunities = [
 export function localSignificanceScore(place, profile) {
   const text = textFor(place);
   const description = normalizeText(place.shortDescription || "");
-  const isThinResearchDescription = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
+  const isThinResearchDescription = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isGamblingVenue = /\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/.test(text);
   let score = Number(place.priorityScore || 60);
-  if (/signature|major|essential|famous|iconic|must see|must do|official tourism|hall of fame|museum|landmark|national|civil rights|aquarium|botanical|history center|historic site|historic district|olympic park|beltline|public market|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access|national park|scenic corridor|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|dollywood|the island in pigeon forge|anakeesta|skypark|ober gatlinburg|grotto falls|laurel falls|rainbow falls|abrams falls|gatlinburg trail/.test(text)) score += 18;
+  if (/signature|major|essential|famous|iconic|must see|must do|official tourism|tourist attraction|historical landmark|cultural landmark|hall of fame|museum|landmark|national|civil rights|aquarium|botanical|history center|historic site|historic district|olympic park|beltline|public market|whitewater|stockyards|biltmore|parkway|boardwalk|skywheel|marshwalk|barefoot landing|broadway at the beach|brookgreen|huntington beach|cherry grove|oceanfront|beach access|national park|scenic corridor|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|dollywood|the island in pigeon forge|anakeesta|skypark|ober gatlinburg|grotto falls|laurel falls|rainbow falls|abrams falls|gatlinburg trail/.test(text)) score += 18;
   if (/food hall|market|rooftop|local|neighborhood|arts district|live music/.test(text)) score += 10;
   if (/day-trip|regional|mountain|lake|waterfall|state park|scenic|coastal|beach|waterfront|cruise|kayak|paddleboard|fishing/.test(text)) score += 12;
   if (/backup|generic|area$|walk$|candidate|starter planning/.test(text)) score -= 20;
@@ -363,7 +363,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const isSensitiveOrExplicitContent = has(/\b(nude beach|nudist|clothing[- ]optional|swingers?|strip club|gentlemen s club|adult entertainment club|sex shop)\b/);
   const isGamblingVenue = has(/\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/);
-  const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 100;
+  const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
   const breakfastSignalText = `${name} ${categoryText} ${description}`;
@@ -521,7 +521,7 @@ function destinationSignificanceFor(place, profile, flags) {
   const text = textFor(place);
   let score = 0;
   const reasons = [];
-  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|official tourism|historic|presidential|civil rights|aquarium|art museum|natural sciences|history museum|history center|botanical|university|warehouse district|city market|public market|olympic park|beltline|national historical park|historic district|memorial|stockyards|sixth floor|duke|unc|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|barefoot landing|broadway at the beach|oceanfront|beach access|cherry grove/.test(text)) {
+  if (/national|state capitol|capitol|major|signature|iconic|must see|must do|official tourism|tourist attraction|historical landmark|cultural landmark|historic|presidential|civil rights|aquarium|art museum|natural sciences|history museum|history center|botanical|university|warehouse district|city market|public market|olympic park|beltline|national historical park|historic district|memorial|stockyards|sixth floor|duke|unc|boardwalk|skywheel|marshwalk|brookgreen|huntington beach|barefoot landing|broadway at the beach|oceanfront|beach access|cherry grove/.test(text)) {
     score += 26;
     reasons.push("Recognized as a destination-significant anchor.");
   }
@@ -559,7 +559,13 @@ export function firstTimeVisitorValueFor(place, profile = {}, flags = {}) {
     score += amount;
     if (reason) reasons.push(reason);
   };
-  if (/official tourism|visitor bureau|destination guide|must see|must do|first time|top attraction|iconic|signature|essential|famous|landmark/.test(text)) add(30, "Prominent first-time or official-tourism signal.");
+  // "tourist attraction"/"historical landmark"/"cultural landmark" are Google's
+  // own structural place-type tags (always present when Google classifies a
+  // place that way), unlike editorial summary text which is frequently absent
+  // or inconsistent between identical live requests. Trusting these keeps
+  // scoring stable across API calls instead of swinging on whether an
+  // editorial blurb happened to be present this time.
+  if (/official tourism|visitor bureau|destination guide|must see|must do|first time|top attraction|tourist attraction|historical landmark|cultural landmark|iconic|signature|essential|famous|landmark/.test(text)) add(30, "Prominent first-time or official-tourism signal.");
   if (/national|national historical park|national historic site|presidential|civil rights|human rights|memorial|historic district|world class|one of the largest|world renowned/.test(text)) add(26, "Local or national significance signal.");
   if (/aquarium|botanical garden|art museum|history center|science center|olympic park|public market|food hall|market|beltline|riverwalk|boardwalk|stockyards|observatory|viewpoint|cathedral|palace|castle|monument/.test(text)) add(20, "Destination-defining attraction type.");
   if (/national park|scenic corridor|newfound gap|kuwohi|clingsmans dome|cades cove|roaring fork|little river road|foothills parkway|gatlinburg trail|grotto falls|laurel falls|rainbow falls|abrams falls|dollywood|the island in pigeon forge|anakeesta|skypark|ober gatlinburg/.test(text)) add(34, "Region-defining park, scenic, trail, or entertainment signal.");
