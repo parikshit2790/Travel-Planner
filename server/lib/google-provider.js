@@ -544,47 +544,180 @@ async function resolveRouteCoordinates(value, config) {
   return location ? { lat: location.latitude, lng: location.longitude } : null;
 }
 
+// Places must be grouped by where they actually are, not by what category
+// Google assigns them -- a category bucket like "culture-area" absorbs every
+// museum and landmark city-wide regardless of neighborhood, then gets named
+// after whichever one happened to match first (e.g. a Smithsonian annex near
+// the airport becoming the label for a downtown history museum's "region").
+// This clusters places by real coordinates instead, so each region is an
+// actual walkable/drivable area, and names it after its own highest-scored
+// member -- meaningful now because that member is genuinely representative
+// of everything grouped with it.
+const NEARBY_THRESHOLD_MILES = 18;
+
 function buildGoogleRegions(destinationLocation, places) {
   const city = destinationLocation.canonicalName.split(",")[0].trim() || "Destination";
-  const center = {
+  const corePlaces = places.filter((place) => {
+    const location = placeLocation(place);
+    return !location || distanceMiles(destinationLocation, location) < NEARBY_THRESHOLD_MILES;
+  });
+  const nearbyPlaces = places.filter((place) => !corePlaces.includes(place));
+  // Farthest-point k-means seeding claims true geographic outliers (a single
+  // estate or park miles from anything else) as cluster seeds first,
+  // regardless of how high k is set -- leaving too few remaining seeds to
+  // subdivide a genuinely dense downtown core (DC's Mall, Capitol Hill, Penn
+  // Quarter, Georgetown, etc. are all within a few miles of each other) into
+  // separate walkable areas. Pull isolated places out first so they each get
+  // their own accurately-named region without consuming the core's budget,
+  // then cluster only the dense remainder with a dedicated budget.
+  const isolationThresholdMiles = 3;
+  const denseAndIsolated = splitDenseAndIsolated(corePlaces, isolationThresholdMiles);
+  const denseClusterCount = Math.max(3, Math.min(7, Math.round(denseAndIsolated.dense.length / 6) || 3));
+  const denseClusters = denseAndIsolated.dense.length ? balancedGeographicClusters(denseAndIsolated.dense, denseClusterCount) : [];
+  const clusters = [
+    ...denseClusters,
+    ...denseAndIsolated.isolated.map((place) => [place])
+  ].filter((members) => members.length);
+  const regions = clusters.map((members) => {
+    const representative = [...members].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
+    const locations = members.map(placeLocation).filter(Boolean);
+    const center = locations.length
+      ? { lat: locations.reduce((sum, l) => sum + l.lat, 0) / locations.length, lng: locations.reduce((sum, l) => sum + l.lng, 0) / locations.length }
+      : { lat: destinationLocation.latitude, lng: destinationLocation.longitude };
+    return {
+      id: slug(`area-${displayText(representative?.displayName) || city}`),
+      name: regionNameFromPlace(city, representative, "area"),
+      summary: `Cluster of nearby visitor stops around ${displayText(representative?.displayName) || city}. Verify exact hours, tickets, access, and travel time before finalizing.`,
+      centerCoordinates: center,
+      tags: ["geographic-cluster"],
+      neighboringRegionIds: [],
+      typicalTravelMinutesToRegions: {}
+    };
+  }).sort((a, b) => distanceMiles(destinationLocation, a.centerCoordinates) - distanceMiles(destinationLocation, b.centerCoordinates));
+  if (regions.length) regions[0].id = "central-area";
+  if (nearbyPlaces.length) {
+    const representative = [...nearbyPlaces].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
+    const location = placeLocation(representative) || { lat: destinationLocation.latitude, lng: destinationLocation.longitude };
+    regions.push({
+      id: "nearby-region",
+      name: regionNameFromPlace(city, representative, "regional side trip"),
+      summary: `Nearby day-trip or regional destinations outside the core ${city} area.`,
+      centerCoordinates: location,
+      tags: ["nearby", "day-trip", "scenic"],
+      neighboringRegionIds: [],
+      typicalTravelMinutesToRegions: {}
+    });
+  }
+  regions.forEach((region) => {
+    region.neighboringRegionIds = regions.filter((other) => other.id !== region.id).map((other) => other.id);
+  });
+  return regions.length ? regions : [{
     id: "central-area",
     name: `${city} orientation district`,
     summary: `Primary orientation area around ${destinationLocation.canonicalName}.`,
     centerCoordinates: { lat: destinationLocation.latitude, lng: destinationLocation.longitude },
     tags: ["central", "orientation"],
-    neighboringRegionIds: ["culture-area", "food-area", "nearby-region"],
+    neighboringRegionIds: [],
     typicalTravelMinutesToRegions: {}
-  };
-  const culturePlace = places.find((place) => hasAnyType(place, ["museum", "historical_landmark", "cultural_landmark", "art_gallery", "tourist_attraction"])) || places[0];
-  const naturePlace = places.find((place) => hasAnyType(place, ["park", "national_park", "botanical_garden", "hiking_area"])) || places[1] || places[0];
-  const foodPlace = places.find(isFoodPlace) || places[2] || places[0];
-  const nearbyPlace = places.find((place) => distanceMiles(destinationLocation, placeLocation(place)) >= 18) || places[3] || places[0];
-  return [
-    center,
-    regionFromGooglePlace("culture-area", regionNameFromPlace(city, culturePlace, "arts and history"), culturePlace, ["culture", "landmark"], ["central-area", "food-area"]),
-    regionFromGooglePlace("nature-area", regionNameFromPlace(city, naturePlace, "parks and gardens"), naturePlace, ["nature", "viewpoint"], ["central-area", "culture-area"]),
-    regionFromGooglePlace("food-area", regionNameFromPlace(city, foodPlace, "restaurant district"), foodPlace, ["food", "evening"], ["central-area", "culture-area"]),
-    regionFromGooglePlace("nearby-region", regionNameFromPlace(city, nearbyPlace, "regional side trip"), nearbyPlace, ["nearby", "day-trip", "scenic"], ["central-area", "nature-area"])
-  ];
+  }];
+}
+
+// A place with no other place within thresholdMiles of it is geographically
+// isolated -- it should be its own region rather than either swallowing a
+// k-means seed slot (as an outlier) or getting dumped into a large,
+// unrelated cluster by nearest-centroid assignment.
+function splitDenseAndIsolated(places, thresholdMiles) {
+  const withLocation = places.map((place) => ({ place, location: placeLocation(place) })).filter((item) => item.location);
+  const withoutLocation = places.filter((place) => !placeLocation(place));
+  const dense = [];
+  const isolated = [];
+  withLocation.forEach(({ place, location }, index) => {
+    const nearestDistance = withLocation.reduce((min, other, otherIndex) => {
+      if (otherIndex === index) return min;
+      return Math.min(min, distanceMiles(location, other.location));
+    }, Infinity);
+    if (nearestDistance > thresholdMiles) isolated.push(place);
+    else dense.push(place);
+  });
+  return { dense: [...dense, ...withoutLocation], isolated };
+}
+
+// Farthest-point seeding places centroids at the extremes of the point
+// cloud, so a genuinely dense sub-area (e.g. DC's National Mall, where a
+// dozen+ museums sit within a half-mile of each other) can end up entirely
+// inside one seed's cluster while the other seeds -- placed at the sparser
+// edges -- end up with only one or two members each. Recursively bisecting
+// any cluster that ends up disproportionately large re-seeds k-means on
+// just that subset, which finds real internal structure now that it isn't
+// being compared against far-away points anymore.
+function balancedGeographicClusters(places, k, maxShareOfWhole = 0.4) {
+  let clusters = geographicClusters(places, k);
+  const maxSize = Math.max(8, Math.ceil(places.length * maxShareOfWhole));
+  for (let guard = 0; guard < 6; guard += 1) {
+    const oversizedIndex = clusters.findIndex((cluster) => cluster.length > maxSize);
+    if (oversizedIndex === -1) break;
+    const subClusters = geographicClusters(clusters[oversizedIndex], 2).filter((cluster) => cluster.length);
+    if (subClusters.length < 2) break;
+    clusters.splice(oversizedIndex, 1, ...subClusters);
+  }
+  return clusters;
+}
+
+// Simple k-means over place coordinates (few iterations is plenty at
+// city scale). Seeds centroids via farthest-point sampling for reasonable
+// spread instead of picking k random members.
+function geographicClusters(places, k) {
+  const withLocation = places.map((place) => ({ place, location: placeLocation(place) })).filter((item) => item.location);
+  const withoutLocation = places.filter((place) => !placeLocation(place));
+  if (!withLocation.length) return withoutLocation.length ? [withoutLocation] : [];
+  const targetK = Math.max(1, Math.min(k, withLocation.length));
+  const centroids = [withLocation[0].location];
+  while (centroids.length < targetK) {
+    let farthest = null;
+    let farthestDistance = -1;
+    for (const { location } of withLocation) {
+      const minDistance = Math.min(...centroids.map((centroid) => distanceMiles(centroid, location)));
+      if (minDistance > farthestDistance) {
+        farthestDistance = minDistance;
+        farthest = location;
+      }
+    }
+    centroids.push(farthest);
+  }
+  let assignments = withLocation.map(() => 0);
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    assignments = withLocation.map(({ location }) => {
+      let best = 0;
+      let bestDistance = Infinity;
+      centroids.forEach((centroid, index) => {
+        const distance = distanceMiles(centroid, location);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = index;
+        }
+      });
+      return best;
+    });
+    centroids.forEach((_, clusterIndex) => {
+      const members = withLocation.filter((_, i) => assignments[i] === clusterIndex).map((item) => item.location);
+      if (members.length) {
+        centroids[clusterIndex] = {
+          lat: members.reduce((sum, m) => sum + m.lat, 0) / members.length,
+          lng: members.reduce((sum, m) => sum + m.lng, 0) / members.length
+        };
+      }
+    });
+  }
+  const clusters = Array.from({ length: targetK }, () => []);
+  withLocation.forEach(({ place }, i) => clusters[assignments[i]].push(place));
+  if (withoutLocation.length) clusters[0].push(...withoutLocation);
+  return clusters;
 }
 
 function regionNameFromPlace(city, place, fallback) {
   const name = displayText(place?.displayName);
   if (!name) return `${city} ${fallback}`;
   return `${name} area`;
-}
-
-function regionFromGooglePlace(id, name, place, tags, neighboringRegionIds) {
-  const location = placeLocation(place) || { lat: 0, lng: 0 };
-  return {
-    id,
-    name,
-    summary: `${name} grouped from nearby visitor stops. Verify exact hours, tickets, access, and travel time before finalizing.`,
-    centerCoordinates: location,
-    tags,
-    neighboringRegionIds,
-    typicalTravelMinutesToRegions: {}
-  };
 }
 
 function profilePlaceFromGooglePlace(place, region, destinationName, index) {
@@ -672,12 +805,22 @@ function buildGoogleScenicRoutes(regions) {
 }
 
 function regionForGooglePlace(place, regions, destinationLocation) {
-  const category = googleCategory(place);
-  if (destinationLocation && distanceMiles(destinationLocation, placeLocation(place)) >= 18) return regions.find((region) => region.id === "nearby-region") || regions[0];
-  if (category === "food") return regions.find((region) => region.id === "food-area") || regions[0];
-  if (category === "nature") return regions.find((region) => region.id === "nature-area") || regions[0];
-  if (["museum", "landmark", "culture"].includes(category)) return regions.find((region) => region.id === "culture-area") || regions[0];
-  return regions.find((region) => region.id === "central-area") || regions[0];
+  const location = placeLocation(place);
+  if (destinationLocation && location && distanceMiles(destinationLocation, location) >= NEARBY_THRESHOLD_MILES) {
+    return regions.find((region) => region.id === "nearby-region") || regions[regions.length - 1] || regions[0];
+  }
+  if (!location) return regions[0];
+  let best = regions[0];
+  let bestDistance = Infinity;
+  for (const region of regions) {
+    if (region.id === "nearby-region") continue;
+    const distance = distanceMiles(region.centerCoordinates, location);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = region;
+    }
+  }
+  return best;
 }
 
 function isTourismPlace(place) {
