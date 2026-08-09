@@ -161,6 +161,33 @@ const INTEREST_KEYWORDS = {
   mountain: /mountain|blue ridge|peak|ridge|summit/i
 };
 
+async function researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, config) {
+  const candidateProfile = await googleDestinationResearch(cityName, {}, config);
+  const candidateCenter = candidateProfile.regions[0]?.centerCoordinates;
+  if (!primaryLocation || !candidateCenter) return null;
+  const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
+  if (!route?.durationMinutes || route.durationMinutes > maxDriveMinutes) return null;
+  const rankedPlaces = [...candidateProfile.places].sort((a, b) => {
+    const boost = (place) => activeKeywordPatterns.some((pattern) => pattern.test(`${place.name} ${place.shortDescription} ${(place.tags || []).join(" ")}`)) ? 1000 : 0;
+    return (boost(b) + b.priorityScore) - (boost(a) + a.priorityScore);
+  });
+  // A pure priority-score ranking is dominated by attractions, which silently
+  // drops every restaurant candidate before it ever reaches this extension
+  // region -- guarantee a handful of real named restaurants survive so the
+  // region has schedulable meal candidates, not just sightseeing stops.
+  const isFoodPlace = (place) => place.categories?.includes("restaurant") || place.categories?.includes("food");
+  const nonFoodPlaces = rankedPlaces.filter((place) => !isFoodPlace(place));
+  const foodPlaces = rankedPlaces.filter(isFoodPlace);
+  return {
+    cityName,
+    canonicalName: candidateProfile.canonicalName,
+    centerCoordinates: candidateCenter,
+    route,
+    places: [...nonFoodPlaces.slice(0, 7), ...foodPlaces.slice(0, 3)],
+    foodAreas: candidateProfile.foodAreas.slice(0, 3)
+  };
+}
+
 export async function discoverRegionalExtensions(primaryLocation, candidateCityNames, interestLabels, config, { maxDriveMinutes = 240, maxCandidates = 2 } = {}) {
   const interests = (interestLabels || []).map((label) => String(label || "").toLowerCase());
   const activeKeywordPatterns = Object.entries(INTEREST_KEYWORDS)
@@ -168,33 +195,26 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
     .map(([, pattern]) => pattern);
   const results = [];
   for (const cityName of (candidateCityNames || []).slice(0, maxCandidates)) {
-    try {
-      const candidateProfile = await googleDestinationResearch(cityName, {}, config);
-      const candidateCenter = candidateProfile.regions[0]?.centerCoordinates;
-      if (!primaryLocation || !candidateCenter) continue;
-      const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
-      if (!route?.durationMinutes || route.durationMinutes > maxDriveMinutes) continue;
-      const rankedPlaces = [...candidateProfile.places].sort((a, b) => {
-        const boost = (place) => activeKeywordPatterns.some((pattern) => pattern.test(`${place.name} ${place.shortDescription} ${(place.tags || []).join(" ")}`)) ? 1000 : 0;
-        return (boost(b) + b.priorityScore) - (boost(a) + a.priorityScore);
-      });
-      // A pure priority-score ranking is dominated by attractions, which silently
-      // drops every restaurant candidate before it ever reaches this extension
-      // region -- guarantee a handful of real named restaurants survive so the
-      // region has schedulable meal candidates, not just sightseeing stops.
-      const isFoodPlace = (place) => place.categories?.includes("restaurant") || place.categories?.includes("food");
-      const nonFoodPlaces = rankedPlaces.filter((place) => !isFoodPlace(place));
-      const foodPlaces = rankedPlaces.filter(isFoodPlace);
-      results.push({
-        cityName,
-        canonicalName: candidateProfile.canonicalName,
-        centerCoordinates: candidateCenter,
-        route,
-        places: [...nonFoodPlaces.slice(0, 7), ...foodPlaces.slice(0, 3)],
-        foodAreas: candidateProfile.foodAreas.slice(0, 3)
-      });
-    } catch {
-      continue;
+    // A traveler-approved overnight base (unlike an AI-suggested day-trip
+    // candidate) must not silently disappear from the itinerary just because
+    // one Google API call was slow or transiently rate-limited -- retry once
+    // before giving up, since a same-request failure immediately followed by
+    // a same-request success for the next city (observed live: Grand Canyon
+    // failed, Sedona succeeded moments later in the same request) points to
+    // transient flakiness, not a real per-city research failure.
+    let lastError = null;
+    let succeeded = false;
+    for (let attempt = 0; attempt < 2 && !succeeded; attempt += 1) {
+      try {
+        const candidate = await researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, config);
+        succeeded = true;
+        if (candidate) results.push(candidate);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!succeeded) {
+      console.warn("[RouteMosaic planner] Regional extension candidate research failed after retry", JSON.stringify({ cityName, code: lastError?.code || "REGIONAL_EXTENSION_CANDIDATE_FAILED" }));
     }
   }
   return results;
