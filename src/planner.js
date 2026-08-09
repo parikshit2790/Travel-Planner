@@ -1711,7 +1711,13 @@ function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityI
   const candidates = profile.places
     .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
     .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
-    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue)
+    // A restaurant tagged "evening" (meaning it's a good dinner spot) trips
+    // the isEveningAnchor keyword match, which would schedule it as a
+    // standalone 90-minute sightseeing block right after dinner instead of
+    // being the meal itself. Still allow a bar/restaurant combo through via
+    // isBar, since that's a legitimate nightlife stop, not a meal masquerading
+    // as an activity.
+    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue && !((classification.isRestaurant || classification.isFoodHall) && !classification.isBar))
     .filter(({ place, classification }) => Number(place.typicalDurationMinutes || 0) < 150 || classification.isBoardwalk || classification.isBeachOrWaterfront || classification.isBar || /evening|nightlife|dessert|rooftop|dinner|promenade|district|walk/i.test(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`))
     .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
     .sort((a, b) => {

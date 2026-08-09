@@ -255,6 +255,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   if (hasMuseumDominance(plan)) hardFailures.push("category-concentration");
   if (hasSamePrimaryMealForMultipleDays(mealItems)) hardFailures.push("meal-repetition");
   if (hasMealVenueThatLooksLikeActivity(mealItems)) hardFailures.push("meal-venue-not-restaurant");
+  if (hasGenericMealPlaceholder(mealItems)) hardFailures.push("meal-placeholder-not-a-restaurant");
   if ((graph.coverage?.restaurant || 0) === 0 && mealItems.length) hardFailures.push("meal-candidates-not-backed-by-graph");
   if ((graph.coverage?.attraction || 0) === 0) hardFailures.push("destination-attraction-coverage-missing");
   if (hasSignatureCoverageFailure(plan, graph)) hardFailures.push("signature-attraction-coverage");
@@ -270,7 +271,7 @@ export function critiquePlanDeterministically(plan, graph = {}) {
   const subScores = {
     destinationFit: scoreFrom(100, hardFailures.includes("destination-attraction-coverage-missing") ? 35 : 0, hardFailures.includes("signature-attraction-coverage") ? 38 : 0, hardFailures.includes("first-time-coverage-insufficient") ? 32 : 0, hardFailures.includes("ordinary-local-facility-overpromotion") ? 35 : 0, hardFailures.includes("category-concentration") ? 30 : 0, issues.includes("generic-day-title") ? 8 : 0),
     routeLogic: scoreFrom(100, hardFailures.includes("day-count-mismatch") ? 40 : 0, issues.includes("backup-too-large") ? 8 : 0),
-    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
+    mealValidity: scoreFrom(100, hardFailures.includes("universal-restaurant-dominance") ? 35 : 0, hardFailures.includes("meal-repetition") ? 30 : 0, hardFailures.includes("meal-venue-not-restaurant") ? 35 : 0, hardFailures.includes("meal-placeholder-not-a-restaurant") ? 35 : 0, hardFailures.includes("meal-candidates-not-backed-by-graph") ? 20 : 0, hardFailures.includes("meal-research-insufficient") ? 35 : 0, issues.includes("restaurant-repetition-risk") ? 6 : 0),
     scheduleRealism: scoreFrom(100, issues.includes("fixed-duration-dominance") ? 18 : 0, hardFailures.includes("duplicated-daytime-evening") ? 30 : 0, hardFailures.includes("raw-place-label") ? 30 : 0, hardFailures.includes("stale-attraction-recommended") ? 45 : 0, hardFailures.includes("day-schedule-exceeds-calendar-day") ? 60 : 0),
     costRealism: scoreFrom(100, issues.includes("fixed-cost-dominance") ? 18 : 0),
     languageQuality: scoreFrom(100, hardFailures.includes("internal-or-template-language") ? 60 : 0, issues.includes("generic-day-title") ? 8 : 0),
@@ -530,6 +531,19 @@ function hasMealVenueThatLooksLikeActivity(mealItems) {
     const restaurantSignal = /\b(restaurant|cafe|coffee|bakery|brunch|breakfast|diner|bistro|grill|taqueria|pizzeria|pizza|bbq|barbecue|ramen|sushi|tavern|kitchen|eatery|deli|sandwich|seafood|steakhouse|burger|tacos|dessert|food hall|public market|market hall)\b/.test(text);
     const activitySignal = /\b(rail trail|greenway|arts district|museum|park|lake|mountain|waterfall|campus|neighborhood|walking route|scenic drive|visitor center|hall of fame)\b/.test(text);
     return activitySignal && !restaurantSignal;
+  });
+}
+
+// When no real restaurant candidate exists for a meal slot, the planner
+// falls back to a synthetic label like "Capitol Hill breakfast" -- a
+// region name plus the meal type, with no place backing it. That fallback
+// is meant as a last-resort placeholder, not a restaurant name, and must
+// never reach the user looking like one.
+function hasGenericMealPlaceholder(mealItems) {
+  return mealItems.some((item) => {
+    if (item.mealDetails?.restaurantPlaceId) return false;
+    const name = String(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "").trim();
+    return /^[\w' .-]+ (breakfast|lunch|dinner)$/i.test(name);
   });
 }
 
