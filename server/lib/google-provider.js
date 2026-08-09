@@ -297,6 +297,42 @@ export async function resolveDestination(destination, config) {
   return locations[0] || null;
 }
 
+// AI-sourced destination research (openai-destination-provider.js) discovers
+// real, well-chosen places and neighborhoods but has no access to a mapping
+// service, so it cannot supply trustworthy coordinates -- a language model
+// asked for latitude/longitude is a guess, not a lookup. Downstream routing
+// math (estimateTravel) silently falls back to region-center coordinates,
+// or worse to a near-zero clamped distance, whenever a place's own
+// coordinates are missing. This grounds each AI-sourced place against real
+// Google Places data without changing which places were chosen or how
+// they're described -- only their physical location gets filled in.
+export async function groundPlacesWithCoordinates(profile, destinationName, config) {
+  const places = Array.isArray(profile?.places) ? profile.places : [];
+  const hasCoordinates = (value) => Number.isFinite(value?.lat) && Number.isFinite(value?.lng);
+  const needsGrounding = places.filter((place) => !hasCoordinates(place.coordinates));
+  if (!needsGrounding.length) return profile;
+  const lightFieldMask = "places.id,places.location";
+  const results = await Promise.allSettled(
+    needsGrounding.map((place) => googleTextSearch(`${place.name}, ${destinationName}`, config, lightFieldMask, 1))
+  );
+  needsGrounding.forEach((place, index) => {
+    const outcome = results[index];
+    if (outcome.status !== "fulfilled" || !outcome.value?.length) return;
+    const location = placeLocation(outcome.value[0]);
+    if (location) place.coordinates = location;
+  });
+  (profile.regions || []).forEach((region) => {
+    if (hasCoordinates(region.centerCoordinates)) return;
+    const grounded = places.filter((place) => place.regionId === region.id && hasCoordinates(place.coordinates));
+    if (!grounded.length) return;
+    region.centerCoordinates = {
+      lat: grounded.reduce((sum, place) => sum + place.coordinates.lat, 0) / grounded.length,
+      lng: grounded.reduce((sum, place) => sum + place.coordinates.lng, 0) / grounded.length
+    };
+  });
+  return profile;
+}
+
 async function googlePlaceDetails(placeId, config) {
   return googlePlacesRequest(`/places/${encodeURIComponent(placeId)}`, {
     config,
