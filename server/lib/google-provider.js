@@ -188,23 +188,36 @@ async function researchRegionalExtensionCandidate(cityName, primaryLocation, max
   };
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function discoverRegionalExtensions(primaryLocation, candidateCityNames, interestLabels, config, { maxDriveMinutes = 240, maxCandidates = 2 } = {}) {
   const interests = (interestLabels || []).map((label) => String(label || "").toLowerCase());
   const activeKeywordPatterns = Object.entries(INTEREST_KEYWORDS)
     .filter(([key]) => interests.some((label) => label.includes(key)))
     .map(([, pattern]) => pattern);
   const results = [];
-  for (const cityName of (candidateCityNames || []).slice(0, maxCandidates)) {
+  const candidateNames = (candidateCityNames || []).slice(0, maxCandidates);
+  for (const [index, cityName] of candidateNames.entries()) {
+    // The primary destination's own research just finished 4 parallel Google
+    // calls; starting straight into another city's 4 parallel calls (first
+    // candidate) or back-to-back with the previous city (later candidates)
+    // can trip a short burst rate limit -- observed live and reproducibly:
+    // the first candidate in the list failed every time while the next one,
+    // researched moments later, succeeded every time. A small stagger before
+    // each candidate (skipped for the very first call in a single-candidate
+    // request) gives the burst window room to clear.
+    if (index > 0 || candidateNames.length > 1) await delay(900);
     // A traveler-approved overnight base (unlike an AI-suggested day-trip
     // candidate) must not silently disappear from the itinerary just because
-    // one Google API call was slow or transiently rate-limited -- retry once
-    // before giving up, since a same-request failure immediately followed by
-    // a same-request success for the next city (observed live: Grand Canyon
-    // failed, Sedona succeeded moments later in the same request) points to
-    // transient flakiness, not a real per-city research failure.
+    // one Google API call was rate-limited -- retry once, with a backoff
+    // delay, before giving up. An immediate no-delay retry would just hit
+    // the same burst window and fail the same way again.
     let lastError = null;
     let succeeded = false;
     for (let attempt = 0; attempt < 2 && !succeeded; attempt += 1) {
+      if (attempt > 0) await delay(1500);
       try {
         const candidate = await researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, config);
         succeeded = true;
