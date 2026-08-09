@@ -629,7 +629,17 @@ function regionalDestinationQuality(plan, graph = {}) {
   // coincidence -- e.g. any city whose regional day-trip suggestions happen
   // to mention a national park -- so this now relies solely on the
   // deliberately-computed archetype classification.
-  const applies = /^(mountain|national-park)$/.test(archetype);
+  // The archetype check alone is still too broad: ANY mountain/national-park
+  // destination (Grand Canyon, Yellowstone, Yosemite, a Sedona regional
+  // extension, ...) shares that archetype but has nothing to do with
+  // Gatlinburg/Pigeon Forge/Dollywood -- discovered when an approved
+  // Phoenix -> Grand Canyon -> Sedona route got wrongly rejected for missing
+  // "gateway town" terms that only exist in the Smokies. Require the
+  // destination itself to actually be the Smoky Mountains region before this
+  // Smokies-specific vocabulary check applies.
+  const destinationText = normalizeText([plan?.destination, plan?.generationMetadata?.destinationProfileSnapshot?.canonicalName, plan?.generationMetadata?.destinationProfile?.canonicalName].filter(Boolean).join(" "));
+  const isSmokyMountainsRegion = /\b(smoky|smokies|gatlinburg|pigeon forge|sevierville)\b/.test(destinationText);
+  const applies = /^(mountain|national-park)$/.test(archetype) && isSmokyMountainsRegion;
   const mealItems = (plan.days || []).flatMap((day) => day.scheduleItems || []).filter((item) => ["breakfast", "lunch", "dinner"].includes(item.type));
   const mealNames = mealItems.map((item) => normalizeText(item.mealDetails?.restaurantName || item.mealDetails?.primaryOption || "")).filter(Boolean);
   const uniqueMeals = new Set(mealNames);

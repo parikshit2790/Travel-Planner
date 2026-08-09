@@ -290,7 +290,96 @@ function repairDuplicateEveningItems(plan, profile, input, constraints) {
   });
 }
 
+// The traveler can approve a multi-city Trip Shape on the Review step
+// (e.g. Phoenix -> Grand Canyon -> Sedona with 2 hotel changes) before the
+// itinerary is generated. That approval must actually change which bases
+// the plan sleeps in and which regions each day draws activities from --
+// not just get echoed back as unused metadata. This resolves the approved
+// hotelBases sequence into real region ids and a day-by-day allocation so
+// buildHotelBase, buildDays, and the Route tab can all follow it.
+function resolveApprovedTripShapeSchedule(profile, input) {
+  const shape = input.approvedTripShape;
+  const bases = Array.isArray(shape?.hotelBases) ? shape.hotelBases : [];
+  if (!shape || bases.length < 2) return null;
+  // The first approved base is the primary destination itself (e.g. "Phoenix,
+  // Arizona, United States"), but no researched region is ever literally named
+  // after the whole city -- regions are neighborhoods/districts. Anchor base 0
+  // on the profile's own default hotel region instead of name-matching it; only
+  // the approved secondary cities (each merged in as their own dedicated
+  // regional-ext- region) need to be resolved by name.
+  const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules?.defaultHotelRegion) || profile.regions[0];
+  const resolvedBases = bases.map((base, index) => {
+    if (index === 0) {
+      return primaryRegion ? { name: primaryRegion.name, regionId: primaryRegion.id, nights: Math.max(0, Number(base.nights || 0)) } : null;
+    }
+    const name = normalizeText(base?.canonicalName || base?.shortName || "");
+    if (!name) return null;
+    const region = profile.regions.find((candidate) => {
+      const candidateName = normalizeText(candidate.name);
+      return candidateName === name || candidateName.includes(name) || name.includes(candidateName);
+    });
+    if (!region) return null;
+    return { name: region.name, regionId: region.id, nights: Math.max(0, Number(base.nights || 0)) };
+  });
+  // If any approved base can't be matched to real researched region data
+  // (or two approved bases collapse onto the same region), a multi-city
+  // itinerary cannot actually be built -- fail closed to the normal
+  // single-base path rather than silently dropping a city.
+  if (resolvedBases.some((entry) => !entry)) return null;
+  if (new Set(resolvedBases.map((entry) => entry.regionId)).size < resolvedBases.length) return null;
+
+  const numberOfDays = Math.max(1, Number(input.numberOfDays || 1));
+  const daysForBase = resolvedBases.map((entry) => Math.max(1, entry.nights || 1));
+  let diff = numberOfDays - daysForBase.reduce((sum, value) => sum + value, 0);
+  if (diff > 0) {
+    daysForBase[daysForBase.length - 1] += diff;
+  } else {
+    let guard = 0;
+    while (diff < 0 && guard < numberOfDays * 4) {
+      const target = daysForBase.indexOf(Math.max(...daysForBase));
+      if (daysForBase[target] > 1) {
+        daysForBase[target] -= 1;
+        diff += 1;
+      } else {
+        break;
+      }
+      guard += 1;
+    }
+  }
+
+  const dayRegionIds = [];
+  const dayBaseIndex = [];
+  const transferDayIndexes = new Set();
+  resolvedBases.forEach((entry, baseIndex) => {
+    for (let i = 0; i < daysForBase[baseIndex] && dayRegionIds.length < numberOfDays; i += 1) {
+      if (i === 0 && baseIndex > 0) transferDayIndexes.add(dayRegionIds.length);
+      dayRegionIds.push(entry.regionId);
+      dayBaseIndex.push(baseIndex);
+    }
+  });
+  while (dayRegionIds.length < numberOfDays) {
+    dayRegionIds.push(resolvedBases[resolvedBases.length - 1].regionId);
+    dayBaseIndex.push(resolvedBases.length - 1);
+  }
+
+  return { bases: resolvedBases, dayRegionIds, dayBaseIndex, transferDayIndexes, hotelChanges: resolvedBases.length - 1 };
+}
+
 function buildHotelBase(profile, input, days) {
+  const schedule = resolveApprovedTripShapeSchedule(profile, input);
+  if (schedule) {
+    const sequenceNames = schedule.bases.map((base) => base.name);
+    return {
+      primary: schedule.bases[0].name,
+      alternatives: schedule.bases.slice(1).map((base) => base.name),
+      sequence: schedule.bases,
+      hotelChanges: schedule.hotelChanges,
+      forDay: (dayIndex) => schedule.bases[schedule.dayBaseIndex[Math.min(Math.max(0, dayIndex), schedule.dayBaseIndex.length - 1)]]?.name || schedule.bases[0].name,
+      reason: `Follows the route you approved: ${sequenceNames.join(" → ")}, with ${schedule.hotelChanges} hotel change${schedule.hotelChanges === 1 ? "" : "s"}.`,
+      tradeoffs: "This follows the trip shape you approved on the Review step. Confirm real lodging neighborhoods, transit access, parking, and travel times before booking.",
+      splitStaySuggestion: `${schedule.hotelChanges} hotel change${schedule.hotelChanges === 1 ? "" : "s"} as approved on the Review step.`
+    };
+  }
   const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
   const alternatives = profile.regions.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
   return {
@@ -850,17 +939,29 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
   const eveningUsage = new Map();
   const backupUsage = new Map();
   const themes = destinationDayThemes(profile, input, intelligence);
+  const approvedSchedule = resolveApprovedTripShapeSchedule(profile, input);
   return Array.from({ length: input.numberOfDays }, (_, index) => {
     const date = addDays(input.startDate, index);
-    const themeRegions = themes[index % themes.length];
+    // An approved multi-city route overrides the normal theme-region
+    // rotation -- each day must draw its activities from whichever base
+    // (primary destination or approved regional extension) the traveler is
+    // actually sleeping in that night, not from clustered local themes.
+    const themeRegions = approvedSchedule ? [approvedSchedule.dayRegionIds[index]] : themes[index % themes.length];
+    // When a multi-city route is approved, every other approved base's region
+    // is reserved for its own dedicated day(s) -- a thin day in Phoenix must
+    // never "fill" itself with a Grand Canyon or Sedona candidate that belongs
+    // to a later day just because Phoenix's own candidates ran short.
+    const otherApprovedBaseRegionIds = approvedSchedule
+      ? new Set(approvedSchedule.bases.map((base) => base.regionId).filter((id) => !themeRegions.includes(id)))
+      : null;
     const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
-    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
+    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !otherApprovedBaseRegionIds?.has(item.place.regionId));
     const candidates = [...themeCandidates, ...fillCandidates.slice(0, Math.max(0, input.maxActivities - themeCandidates.length))];
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const isTrueAllDay = fullDay && Number(fullDay.place.typicalDurationMinutes || 0) >= 300;
     const activityCount = isTrueAllDay && input.maxActivities <= 2 ? 1 : Math.min(input.maxActivities, isTrueAllDay ? 1 : candidates.length);
-    let selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (isTrueAllDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input)), scheduled);
-    const eligibleCandidates = scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
+    const eligibleCandidates = scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !otherApprovedBaseRegionIds?.has(item.place.regionId));
+    let selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (isTrueAllDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), eligibleCandidates, scheduled);
     selected = enforceUrbanFirstTimeCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = diversifyDuplicateMuseumDay(profile, input, selected, eligibleCandidates, scheduled);
     selected = ensureUrbanHistoricalCivicCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
@@ -868,7 +969,14 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     selected = ensureCoastalNatureCoverage(profile, input, intelligence, index, selected, eligibleCandidates, scheduled);
     if (!isLongDriveArrivalDay(profile, input, index)) selected.forEach((item) => scheduled.add(item.place.id));
     const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
-    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage);
+    const regionalTransfer = approvedSchedule && approvedSchedule.transferDayIndexes.has(index)
+      ? (() => {
+          const fromRegionId = approvedSchedule.dayRegionIds[index - 1];
+          const toRegionId = approvedSchedule.dayRegionIds[index];
+          return { fromRegionId, toRegionId, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), travel: estimateTravel(profile, fromRegionId, toRegionId) };
+        })()
+      : null;
+    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage, regionalTransfer);
     scheduleItems.forEach((item) => {
       if (item.placeId && item.type !== "breakfast" && item.type !== "lunch" && item.type !== "dinner") scheduled.add(item.placeId);
     });
@@ -1024,7 +1132,7 @@ function ensureNearbyUrbanRegionalCoverage(profile, input, dayIndex, selected, c
       routeRank: routeRank(item.intelligence?.routeFeasibility?.classification)
     }))
     .filter(({ item, flag, routeRank: rank }) => {
-      if (rank > 1 || flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness || flag.isChildrenFocused) return false;
+      if (rank > 1 || flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness || flag.isChildrenFocused || flag.isGamblingVenue) return false;
       const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
       return flag.isDayTrip || flag.isRegionalDestination || /\b(university|gardens|garden|downtown|college town|nearby|regional|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
     })
@@ -1226,13 +1334,17 @@ function keepNearbyThemeRegions(profile, regionIds, limit) {
     .slice(0, limit);
 }
 
-function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map()) {
+function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null) {
   const items = [];
   const buffers = paceDefaults(input.pace).buffer;
   const mealDuration = input.pace === "Relaxed" ? 75 : 60;
-  const travelContext = tripTravelContext(profile, input);
-  const isArrivalDay = dayIndex === 0 && travelContext.needsArrivalLogistics;
-  const isDepartureDay = dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
+  // A day that transfers to a newly-approved hotel base (e.g. Phoenix ->
+  // Grand Canyon) is scheduled like an arrival day -- light morning,
+  // dedicated travel block, check-in -- but using the inter-base drive
+  // instead of the trip's overall origin-to-destination travel.
+  const travelContext = regionalTransfer ? regionalTransferContext(regionalTransfer.travel) : tripTravelContext(profile, input);
+  const isArrivalDay = Boolean(regionalTransfer) || (dayIndex === 0 && travelContext.needsArrivalLogistics);
+  const isDepartureDay = !regionalTransfer && dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
   const parkRouteDay = shouldPackLunchForDay(places);
   const breakfastStart = constraints.breakfastMinutes;
   const longArrivalDrive = isArrivalDay && travelContext.originDriveMinutes >= 360;
@@ -1250,7 +1362,9 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       price: moneyRange(mealCost(input, "breakfast").low, mealCost(input, "breakfast").high),
       reservation: "No reservation needed for a simple travel-morning breakfast."
     }, firstRegion, input, constraints, null, true);
-    items.push(arrivalTravelItem(profile, input, travelContext));
+    items.push(regionalTransfer
+      ? arrivalTravelItem(profile, input, travelContext, regionalTransfer.fromLabel, regionalTransfer.toLabel)
+      : arrivalTravelItem(profile, input, travelContext));
     addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
   } else {
@@ -1603,19 +1717,35 @@ function isTimeSensitiveClosed(place, startMinutes) {
   return needsDaytime && startMinutes >= 17 * 60;
 }
 
-function arrivalTravelItem(profile, input, context) {
+function regionalTransferContext(travel) {
+  return {
+    needsArrivalLogistics: true,
+    needsDepartureLogistics: false,
+    transportMode: "drive",
+    departureMinutes: 9 * 60,
+    arrivalMinutes: Math.min(21 * 60, 9 * 60 + travel.durationMinutes),
+    originDriveMinutes: travel.durationMinutes,
+    originDistanceMiles: travel.distanceMiles,
+    routeSource: travel.estimateType || "",
+    routeCheckedAt: "",
+    routeConfidence: travel.estimateType === "curated-coordinate-estimate" ? "provider" : "coordinate",
+    estimateType: "coordinate-arrival-estimate"
+  };
+}
+
+function arrivalTravelItem(profile, input, context, fromLabel = input.origin || "your origin", toLabel = profile.canonicalName) {
   const duration = context.transportMode === "drive" ? context.originDriveMinutes : Math.max(120, context.arrivalMinutes - context.departureMinutes);
   const description = context.transportMode === "drive"
-    ? `Drive from ${input.origin || "your origin"} to ${profile.canonicalName}; includes conservative fuel, restroom, meal, parking, and arrival buffer. Assumes an ${formatTime(context.departureMinutes)} departure because no exact departure time was entered.`
-    : `Arrival logistics for ${profile.canonicalName}; includes airport or station buffer, luggage, rental car or transfer pickup, and hotel approach time.`;
+    ? `Drive from ${fromLabel} to ${toLabel}; includes conservative fuel, restroom, meal, parking, and arrival buffer. Assumes an ${formatTime(context.departureMinutes)} departure because no exact departure time was entered.`
+    : `Arrival logistics for ${toLabel}; includes airport or station buffer, luggage, rental car or transfer pickup, and hotel approach time.`;
   return {
-    ...simpleItem("travel", context.departureMinutes, duration, `Travel to ${profile.canonicalName}`, description),
+    ...simpleItem("travel", context.departureMinutes, duration, `Travel to ${toLabel}`, description),
     travelFromPrevious: {
       mode: context.transportMode === "drive" ? "Drive" : "Arrival transfer",
       durationMinutes: duration,
       distanceMiles: context.originDistanceMiles,
-      fromLabel: input.origin || "Origin",
-      toLabel: profile.canonicalName,
+      fromLabel,
+      toLabel,
       estimateType: context.estimateType,
       provider: context.routeSource,
       checkedAt: context.routeCheckedAt,
@@ -2123,6 +2253,9 @@ function buildAdvisories(profile, input, constraints, days, budget) {
   if (constraints.seriousDietary) advisories.push(advisory("dietary-confirmation", "caution", "dietary", "Confirm dietary restrictions", "Mandatory dietary restrictions and allergies are applied, but restaurants should confirm ingredients and preparation directly.", "Call or message restaurants before dining."));
   if (constraints.mobilityNeeds) advisories.push(advisory("accessibility-confirmation", "caution", "accessibility", "Confirm accessibility conditions", "The plan favors easier and more accessible stops, but venue conditions can change.", "Confirm elevators, paths, parking, and drop-off details directly."));
   if (constraints.noAlcohol) advisories.push(advisory("no-alcohol", "info", "evening", "Alcohol-focused venues suppressed", "Evening recommendations avoid bar- or alcohol-led planning.", "Use cafe, walk, dessert, or live-music options that do not require drinking."));
+  if ((input.approvedTripShape?.hotelBases || []).length > 1 && !resolveApprovedTripShapeSchedule(profile, input)) {
+    advisories.push(advisory("approved-route-not-honored", "caution", "route", "Approved multi-city route could not be applied", "The multi-city route you approved on the Review step could not be matched to researched destination data for every approved city, so a single-base itinerary was generated instead.", "Regenerate after confirming destination research succeeded for every approved city, or adjust the approved route."));
+  }
   days.forEach((day) => {
     if (day.dailyDriveMinutes > input.maxDrivingMinutes) advisories.push(advisory(`drive-${day.id}`, "caution", "route", `Day ${day.dayNumber} may exceed driving comfort`, `Estimated driving is ${formatDuration(day.dailyDriveMinutes)}.`, "Remove or replace one distant stop."));
     if (!day.backupOptions.length && day.scheduleItems.some((item) => item.weatherDependency === "high")) advisories.push(advisory(`backup-${day.id}`, "caution", "weather", `Day ${day.dayNumber} needs a backup`, "This outdoor-heavy day has limited same-region indoor backups.", "Keep the day flexible if weather is poor."));
@@ -2156,7 +2289,35 @@ function buildOverview(profile, input, days, budget, route) {
   };
 }
 
+function approvedTripShapeOptionCard(profile, input, schedule) {
+  const sequenceNames = schedule.bases.map((base) => base.name);
+  return tripShapeOption({
+    id: "shape-approved",
+    title: `Approved route: ${sequenceNames.join(" → ")}`,
+    structureType: "Approved multi-city route",
+    recommended: true,
+    routeSequence: sequenceNames,
+    overnightBases: schedule.bases.map((base) => ({ base: base.name, nights: base.nights })),
+    hotelChanges: schedule.hotelChanges,
+    majorTransferDays: [...schedule.transferDayIndexes].sort((a, b) => a - b).map((dayIndex) => `Day ${dayIndex + 1}: transfer to ${regionName(profile, schedule.dayRegionIds[dayIndex])}`),
+    totalEstimatedDriving: "See day-by-day itinerary for transfer drive times",
+    totalMajorDriving: 0,
+    longestDrivingDay: "See day-by-day itinerary for transfer drive times",
+    fullSightseeingDays: Math.max(0, input.numberOfDays - schedule.transferDayIndexes.size),
+    arrivalAssumptions: "This is the route you approved on the Review step; the itinerary follows it directly.",
+    departureAssumptions: "Departure logistics are handled from the final approved base.",
+    experienceMix: `Follows your approved sequence across ${sequenceNames.join(", ")}.`,
+    advantages: ["Matches the route you explicitly approved on the Review step"],
+    tradeoffs: schedule.hotelChanges ? [`${schedule.hotelChanges} hotel change${schedule.hotelChanges === 1 ? "" : "s"}`, "Luggage/check-out/check-in time required on transfer days"] : [],
+    costImpact: "Reflects the approved route's lodging and transfer plan.",
+    whyItFitsUser: "This is the trip shape you reviewed and approved before generation.",
+    confidence: 100
+  });
+}
+
 function buildTripShapeOptions(profile, input, intelligence) {
+  const approvedSchedule = resolveApprovedTripShapeSchedule(profile, input);
+  if (approvedSchedule) return [approvedTripShapeOptionCard(profile, input, approvedSchedule)];
   if ((intelligence?.destinationArchetype?.primaryArchetype === "mountain" || intelligence?.destinationArchetype?.primaryArchetype === "national park") && intelligence?.regionalDestinationProfile) {
     return buildRegionalMountainTripShapeOptions(profile, input, intelligence);
   }
@@ -2391,9 +2552,9 @@ function buildDetailedTripDays(profile, input, constraints, days, hotelBase) {
     return {
       ...day,
       routeOrLocation: dayRouteLabel(profile, day, input, index),
-      startingBase: index === 0 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : hotelBase.primary,
-      endingBase: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : hotelBase.primary,
-      hotel: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? "Departure / home base" : hotelBase.primary,
+      startingBase: index === 0 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
+      endingBase: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
+      hotel: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? "Departure / home base" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
       totalExpectedDriving: formatDuration(day.dailyDriveMinutes),
       dayArchetype: archetype,
       todaysTopFive: topFiveForDay(day, archetype),
@@ -2841,7 +3002,7 @@ function buildLodgingPlan(input, days, hotelBase) {
   return {
     recommendedBase: hotelBase.primary,
     nights,
-    hotelChangeCount: /change|split|multiple/i.test(input.lodging.changeHotels || "") ? "User open to changes; verify before booking." : 0,
+    hotelChangeCount: Number.isFinite(hotelBase.hotelChanges) ? hotelBase.hotelChanges : (/change|split|multiple/i.test(input.lodging.changeHotels || "") ? "User open to changes; verify before booking." : 0),
     nightlyPlan: days.slice(0, Math.max(0, nights)).map((day) => ({
       night: day.dayNumber,
       date: formatDisplayDate(day.date),
@@ -3149,7 +3310,8 @@ function cuisineFromPlace(place) {
 
 function mealRecommendation(profile, input, regionId, mealType, mealUsage = new Map(), anchorPlace = null) {
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
-  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, false, anchorPlace) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true, anchorPlace);
+  const preferredCuisines = input.food.cuisine || [];
+  const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, false, anchorPlace, preferredCuisines) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true, anchorPlace, preferredCuisines);
   // The selected restaurant's own real cuisine (from its name/description/
   // Google place types) is a much stronger signal than the traveler's
   // stated cuisine interest, which is often unset -- falling back straight
@@ -3161,7 +3323,7 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     || (input.food.cuisine || [])[0]
     || "local";
   const excluded = new Set([primaryPlace?.id].filter(Boolean));
-  const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true, anchorPlace) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true, anchorPlace);
+  const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true, anchorPlace, preferredCuisines) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true, anchorPlace, preferredCuisines);
   const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
   const secondary = secondaryPlace?.name || secondaryFoodOption(profile, area, regionId);
   const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
@@ -3198,7 +3360,13 @@ function mealQualityScore(place) {
   return Number(place.priorityScore || 0) - (classification.isThinResearchAttraction ? 40 : 0);
 }
 
-function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false, anchorPlace = null) {
+function placeMatchesCuisine(place, preferredCuisines) {
+  if (!preferredCuisines || !preferredCuisines.length) return false;
+  const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
+  return preferredCuisines.some((cuisine) => text.includes(normalizeText(cuisine)));
+}
+
+function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set(), mealUsage = new Map(), allowReused = false, anchorPlace = null, preferredCuisines = []) {
   const excluded = excludedIds instanceof Set ? excludedIds : new Set([excludedIds].filter(Boolean));
   // A regional-extension place (a day-trip or overnight-extension city, often
   // an hour or more away) must never be recommended as a meal for an ordinary
@@ -3220,12 +3388,19 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
       ? haversineMiles(anchorCoordinates.lat, anchorCoordinates.lng, placeCoordinates.lat, placeCoordinates.lng)
       : null;
   };
+  // A place matching one of the traveler's stated cuisine interests should
+  // win ties against equally-viable options -- otherwise a selected cuisine
+  // interest (e.g. Indian) never actually influences which restaurant gets
+  // picked, only the display label of whatever was chosen without it.
+  const cuisineRank = (place) => (placeMatchesCuisine(place, preferredCuisines) ? 0 : 1);
   const regionMatches = profile.places
     .filter((place) => place.regionId === regionId)
     .filter(byMealFit)
     .sort((a, b) => {
       const usageDiff = (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0);
       if (usageDiff) return usageDiff;
+      const cuisineDiff = cuisineRank(a) - cuisineRank(b);
+      if (cuisineDiff) return cuisineDiff;
       const distanceA = distanceToAnchor(a);
       const distanceB = distanceToAnchor(b);
       // Only let proximity override priority when the gap is large enough to
@@ -3241,7 +3416,7 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
     .sort((a, b) => {
       const routeA = estimateTravel(profile, regionId, a.regionId).durationMinutes;
       const routeB = estimateTravel(profile, regionId, b.regionId).durationMinutes;
-      return routeA - routeB || (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || mealQualityScore(b) - mealQualityScore(a);
+      return routeA - routeB || (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || cuisineRank(a) - cuisineRank(b) || mealQualityScore(b) - mealQualityScore(a);
     })[0] || null;
 }
 
