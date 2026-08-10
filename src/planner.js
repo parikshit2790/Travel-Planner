@@ -959,17 +959,29 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     // When a multi-city route is approved, every other approved base's region
     // is reserved for its own dedicated day(s) -- a thin day in Phoenix must
     // never "fill" itself with a Grand Canyon or Sedona candidate that belongs
-    // to a later day just because Phoenix's own candidates ran short.
-    const otherApprovedBaseRegionIds = approvedSchedule
-      ? new Set(approvedSchedule.bases.map((base) => base.regionId).filter((id) => !themeRegions.includes(id)))
-      : null;
+    // to a later day just because Phoenix's own candidates ran short, and a
+    // Grand Canyon/Sedona day must never fill with a Phoenix candidate.
+    // A regional-extension base (Grand Canyon, Sedona, ...) is always exactly
+    // one merged region (its "regional-ext-" id), but the primary destination
+    // can legitimately span many real sub-regions (downtown, midtown,
+    // Camelback, Roosevelt Row, ...) -- excluding only the single
+    // approvedSchedule.bases regionId per base (as before) left every OTHER
+    // primary-destination sub-region unguarded, so real Phoenix places kept
+    // leaking into Grand Canyon/Sedona days. Belonging is now judged by
+    // whether a region is itself a "regional-ext-" region, not by an exact id
+    // match against a single stored region per base.
+    const isRegionalExtensionRegionId = (regionId) => String(regionId || "").startsWith("regional-ext-");
+    const todayIsExtensionDay = approvedSchedule ? isRegionalExtensionRegionId(themeRegions[0]) : false;
+    const belongsToAnotherApprovedBase = approvedSchedule
+      ? (regionId) => (todayIsExtensionDay ? !themeRegions.includes(regionId) : isRegionalExtensionRegionId(regionId))
+      : () => false;
     const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
-    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !otherApprovedBaseRegionIds?.has(item.place.regionId));
+    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !belongsToAnotherApprovedBase(item.place.regionId));
     const candidates = [...themeCandidates, ...fillCandidates.slice(0, Math.max(0, input.maxActivities - themeCandidates.length))];
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const isTrueAllDay = fullDay && Number(fullDay.place.typicalDurationMinutes || 0) >= 300;
     const activityCount = isTrueAllDay && input.maxActivities <= 2 ? 1 : Math.min(input.maxActivities, isTrueAllDay ? 1 : candidates.length);
-    const eligibleCandidates = scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !otherApprovedBaseRegionIds?.has(item.place.regionId));
+    const eligibleCandidates = scored.filter((item) => item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !belongsToAnotherApprovedBase(item.place.regionId));
     let selected = improveArchetypeSelection(profile, input, intelligence, index, themeRegions, (isTrueAllDay && index > 0 && input.maxActivities >= 3 ? [fullDay] : candidates).slice(0, activityCount), eligibleCandidates, scheduled);
     selected = enforceUrbanFirstTimeCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = diversifyDuplicateMuseumDay(profile, input, selected, eligibleCandidates, scheduled);
@@ -1213,6 +1225,14 @@ function isActivityCandidateForSchedule(item, profile, input) {
   if (classification.isOrdinaryBusiness || classification.isStaleOrClosedAttraction || classification.isChildrenFocused) return false;
   if (classification.isRestaurant || classification.isFoodHall || classification.isBar) return false;
   if (classification.isDinnerShow) return false;
+  // isGamblingVenue was previously only hard-excluded in a couple of narrow
+  // call sites (isBackupCompatible, eveningAnchorPlace), so a casino kept
+  // re-entering through whichever other path selects daytime activity
+  // candidates -- e.g. ensureNearbyUrbanRegionalCoverage, and the last day
+  // of a trip (never covered by that function's dayIndex guard) fell back
+  // to it too. This is the one gate every activity candidate must pass
+  // through, so exclude it here instead of patching each caller.
+  if (classification.isGamblingVenue) return false;
   if (classification.isSensitiveOrExplicitContent && !preferencesRequestSensitiveContent(input)) return false;
   if (isGenericParkContainer(item.place, profile)) return false;
   return true;
