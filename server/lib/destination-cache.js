@@ -28,12 +28,29 @@ export function destinationResearchCacheKey(destination, trip = {}, config = {})
   const providerMode = [config.aiProvider || "none", config.placeProvider || "none", config.routeProvider || "none"].join(":");
   const model = config.aiProvider === "openai" ? config.aiModel || "gpt-5-mini" : "none";
   const season = seasonBucket(trip?.startDate || trip?.endDate || "");
+  // Two requests for the same primary destination but different approved
+  // regional-extension bases (or none at all) previously collided on this
+  // key -- confirmed live: a traveler's first attempt (before an approved
+  // multi-city route could be researched correctly) cached a plain profile
+  // under this destination, and their retry reused that same stale entry
+  // for the rest of its 24h TTL even after the underlying bug was fixed and
+  // redeployed, because nothing here changes when the approved bases do.
+  // Fold the approved bases into the key so a different (or newly-approved)
+  // multi-city shape always gets its own cache entry. The "v3" bump also
+  // ensures this deploy's entries never collide with anything cached under
+  // the old key shape.
+  const approvedBases = (trip?.approvedTripShape?.hotelBases || [])
+    .map((base) => canonical(base?.canonicalName || base?.shortName || ""))
+    .filter(Boolean)
+    .sort()
+    .join(",");
   return [
-    "destination-profile-v2",
+    "destination-profile-v3",
     canonical(destination),
     providerMode,
     model,
-    season
+    season,
+    approvedBases
   ].join("|");
 }
 
