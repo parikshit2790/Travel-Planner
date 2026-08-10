@@ -314,9 +314,18 @@ function resolveApprovedTripShapeSchedule(profile, input) {
     }
     const name = normalizeText(base?.canonicalName || base?.shortName || "");
     if (!name) return null;
+    // A researched region's name is often Google's fully canonicalized form
+    // (e.g. "Grand Canyon National Park, Arizona, United States"), which can
+    // drop or add words relative to what the traveler approved (e.g. "Grand
+    // Canyon National Park South Rim") -- a plain substring check in either
+    // direction fails for real place names like this. Also compare against
+    // just the part before the first comma (the actual place name, without
+    // the trailing state/country), which is far more likely to line up.
     const region = profile.regions.find((candidate) => {
       const candidateName = normalizeText(candidate.name);
-      return candidateName === name || candidateName.includes(name) || name.includes(candidateName);
+      const candidateCore = normalizeText(String(candidate.name || "").split(",")[0]);
+      return candidateName === name || candidateName.includes(name) || name.includes(candidateName)
+        || (candidateCore && (candidateCore === name || name.includes(candidateCore) || candidateCore.includes(name)));
     });
     if (!region) return null;
     return { name: region.name, regionId: region.id, nights: Math.max(0, Number(base.nights || 0)) };
