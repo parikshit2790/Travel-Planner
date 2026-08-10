@@ -2696,9 +2696,13 @@ export function validateTripPlan(plan) {
   plan.days.forEach((day) => {
     if (!day.date) blocking.push(advisory(`date-${day.id}`, "blocking", "dates", `Day ${day.dayNumber} missing date`, "Every generated day must have a date.", "Regenerate the trip."));
     validateDay(day).forEach((issue) => blocking.push(advisory(`day-${day.id}-${issue.code}`, "blocking", "schedule", `Day ${day.dayNumber} schedule issue`, issue.message, "Regenerate or move conflicting items.")));
-    if (day.scheduleItems.some((item) => item.weatherDependency === "high") && !day.backupOptions.length) {
-      blocking.push(advisory(`backup-${day.id}`, "caution", "weather", `Day ${day.dayNumber} backup missing`, "Outdoor-heavy days should include at least one backup option.", "Replace one item with a lower-weather-dependency option."));
-    }
+    // A missing same-region indoor backup on an outdoor-heavy day is a soft
+    // planning note (severity "caution"), not grounds for rejecting an
+    // otherwise-valid itinerary -- buildAdvisories already surfaces this same
+    // check to the user non-blockingly. Pushing it into this function's
+    // "blocking" collection ignored its own declared severity and rejected
+    // real, correct plans (confirmed live: an approved Phoenix -> Grand
+    // Canyon -> Sedona itinerary was rejected solely for this).
     day.scheduleItems.forEach((item) => {
       const place = item.placeId ? profile.places.find((candidate) => candidate.id === item.placeId) : null;
       if (place && childFreeAdultTrip(input) && classifyPlaceForPlanning(place, profile, input).isChildrenFocused) {
