@@ -202,21 +202,22 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
     .filter(([key]) => interests.some((label) => label.includes(key)))
     .map(([, pattern]) => pattern);
   const candidateNames = (candidateCityNames || []).slice(0, maxCandidates);
-  // Directly measured live: a large, heavily-indexed candidate (e.g. a
-  // national park) can take ~50s to research on its own -- likely Google
-  // Places pagination across a big result set -- while a smaller candidate
-  // (e.g. a town) finishes in a few seconds. Researching candidates one at a
-  // time meant a slow candidate's ~50s plus a fast one's few seconds could
-  // exceed the shared request budget even after the caller already runs this
-  // batch alongside the primary destination's own research. Research every
-  // candidate concurrently instead of sequentially -- total time becomes the
-  // slowest single candidate, not the sum of all of them -- and give each
-  // one enough per-call headroom to actually finish instead of aborting a
-  // request that was always going to succeed if left to run.
-  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(55000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
-  const settled = await Promise.allSettled(candidateNames.map((cityName) =>
-    researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig)
-  ));
+  // The real cause of extension candidates failing turned out to be
+  // OpenAI's primary-research timeout eating almost the entire shared
+  // request budget (fixed separately, see openAiRequestTimeoutMs) -- a
+  // standalone candidate now reliably succeeds in ~30s. But live-tested
+  // after that fix: candidates still fail when researched fully
+  // simultaneously with each other (Promise.all with zero stagger),
+  // consistent with a brief peak-concurrency burst against the Google API
+  // (this batch's own N*4 parallel calls landing at the same instant as the
+  // primary destination's own fallback calls). A small stagger between
+  // candidates costs only a couple of seconds against a now-healthy ~30s
+  // budget out of ~58-60s available, and avoids that peak.
+  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(30000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
+  const settled = await Promise.allSettled(candidateNames.map(async (cityName, index) => {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, index * 2500));
+    return researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig);
+  }));
   const results = [];
   settled.forEach((outcome, index) => {
     if (outcome.status === "fulfilled") {
