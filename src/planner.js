@@ -1021,7 +1021,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     const backups = buildBackups(profile, constraints, themeRegions, selected.map((item) => item.place), scheduled, backupUsage);
     backups.forEach((backup) => backupUsage.set(backup.placeId, (backupUsage.get(backup.placeId) || 0) + 1));
     const warnings = [];
-    const dailyDriveMinutes = scheduleItems.filter((item) => item.type === "travel").reduce((sum, item) => sum + item.durationMinutes, 0);
+    const dailyDriveMinutes = groundTravelMinutes(scheduleItems);
     if (dailyDriveMinutes > input.maxDrivingMinutes) warnings.push(`Estimated driving exceeds your ${Math.round(input.maxDrivingMinutes / 60)} hour daily preference.`);
     const dailyBudget = estimateDayBudget(input, scheduleItems);
     const contentItems = scheduleItems.filter((item) => item.type === "activity" || item.type === "evening");
@@ -1864,6 +1864,19 @@ function travelItem(fromLabel, toLabel, start, travel) {
   };
 }
 
+// A "Fly and rent a car" (or any fly-based) trip's arrival/departure travel
+// item is a flight -- comparing its duration against a "max driving per day"
+// preference produces a nonsensical warning ("Estimated driving exceeds your
+// 4 hour daily preference" on an 11-hour transatlantic flight day, confirmed
+// live for a Denver-to-Rome trip). Ground transfers (actual driving, or a
+// regional-extension base transfer that really is a drive) still belong in
+// this total; only the flight-labeled arrival/departure item is excluded.
+function groundTravelMinutes(scheduleItems) {
+  return scheduleItems
+    .filter((item) => item.type === "travel" && item.travelFromPrevious?.mode !== "Arrival transfer" && item.travelFromPrevious?.mode !== "Departure transfer")
+    .reduce((sum, item) => sum + item.durationMinutes, 0);
+}
+
 function eveningItem(profile, input, constraints, regionId, start, dayIndex, usedActivityIds = new Set(), eveningUsage = new Map()) {
   const anchor = eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds, start, eveningUsage);
   if (anchor) {
@@ -2136,7 +2149,7 @@ function recalculateDay(day, input, profile) {
     cursor = item.endTimeMinutes + paceDefaults(input.pace).buffer;
   });
   day.scheduleItems = sortAndFormat(day.scheduleItems);
-  day.dailyDriveMinutes = day.scheduleItems.filter((item) => item.type === "travel").reduce((sum, item) => sum + item.durationMinutes, 0);
+  day.dailyDriveMinutes = groundTravelMinutes(day.scheduleItems);
   day.dailyBudget = estimateDayBudget(input, day.scheduleItems);
   day.warnings = validateDay(day).map((warning) => warning.message);
 }
