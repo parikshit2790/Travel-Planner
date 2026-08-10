@@ -20,6 +20,7 @@ import { mockLocationSearch } from "../server/lib/mock-provider.js";
 const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");
 const provider = readFileSync("src/location-provider.js", "utf8");
+const domain = readFileSync("src/domain.js", "utf8");
 
 assert.equal(initialState.trip.from, "");
 assert.equal(initialState.trip.destination, "");
@@ -175,5 +176,30 @@ assert.ok(css.includes(".location-results-panel { pointer-events: auto; }"));
 assert.ok(css.includes(".route-summary"));
 assert.ok(css.includes(".advisory-panel"));
 assert.ok(css.includes(".toast { position: fixed; right: 24px; top: 18px;"));
+
+// Places Already in Mind / Must-do Places are verified-autocomplete "tag"
+// fields (chips), not plain free text -- see addVerifiedPlaceTag() for why
+// (ambiguous/misspelled free text was resolving to wrong, unrelated cities).
+assert.ok(app.includes("function placeTagsField"));
+assert.ok(app.includes("function addVerifiedPlaceTag"));
+assert.ok(app.includes("function removePlaceTag"));
+assert.ok(app.includes('placeTagsField("placesInMind"'));
+assert.ok(app.includes('placeTagsField("mustDoPlaces"'));
+assert.ok(app.includes('removePlaceTag:${esc(field)}:${index}'));
+assert.ok(app.includes('name.startsWith("removePlaceTag:")'));
+assert.ok(app.includes("`${field}Verified`"));
+assert.ok(domain.includes("placesInMindVerified"));
+assert.ok(domain.includes("mustDoPlacesVerified"));
+assert.ok(!app.includes('input("trip.routePreferences.placesInMind"'));
+assert.ok(!app.includes('input("trip.routePreferences.mustDoPlaces"'));
+
+assert.ok(css.includes(".place-tag-list"));
+assert.ok(css.includes(".place-tag.verified"));
+assert.ok(css.includes(".place-tag.unverified"));
+assert.ok(css.includes(".place-tag-remove"));
+
+const tagTrip = createTripDraft();
+assert.deepEqual(tagTrip.routePreferences.placesInMindVerified, []);
+assert.deepEqual(tagTrip.routePreferences.mustDoPlacesVerified, []);
 
 console.log("Location autocomplete tests passed");
