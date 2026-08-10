@@ -988,6 +988,23 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     selected = ensureUrbanHistoricalCivicCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = ensureNearbyUrbanRegionalCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = ensureCoastalNatureCoverage(profile, input, intelligence, index, selected, eligibleCandidates, scheduled);
+    // An approved multi-city base (e.g. Grand Canyon, Sedona) must never sit
+    // empty on the one day the traveler is actually there -- normal scoring
+    // (score > -200 threshold, archetype-specific penalties) can zero out a
+    // thin regional-extension candidate pool entirely, silently leaving only
+    // travel/hotel/meal items. Confirmed live: Phoenix -> Grand Canyon ->
+    // Sedona produced zero scheduled activities on both extension days. Fall
+    // back to the region's own highest-scoring real candidates, ignoring the
+    // score floor, before accepting a logistics-only day for an approved base.
+    if (approvedSchedule && selected.length === 0 && themeRegions[0]) {
+      const homeRegionId = themeRegions[0];
+      const fallbackPool = scored
+        .filter((item) => item.place.regionId === homeRegionId && !scheduled.has(item.place.id) && isActivityCandidateForSchedule(item, profile, input))
+        .sort((a, b) => b.score - a.score);
+      if (fallbackPool.length) {
+        selected = fallbackPool.slice(0, Math.max(1, Math.min(2, input.maxActivities)));
+      }
+    }
     if (!isLongDriveArrivalDay(profile, input, index)) selected.forEach((item) => scheduled.add(item.place.id));
     const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
     const regionalTransfer = approvedSchedule && approvedSchedule.transferDayIndexes.has(index)
@@ -997,7 +1014,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
           return { fromRegionId, toRegionId, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), travel: estimateTravel(profile, fromRegionId, toRegionId) };
         })()
       : null;
-    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage, regionalTransfer);
+    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage, regionalTransfer, approvedSchedule ? themeRegions[0] : null);
     scheduleItems.forEach((item) => {
       if (item.placeId && item.type !== "breakfast" && item.type !== "lunch" && item.type !== "dinner") scheduled.add(item.placeId);
     });
@@ -1363,7 +1380,7 @@ function keepNearbyThemeRegions(profile, regionIds, limit) {
     .slice(0, limit);
 }
 
-function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null) {
+function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null, homeRegionId = null) {
   const items = [];
   const buffers = paceDefaults(input.pace).buffer;
   const mealDuration = input.pace === "Relaxed" ? 75 : 60;
@@ -1381,7 +1398,12 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     ? Math.max(16 * 60, travelContext.arrivalMinutes + (longArrivalDrive ? 105 : 60))
     : 0;
   const activityStart = Math.max(parseTime(input.earliestActivity) ?? 9 * 60, breakfastStart + 60, arrivalActivityStart);
-  const firstRegion = places[0]?.regionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
+  // When no activity got scheduled for the day (e.g. a thin regional-extension
+  // candidate pool), falling back to the trip's default hotel region for meals
+  // silently relocates them to the primary destination -- e.g. Grand Canyon's
+  // breakfast/lunch/dinner recommending Phoenix restaurants. Prefer the day's
+  // own approved base region (homeRegionId) before that trip-wide default.
+  const firstRegion = places[0]?.regionId || homeRegionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
   if (isArrivalDay) {
     addMeal(items, "breakfast", breakfastStart, 45, "Pre-departure breakfast", {
       primary: "Breakfast before leaving or on the first route stop",
