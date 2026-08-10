@@ -91,11 +91,15 @@ let ui = {
   planningPrinciplesSuppressHover: false,
   focusPlanningPrinciples: false,
   activeLocationField: null,
-  locationSuggestions: { from: [], destination: [], destinationRegions: [] },
-  locationLoading: { from: false, destination: false, destinationRegions: false },
-  locationError: { from: "", destination: "", destinationRegions: "" },
-  locationHighlight: { from: -1, destination: -1, destinationRegions: -1 },
-  locationRequestId: { from: 0, destination: 0, destinationRegions: 0 },
+  locationSuggestions: { from: [], destination: [], destinationRegions: [], placesInMind: [], mustDoPlaces: [] },
+  locationLoading: { from: false, destination: false, destinationRegions: false, placesInMind: false, mustDoPlaces: false },
+  locationError: { from: "", destination: "", destinationRegions: "", placesInMind: "", mustDoPlaces: "" },
+  locationHighlight: { from: -1, destination: -1, destinationRegions: -1, placesInMind: -1, mustDoPlaces: -1 },
+  locationRequestId: { from: 0, destination: 0, destinationRegions: 0, placesInMind: 0, mustDoPlaces: 0 },
+  // Places Already in Mind / Must-do Places are multi-value "tag" fields --
+  // this holds the text currently being typed to add a new place, separate
+  // from the already-added, comma-joined value in trip.routePreferences.
+  placeTagDraft: { placesInMind: "", mustDoPlaces: "" },
   touchedBasicsFields: new Set(),
   basicsSubmitAttempted: false
 };
@@ -1219,8 +1223,8 @@ function tripStructureSection(trip) {
     <details class="progressive-fields route-shaping-fields" ${routeDetailsOpen ? "open" : ""}>
       <summary><span><i aria-hidden="true">${iconSvg("route")}</i>Route-shaping details</span>${preferenceChips(routePreferenceSummary(prefs))}</summary>
       <div class="form-grid route-detail-grid">
-        ${fieldShell("Places Already in Mind", input("trip.routePreferences.placesInMind", prefs.placesInMind, "Places Already in Mind"), "Cities, neighborhoods, parks, or nearby areas you are already considering.")}
-        ${fieldShell("Must-do Places", input("trip.routePreferences.mustDoPlaces", prefs.mustDoPlaces, "Must-do Places"), "RouteMosaic should protect these before lower-priority ideas.")}
+        ${placeTagsField("placesInMind", "Places Already in Mind", prefs, "Cities, neighborhoods, parks, or nearby areas you are already considering. Pick a suggestion for each one so it resolves to the right place.")}
+        ${placeTagsField("mustDoPlaces", "Must-do Places", prefs, "RouteMosaic should protect these before lower-priority ideas. Pick a suggestion for each one so it resolves to the right place.")}
         ${fieldShell("Places to Avoid", input("trip.routePreferences.placesToAvoid", prefs.placesToAvoid, "Places to Avoid"), "Cities, neighborhoods, or activity types you do not want included.")}
         ${fieldShell("Open to Nearby Cities", select("trip.routePreferences.openToNearbyCities", prefs.openToNearbyCities, ["Yes", "No", "Only if clearly better"], "Open to Nearby Cities"), "Nearby cities are suggested only when the value justifies the burden.")}
         ${showMultiCityLimits ? fieldShell("Maximum Hotel Changes", select("trip.routePreferences.maxHotelChanges", prefs.maxHotelChanges, ["0", "1", "2", "3"], "Maximum Hotel Changes"), "Multi-city options cannot exceed this.") : ""}
@@ -1396,6 +1400,31 @@ function locationField(field, labelText, value, location, verificationStatus) {
   </div>`;
 }
 
+// Places Already in Mind / Must-do Places render as verified "tag" chips
+// instead of a single free-text input -- see addVerifiedPlaceTag() for why
+// (ambiguous/misspelled free text was resolving to wrong, unrelated cities).
+function placeTagsField(field, labelText, prefs, helperText) {
+  const active = ui.activeLocationField === field;
+  const verified = new Set((prefs[`${field}Verified`] || []).map((name) => name.toLowerCase()));
+  const tags = String(prefs[field] || "").split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
+  const panelId = `location-results-${field}`;
+  const activeId = ui.locationHighlight[field] >= 0 ? `${panelId}-${ui.locationHighlight[field]}` : "";
+  return `<div class="field-shell location-field place-tags-field">
+    <label for="location-${field}">${esc(labelText)}</label>
+    ${tags.length ? `<ul class="place-tag-list" aria-label="${esc(labelText)}">${tags.map((tag, index) => {
+      const isVerified = verified.has(tag.toLowerCase());
+      return `<li class="place-tag ${isVerified ? "verified" : "unverified"}" title="${isVerified ? "Verified location" : "Not verified from suggestions -- may not resolve to the place you meant."}">
+        <span aria-hidden="true">${isVerified ? "✓" : "⚠"}</span>${esc(tag)}
+        <button type="button" class="place-tag-remove" aria-label="Remove ${esc(tag)}" data-action="removePlaceTag:${esc(field)}:${index}">×</button>
+      </li>`;
+    }).join("")}</ul>` : ""}
+    <div class="location-control">
+      <input id="location-${field}" role="combobox" aria-autocomplete="list" aria-expanded="${active}" aria-controls="${panelId}" ${activeId ? `aria-activedescendant="${activeId}"` : ""} aria-describedby="location-helper-${field}" autocomplete="off" data-location-field="${esc(field)}" value="${esc(locationValue(field))}" placeholder="Type a place, then pick a suggestion to add it">
+    </div>
+    <small id="location-helper-${field}" class="field-helper">${esc(helperText)}</small>
+  </div>`;
+}
+
 function destinationRegionsField(trip) {
   const needs = tripBasicsIssues(trip).some((issue) => issue.field === "trip.destinationRegions");
   if (!needs && !String(trip.destinationRegions || "").trim()) return "";
@@ -1523,7 +1552,7 @@ function restrictionOverlay() {
 function locationAutocompleteOverlay() {
   const field = ui.activeLocationField;
   if (!field || state.activeStep !== 1) return "";
-  const inputValue = field === "from" ? state.trip.from : field === "destination" ? state.trip.destination : state.trip.destinationRegions;
+  const inputValue = locationValue(field);
   const suggestions = ui.locationSuggestions[field] || [];
   const loading = ui.locationLoading[field];
   const error = ui.locationError[field];
@@ -2582,6 +2611,12 @@ function openLocationSuggestions(field) {
 
 function updateLocationDraft(field, value) {
   ui.touchedBasicsFields.add(field);
+  if (field === "placesInMind" || field === "mustDoPlaces") {
+    ui.placeTagDraft[field] = value;
+    ui.activeLocationField = field;
+    queueLocationSearch(field, value);
+    return;
+  }
   const path = field === "from" ? "trip.from" : field === "destination" ? "trip.destination" : "trip.destinationRegions";
   setPath(state, path, value);
   if (field === "from") {
@@ -2626,6 +2661,7 @@ function markLocationFieldNeedsReview(field) {
 function locationValue(field) {
   if (field === "from") return state.trip.from;
   if (field === "destination") return state.trip.destination;
+  if (field === "placesInMind" || field === "mustDoPlaces") return ui.placeTagDraft[field] || "";
   return state.trip.destinationRegions;
 }
 
@@ -2695,6 +2731,10 @@ function selectLocationSuggestion(field, index) {
   const suggestion = ui.locationSuggestions[field]?.[index];
   if (!suggestion) return;
   ui.touchedBasicsFields.add(field);
+  if (field === "placesInMind" || field === "mustDoPlaces") {
+    addVerifiedPlaceTag(field, suggestion);
+    return;
+  }
   const hadApprovedRoute = (field === "from" || field === "destination") && Boolean(state.trip.approvedTripShape);
   if (field === "from") {
     state.trip.from = suggestion.normalizedName;
@@ -2726,7 +2766,60 @@ function selectLocationSuggestion(field, index) {
   ui.locationHighlight[field] = -1;
 }
 
+// Places Already in Mind / Must-do Places are stored as the same
+// comma-joined string splitList() already expects downstream (see
+// route-architecture.js) -- only the INPUT experience changes. Appending a
+// verified suggestion's real canonical name (not whatever the traveler
+// typed) is what stops a short or misspelled name from ever reaching
+// regional-extension research as ambiguous free text in the first place.
+function addVerifiedPlaceTag(field, suggestion) {
+  const name = String(suggestion.normalizedName || suggestion.displayName || "").trim();
+  if (!name) return;
+  const prefs = state.trip.routePreferences;
+  const existing = String(prefs[field] || "").split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
+  const verifiedKey = `${field}Verified`;
+  prefs[verifiedKey] ||= [];
+  if (!existing.some((item) => item.toLowerCase() === name.toLowerCase())) {
+    existing.push(name);
+    prefs[field] = existing.join(", ");
+  }
+  if (!prefs[verifiedKey].includes(name)) prefs[verifiedKey].push(name);
+  const hadApprovedRoute = Boolean(state.trip.approvedTripShape);
+  if (hadApprovedRoute) {
+    resetRouteApproval(state.trip);
+    ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
+  }
+  ui.placeTagDraft[field] = "";
+  ui.activeLocationField = null;
+  ui.locationSuggestions[field] = [];
+  ui.locationHighlight[field] = -1;
+}
+
+function removePlaceTag(field, index) {
+  const prefs = state.trip.routePreferences;
+  const existing = String(prefs[field] || "").split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
+  const [removed] = existing.splice(index, 1);
+  prefs[field] = existing.join(", ");
+  const verifiedKey = `${field}Verified`;
+  if (removed) prefs[verifiedKey] = (prefs[verifiedKey] || []).filter((item) => item.toLowerCase() !== removed.toLowerCase());
+  if (state.trip.approvedTripShape) {
+    resetRouteApproval(state.trip);
+    ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
+  }
+}
+
 function clearLocationField(field) {
+  if (field === "placesInMind" || field === "mustDoPlaces") {
+    clearTimeout(locationTimers[field]);
+    ui.locationRequestId[field] = (ui.locationRequestId[field] || 0) + 1;
+    ui.locationSuggestions[field] = [];
+    ui.locationLoading[field] = false;
+    ui.locationError[field] = "";
+    ui.locationHighlight[field] = -1;
+    ui.placeTagDraft[field] = "";
+    if (ui.activeLocationField === field) ui.activeLocationField = null;
+    return;
+  }
   clearTimeout(locationTimers[field]);
   ui.touchedBasicsFields.add(field);
   ui.locationRequestId[field] = (ui.locationRequestId[field] || 0) + 1;
@@ -3362,6 +3455,10 @@ function action(name) {
     selectLocationSuggestion(field, Number(index));
   }
   if (name.startsWith("clearLocation:")) clearLocationField(name.split(":")[1]);
+  if (name.startsWith("removePlaceTag:")) {
+    const [, field, index] = name.split(":");
+    removePlaceTag(field, Number(index));
+  }
   if (name === "closeLocationSuggestions") ui.activeLocationField = null;
   if (name.startsWith("retryLocationSearch:")) {
     const field = name.split(":")[1];

@@ -26,7 +26,18 @@ export const tripStructureOptions = [
 export const defaultRoutePreferences = {
   tripStructure: "recommend",
   placesInMind: "",
+  // Places Already in Mind / Must-do Places directly become candidate names
+  // for regional-extension research (see splitList usage below) -- a
+  // free-typed, unverified short or misspelled name (e.g. "Ashville" for
+  // Asheville, NC) can resolve to a same-named place hundreds of miles away
+  // with no relation to the trip at all (confirmed live: it resolved to
+  // Ashville, Virginia). These arrays track which comma-separated segments
+  // of placesInMind/mustDoPlaces were added via a verified, geocoded
+  // autocomplete suggestion (see placeTagsField in app.js) rather than
+  // typed free text, so the UI can show which entries are trustworthy.
+  placesInMindVerified: [],
   mustDoPlaces: "",
+  mustDoPlacesVerified: [],
   placesToAvoid: "",
   openToNearbyCities: "Yes",
   maxHotelChanges: "1",
