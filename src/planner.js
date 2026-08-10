@@ -1384,10 +1384,26 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   // then maybe takes a short walk -- not the other way around), so the
   // single evening-friendly activity is handled separately below instead of
   // through the normal pre-dinner activity loop.
+  // isArrivalEveningFriendly exists for the trip's own long-haul arrival day
+  // (a light stroll near the hotel after a flight) and explicitly excludes
+  // anything tagged "regional" -- but every place in an approved regional
+  // extension (Grand Canyon, Sedona, ...) is tagged exactly that way by the
+  // merge that brings its data in (confirmed live via a local repro: a real
+  // 90-minute viewpoint and a 120-minute trail both got excluded, leaving
+  // the day with zero scheduled activity beyond travel and dinner). Applied
+  // to a base-transfer day, that filter throws out the destination's own
+  // signature sights on the one day built around actually being there. A
+  // transfer day (not a long-haul arrival) still has real daylight left
+  // after checkin -- schedule real destination activities from the already
+  // region-scoped candidate list, not a light-stroll-only subset.
   const dayPlaces = isDepartureDay
     ? places.filter((place) => isDepartureFriendly(place)).slice(0, 1)
     : isArrivalDay
-      ? (longArrivalDrive ? [] : places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1))
+      ? (longArrivalDrive
+          ? []
+          : regionalTransfer
+            ? places.slice(0, Math.max(1, Math.min(2, input.maxActivities)))
+            : places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1))
       : places;
   let previousScheduledPlace = null;
   dayPlaces.forEach((place, index) => {
