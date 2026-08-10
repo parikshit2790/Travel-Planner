@@ -22,7 +22,17 @@ export function providerConfig() {
     aiModel: cleanEnv(process.env.AI_MODEL || process.env.OPENAI_MODEL) || "gpt-5-mini",
     timeoutMs: providerTimeoutMs,
     googleRequestTimeoutMs: positiveNumber(process.env.GOOGLE_REQUEST_TIMEOUT_MS, providerTimeoutMs),
-    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 50000),
+    // Directly measured live: a plain Phoenix-only research call (no
+    // approved multi-city route at all) still took ~52s end to end and
+    // resolved to the Google fallback provider, not OpenAI -- meaning
+    // OpenAI was consistently running out its full 50s timeout before
+    // falling back, regardless of destination. That left almost none of
+    // the shared ~58-60s request budget for anything after it, including
+    // regional extension research running concurrently. Give OpenAI a
+    // real but bounded window, so a slow/failing attempt fails fast enough
+    // to leave meaningful time for the Google-based fallback and any
+    // parallel regional extension research to actually complete.
+    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 28000),
     plannerRequestTimeoutMs: positiveNumber(process.env.PLANNER_REQUEST_TIMEOUT_MS, 58000),
     frontendGenerationTimeoutMs: positiveNumber(process.env.FRONTEND_GENERATION_TIMEOUT_MS, 70000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
