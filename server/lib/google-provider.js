@@ -67,7 +67,7 @@ export async function googleLocationSearch(query, config) {
   return dedupeBy(locations, (item) => item.providerPlaceId).slice(0, 8);
 }
 
-export async function googleDestinationResearch(destination, trip = {}, config, options = {}) {
+export async function googleDestinationResearch(destination, trip = {}, config) {
   const destinationLocation = locationFromTrip(trip) || (await resolveDestination(destination, config));
   if (!destinationLocation) throw googleProviderError("DESTINATION_RESEARCH_FAILED", "Destination could not be resolved.", false, 502);
   const destinationName = destinationLocation.canonicalName || String(destination || "").trim();
@@ -75,18 +75,15 @@ export async function googleDestinationResearch(destination, trip = {}, config, 
   // restaurants than a fixed small candidate pool can sustain -- scale the
   // restaurant fetch and candidate count with trip length.
   const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
-  // A regional extension only keeps 7 non-food + 3 food places out of
-  // whatever comes back (see researchRegionalExtensionCandidate), so it
-  // never needed the full-size primary-destination fetch. Directly measured
-  // live: a large, heavily-indexed destination (a national park) can take
-  // ~50s to respond to the full-size query set -- close enough to Vercel's
-  // hard 60s function ceiling (vercel.json maxDuration) to fail outright,
-  // while the same destination with a much smaller requested result count
-  // responds in a few seconds. Request far fewer results for extensions.
-  const isLean = Boolean(options.lean);
-  const attractionsCount = isLean ? 8 : 20;
-  const nearbyCount = isLean ? 8 : 20;
-  const restaurantFetchCount = isLean ? 6 : tripDays >= 7 ? 20 : 14;
+  // Previously requested a smaller result count here for regional-extension
+  // candidates on the theory that a large destination's full-size query was
+  // itself slow. Direct live measurement disproved that: the real delay was
+  // OpenAI's primary-research timeout eating the shared request budget
+  // (fixed separately, see openAiRequestTimeoutMs), and the reduced count
+  // caused post-filter candidate lists to sometimes come back empty even for
+  // destinations that previously succeeded reliably (e.g. Sedona). Use the
+  // same full-size query for every caller.
+  const restaurantFetchCount = tripDays >= 7 ? 20 : 14;
   // A single "best restaurants...food halls" query is dominated by generic,
   // broadly-touristy results (food courts, malls, chains) because that
   // framing is exactly what surfaces mainstream Google results. A second
@@ -94,11 +91,11 @@ export async function googleDestinationResearch(destination, trip = {}, config, 
   // genuinely different slice of Google's index -- this is what actually
   // brings in cultural and neighborhood-specific restaurants, not just a
   // bigger number of the same kind of place.
-  const localRestaurantFetchCount = isLean ? 4 : tripDays >= 7 ? 16 : 12;
-  const foodCandidateLimit = isLean ? 10 : tripDays >= 7 ? 24 : 16;
+  const localRestaurantFetchCount = tripDays >= 7 ? 16 : 12;
+  const foodCandidateLimit = tripDays >= 7 ? 24 : 16;
   const [attractions, nearby, restaurants, localRestaurants] = await Promise.all([
-    googleTextSearch(`best tourist attractions and museums in ${destinationName}`, config, placeFieldMask(), attractionsCount),
-    googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, nearbyCount),
+    googleTextSearch(`best tourist attractions and museums in ${destinationName}`, config, placeFieldMask(), 20),
+    googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, 20),
     googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount),
     googleTextSearch(`local authentic restaurants and neighborhood eateries in ${destinationName}`, config, placeFieldMask(), localRestaurantFetchCount)
   ]);
@@ -173,7 +170,7 @@ const INTEREST_KEYWORDS = {
 };
 
 async function researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, config) {
-  const candidateProfile = await googleDestinationResearch(cityName, {}, config, { lean: true });
+  const candidateProfile = await googleDestinationResearch(cityName, {}, config);
   const candidateCenter = candidateProfile.regions[0]?.centerCoordinates;
   if (!primaryLocation || !candidateCenter) return null;
   const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
