@@ -2772,8 +2772,18 @@ function selectLocationSuggestion(field, index) {
 // verified suggestion's real canonical name (not whatever the traveler
 // typed) is what stops a short or misspelled name from ever reaching
 // regional-extension research as ambiguous free text in the first place.
+//
+// The stored name must NOT contain a comma: this string is re-split on
+// commas both here (for chip rendering) and by splitList() downstream, so a
+// full "City, State, Country" name would get shredded into multiple bogus
+// entries (confirmed live: "Asheville, North Carolina, United States" became
+// three separate chips -- "Asheville", "North Carolina", "United States" --
+// with "North Carolina" then feeding the route planner as a fake hotel
+// base). Use the suggestion's bare place name instead; the location-bias fix
+// already makes short names resolve correctly when re-geocoded downstream.
 function addVerifiedPlaceTag(field, suggestion) {
-  const name = String(suggestion.normalizedName || suggestion.displayName || "").trim();
+  const rawName = String(suggestion.city || suggestion.normalizedName || suggestion.displayName || "").trim();
+  const name = rawName.split(",")[0].trim();
   if (!name) return;
   const prefs = state.trip.routePreferences;
   const existing = String(prefs[field] || "").split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
