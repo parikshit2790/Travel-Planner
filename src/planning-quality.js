@@ -713,7 +713,15 @@ function hasMuseumDominance(plan) {
   const activityItems = (plan.days || []).flatMap((day) => (day.scheduleItems || []).filter((item) => item.type === "activity"));
   if (activityItems.length < 4 || explicitMuseumIntent(plan)) return false;
   const museumItems = activityItems.filter((item) => /\b(museum|gallery|exhibition|historic house|history center)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
-  const outdoorOrNeighborhood = activityItems.filter((item) => /\b(park|garden|greenway|trail|lake|mountain|waterfall|whitewater|neighborhood|district|market|camp|waterfront|beach|boardwalk|scenic|food|arts|art|local culture|evening)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
+  // A scheduled activity's `category` field keeps only the place's FIRST
+  // researched category (e.g. "nature" or "landmark"), and real park/nature
+  // stops routinely use vocabulary this list didn't cover -- confirmed live:
+  // Grand Canyon and Sedona nature stops (Grandview Point, Walnut Canyon
+  // National Monument, Devil's Bridge Trailhead) all fell through as
+  // "unmatched" and got miscounted as museum concentration, incorrectly
+  // rejecting a real, well-populated multi-city itinerary. \btrail\b also
+  // never matches "Trailhead" (no word boundary inside one continuous word).
+  const outdoorOrNeighborhood = activityItems.filter((item) => /\b(park|garden|greenway|trail|trailhead|nature|preserve|monument|canyon|overlook|viewpoint|wildlife|forest|desert|botanical|hiking|lake|mountain|waterfall|whitewater|neighborhood|district|market|camp|waterfront|beach|boardwalk|scenic|food|arts|art|local culture|evening)\b/i.test(`${item.title} ${item.category || ""} ${(item.tags || []).join(" ")}`));
   if (outdoorOrNeighborhood.length >= Math.max(3, museumItems.length)) return false;
   if (museumItems.length >= 3 && museumItems.length / activityItems.length > 0.42) return true;
   if (museumItems.length >= 2 && outdoorOrNeighborhood.length === 0) return true;
