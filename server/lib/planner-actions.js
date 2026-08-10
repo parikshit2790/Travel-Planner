@@ -389,6 +389,14 @@ export function mergeRegionalExtensionsIntoProfile(profile, extensions) {
     merged.regions.push({
       id: regionId,
       name: extension.canonicalName,
+      // Google's canonicalized name can diverge completely from what the
+      // traveler actually approved (e.g. an approved "Lake Norman, North
+      // Carolina" base resolved to "Cornelius, North Carolina" -- a real
+      // town on the lake, but with zero textual overlap). Keep the exact
+      // string that was requested so resolveApprovedTripShapeSchedule can
+      // match it exactly instead of relying on fuzzy substring matching
+      // against a name that may bear no resemblance to what was approved.
+      requestedName: extension.cityName || extension.canonicalName,
       summary: `Regional extension about ${Math.round(extension.route.durationMinutes / 60 * 10) / 10} hours (${Math.round(extension.route.distanceMiles)} miles) from ${profile.canonicalName}.`,
       centerCoordinates: extension.centerCoordinates,
       tags: ["regional", isOvernightScale ? "overnight-extension" : "day-trip"],
