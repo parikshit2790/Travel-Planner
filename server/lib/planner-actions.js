@@ -1,5 +1,5 @@
 import { registerGeneratedDestinationProfile } from "../../src/destination-data.js";
-import { createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
+import { calculateInclusiveTripDays, createTripDraft, migrateTripState, syncTravelersToCounts } from "../../src/domain.js";
 import { compatibleAlternatives, generateTripPlan, regenerateDay, regenerateMeals, regeneratePlanPreservingLocks } from "../../src/planner.js";
 import { providerConfig, validatePlanningProviders } from "./env.js";
 import { discoverRegionalExtensions, googleDestinationResearch, googleRouteEstimate, groundPlacesWithCoordinates, resolveDestination, supplementFoodCandidates } from "./google-provider.js";
@@ -83,6 +83,8 @@ async function handleDestinationResearch({ trip } = {}, { requestId } = {}) {
 
 async function handleTripGeneration({ trip, destinationProfile, variationSeed = 0 } = {}, { requestId } = {}) {
   if (!trip) return actionError(400, "TRIP_REQUIRED", "Trip is required.", false, requestId);
+  const boundsError = tripInputBoundsError(trip, requestId);
+  if (boundsError) return boundsError;
   const config = providerConfig();
   const destination = String(trip.destinationDisplay || trip.destination || "").trim();
   const providerErrors = validatePlanningProviders(config);
@@ -498,6 +500,40 @@ function routeErrorCode(error) {
   return "ROUTE_ESTIMATE_FAILED";
 }
 
+const MAX_TRIP_DAYS = 60;
+const MAX_TRIP_TRAVELERS = 50;
+
+// syncTravelersToCounts (domain.js) builds one array entry per traveler with
+// no upper bound, and generateTripPlan builds one schedule entry per day --
+// both run well before getTripIssues' own day-count check (buried inside
+// generateTripPlan). A client posting a degenerate value here (e.g.
+// adults: 100000000) previously blocked the whole single-threaded process
+// building that array before any validation ever ran. Reject grossly
+// out-of-range values up front, before any unbounded work starts.
+function tripInputBoundsError(trip, requestId) {
+  const explicitDays = Number(trip?.days ?? trip?.numberOfDays);
+  const computedDays = trip?.startDate && trip?.endDate ? calculateInclusiveTripDays(trip.startDate, trip.endDate) : null;
+  const days = Number.isFinite(explicitDays) && explicitDays > 0 ? explicitDays : computedDays;
+  if (Number.isFinite(days) && (days < 1 || days > MAX_TRIP_DAYS)) {
+    return actionError(400, "TRIP_DAYS_OUT_OF_RANGE", `Number of Days must be between 1 and ${MAX_TRIP_DAYS}.`, false, requestId);
+  }
+  const travelerFields = ["adults", "children", "seniors"];
+  const hasInvalidTravelerField = travelerFields.some((field) => {
+    const raw = trip?.[field];
+    if (raw === undefined || raw === null || raw === "") return false;
+    const value = Number(raw);
+    return !Number.isFinite(value) || value < 0 || !Number.isInteger(value);
+  });
+  if (hasInvalidTravelerField) {
+    return actionError(400, "TRAVELER_COUNT_INVALID", "Traveler counts must be whole, non-negative numbers.", false, requestId);
+  }
+  const totalTravelers = travelerFields.reduce((sum, field) => sum + (Number(trip?.[field]) || 0), 0);
+  if (totalTravelers > MAX_TRIP_TRAVELERS) {
+    return actionError(400, "TRAVELER_COUNT_OUT_OF_RANGE", `Total travelers cannot exceed ${MAX_TRIP_TRAVELERS}.`, false, requestId);
+  }
+  return null;
+}
+
 function normalizeTripForPlanning(trip) {
   const copy = mergePlainObjects(createTripDraft(), structuredClone(trip));
   migrateTripState(copy);
@@ -505,9 +541,19 @@ function normalizeTripForPlanning(trip) {
   return copy;
 }
 
+// A client-supplied JSON body key literally named "__proto__" survives
+// JSON.parse as a normal own property (not the prototype accessor), and a
+// bracket assignment like base[key] = value with key === "__proto__" DOES
+// trigger the Object.prototype setter -- silently repointing/mutating
+// Object.prototype for the whole process. Confirmed exploitable with a
+// standalone repro of this exact merge algorithm. Never assign these keys,
+// at any recursion depth.
+const UNSAFE_MERGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function mergePlainObjects(base, override) {
   if (!override || typeof override !== "object") return base;
   Object.entries(override).forEach(([key, value]) => {
+    if (UNSAFE_MERGE_KEYS.has(key)) return;
     if (Array.isArray(value)) {
       base[key] = value;
       return;
