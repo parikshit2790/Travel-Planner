@@ -343,9 +343,13 @@ export async function groundPlacesWithCoordinates(profile, destinationName, conf
   const needsGrounding = places.filter((place) => !hasCoordinates(place.coordinates));
   if (!needsGrounding.length) return profile;
   const lightFieldMask = "places.id,places.location";
-  const results = await Promise.allSettled(
-    needsGrounding.map((place) => googleTextSearch(`${place.name}, ${destinationName}`, config, lightFieldMask, 1))
-  );
+  // Firing one Google call per ungrounded place all at once (a full AI
+  // profile can easily be 20-30 places) is a real burst-load pattern on top
+  // of whatever else a single request is already doing concurrently
+  // (regional extension research, food supplementing) -- cap how many
+  // grounding calls are in flight at once instead of firing every place
+  // simultaneously, to keep total concurrent Google API load bounded.
+  const results = await mapWithConcurrencyLimit(needsGrounding, 6, (place) => googleTextSearch(`${place.name}, ${destinationName}`, config, lightFieldMask, 1));
   needsGrounding.forEach((place, index) => {
     const outcome = results[index];
     if (outcome.status !== "fulfilled" || !outcome.value?.length) return;
@@ -1009,6 +1013,24 @@ function durationSeconds(value) {
 
 function compactName(parts) {
   return parts.map((part) => String(part || "").trim()).filter(Boolean).filter((part, index, array) => array.indexOf(part) === index).join(", ");
+}
+
+async function mapWithConcurrencyLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        results[index] = { status: "fulfilled", value: await fn(items[index], index) };
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function dedupeBy(items, keyFn) {
