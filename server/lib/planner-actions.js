@@ -252,7 +252,63 @@ function handleWeatherSummary({ destination = "", startDate = "", endDate = "" }
   return actionError(501, "PROVIDER_NOT_IMPLEMENTED", "Live weather guidance is not available yet.", true, requestId);
 }
 
+function approvedExtensionCities(trip) {
+  // Bases the traveler explicitly approved in Trip Shape (e.g. "Osaka" in an
+  // approved "Tokyo -> Osaka" route) must be researched regardless of what the
+  // AI itself suggested as regional candidates -- an approved base is a
+  // requirement, not a same-day-drive-comfort suggestion.
+  return (trip?.approvedTripShape?.hotelBases || []).slice(1).map((base) => base.canonicalName).filter(Boolean);
+}
+
+function extensionDriveMinutesBudget(trip, isApproved) {
+  // An approved overnight base is reached once (by whatever transport mode fits
+  // the trip -- often rail or air for international multi-city routes), not
+  // driven to and from on the same day, so it must not be filtered out by the
+  // traveler's day-trip driving-comfort preference.
+  return isApproved
+    ? Math.max(600, Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 0)
+    : Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 240;
+}
+
+// A large, heavily-indexed regional-extension candidate (e.g. a national
+// park) can take 40-50+ seconds to research on its own -- live-tested and
+// reproduced repeatedly. Run it after the primary destination's own research
+// and it has no realistic chance of finishing inside the shared 58s request
+// budget. Starting it concurrently with primary research, using only the
+// destination string the traveler already gave us (not waiting on the
+// primary profile), means the two race in parallel instead of stacking, so
+// the approved extension actually has a chance to complete.
+function startApprovedExtensionsResearch(destination, trip, config) {
+  const approvedCities = approvedExtensionCities(trip);
+  const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
+  const hasGoogleAccess = Boolean(config.googleMapsApiKey || config.placeApiKey);
+  if (!approvedCities.length || tripDays < 4 || !hasGoogleAccess) return { approvedCities, promise: Promise.resolve([]) };
+  const promise = (async () => {
+    try {
+      const primaryLocation = await resolveDestination(destination, config);
+      if (!primaryLocation) return [];
+      const maxDriveMinutes = extensionDriveMinutesBudget(trip, true);
+      const interestLabels = [
+        ...(trip?.preferences || []).map((item) => item?.label || item),
+        ...(trip?.activity?.hiking ? [trip.activity.hiking] : [])
+      ].filter(Boolean);
+      return await discoverRegionalExtensions(
+        { latitude: primaryLocation.latitude, longitude: primaryLocation.longitude },
+        approvedCities,
+        interestLabels,
+        config,
+        { maxDriveMinutes, maxCandidates: approvedCities.length }
+      );
+    } catch (error) {
+      console.warn("[RouteMosaic planner] Approved regional extension discovery skipped", JSON.stringify({ code: error?.code || "REGIONAL_EXTENSION_FAILED" }));
+      return [];
+    }
+  })();
+  return { approvedCities, promise };
+}
+
 async function researchDestination(destination, trip, config) {
+  const approvedExtensions = startApprovedExtensionsResearch(destination, trip, config);
   let profile;
   if (config.aiProvider === "openai" && config.aiApiKey) {
     try {
@@ -282,45 +338,42 @@ async function researchDestination(destination, trip, config) {
     else if (config.placeProvider === "openrouteservice") return openRouteServiceDestinationResearch(destination, trip, config);
     else throw new Error("Place provider is not implemented in this build.");
   }
-  return addRegionalExtensions(profile, trip, config);
+  return addRegionalExtensions(profile, trip, config, approvedExtensions);
 }
 
-async function addRegionalExtensions(profile, trip, config) {
-  // Bases the traveler explicitly approved in Trip Shape (e.g. "Osaka" in an
-  // approved "Tokyo -> Osaka" route) must be researched regardless of what the
-  // AI itself suggested as regional candidates -- an approved base is a
-  // requirement, not a same-day-drive-comfort suggestion.
-  const approvedCities = (trip?.approvedTripShape?.hotelBases || []).slice(1).map((base) => base.canonicalName).filter(Boolean);
+async function addRegionalExtensions(profile, trip, config, approvedExtensions = null) {
+  const approvedCities = approvedExtensions?.approvedCities ?? approvedExtensionCities(trip);
   const suggestedCities = profile.regionalDestinationProfile?.regionalCandidateCities || [];
-  const candidateCities = [...new Set([...approvedCities, ...suggestedCities])];
+  // Approved cities are already being researched concurrently (started before
+  // primary research began); only unresearched AI-suggested cities remain to
+  // fetch sequentially here, and only if there's room left in maxCandidates.
+  const remainingSlots = Math.max(0, Math.max(2, approvedCities.length) - approvedCities.length);
+  const additionalCandidateCities = [...new Set(suggestedCities.filter((city) => !approvedCities.includes(city)))].slice(0, remainingSlots);
   const tripDays = Number(trip?.days || trip?.numberOfDays || 0);
   const hasGoogleAccess = Boolean(config.googleMapsApiKey || config.placeApiKey);
-  if (!candidateCities.length || tripDays < 4 || !hasGoogleAccess) return profile;
+  const approvedExtensionResults = approvedExtensions ? await approvedExtensions.promise : [];
+  if (!additionalCandidateCities.length || tripDays < 4 || !hasGoogleAccess) {
+    return mergeRegionalExtensionsIntoProfile(profile, approvedExtensionResults);
+  }
   try {
     const primaryLocation = await resolveDestination(profile.canonicalName, config);
-    if (!primaryLocation) return profile;
-    // An approved overnight base is reached once (by whatever transport mode fits
-    // the trip -- often rail or air for international multi-city routes), not
-    // driven to and from on the same day, so it must not be filtered out by the
-    // traveler's day-trip driving-comfort preference.
-    const maxDriveMinutes = approvedCities.length
-      ? Math.max(600, Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 0)
-      : Number(trip?.transport?.maxDrivingDay) > 0 ? Number(trip.transport.maxDrivingDay) * 60 : 240;
+    if (!primaryLocation) return mergeRegionalExtensionsIntoProfile(profile, approvedExtensionResults);
+    const maxDriveMinutes = extensionDriveMinutesBudget(trip, false);
     const interestLabels = [
       ...(trip?.preferences || []).map((item) => item?.label || item),
       ...(trip?.activity?.hiking ? [trip.activity.hiking] : [])
     ].filter(Boolean);
     const extensions = await discoverRegionalExtensions(
       { latitude: primaryLocation.latitude, longitude: primaryLocation.longitude },
-      candidateCities,
+      additionalCandidateCities,
       interestLabels,
       config,
-      { maxDriveMinutes, maxCandidates: Math.max(2, approvedCities.length) }
+      { maxDriveMinutes, maxCandidates: additionalCandidateCities.length }
     );
-    return mergeRegionalExtensionsIntoProfile(profile, extensions);
+    return mergeRegionalExtensionsIntoProfile(profile, [...approvedExtensionResults, ...extensions]);
   } catch (error) {
     console.warn("[RouteMosaic planner] Regional extension discovery skipped", JSON.stringify({ code: error?.code || "REGIONAL_EXTENSION_FAILED" }));
-    return profile;
+    return mergeRegionalExtensionsIntoProfile(profile, approvedExtensionResults);
   }
 }
 

@@ -193,25 +193,30 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
   const activeKeywordPatterns = Object.entries(INTEREST_KEYWORDS)
     .filter(([key]) => interests.some((label) => label.includes(key)))
     .map(([, pattern]) => pattern);
-  const results = [];
   const candidateNames = (candidateCityNames || []).slice(0, maxCandidates);
-  // Live-tested repeatedly: a stagger/backoff retry made no difference --
-  // the failure is fully deterministic (the same candidate fails on every
-  // run, a differently-sized candidate researched right after always
-  // succeeds), which points to a large, heavily-indexed destination (e.g. a
-  // national park) routinely exceeding the flat 10s-per-call Google timeout
-  // rather than a transient rate limit. Retrying the same slow query just
-  // burns budget without helping. Give extension candidates a longer
-  // per-call ceiling instead, in a single attempt.
-  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(20000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
-  for (const cityName of candidateNames) {
-    try {
-      const candidate = await researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig);
-      if (candidate) results.push(candidate);
-    } catch (error) {
-      console.warn("[RouteMosaic planner] Regional extension candidate research failed", JSON.stringify({ cityName, code: error?.code || "REGIONAL_EXTENSION_CANDIDATE_FAILED" }));
+  // Directly measured live: a large, heavily-indexed candidate (e.g. a
+  // national park) can take ~50s to research on its own -- likely Google
+  // Places pagination across a big result set -- while a smaller candidate
+  // (e.g. a town) finishes in a few seconds. Researching candidates one at a
+  // time meant a slow candidate's ~50s plus a fast one's few seconds could
+  // exceed the shared request budget even after the caller already runs this
+  // batch alongside the primary destination's own research. Research every
+  // candidate concurrently instead of sequentially -- total time becomes the
+  // slowest single candidate, not the sum of all of them -- and give each
+  // one enough per-call headroom to actually finish instead of aborting a
+  // request that was always going to succeed if left to run.
+  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(55000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
+  const settled = await Promise.allSettled(candidateNames.map((cityName) =>
+    researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig)
+  ));
+  const results = [];
+  settled.forEach((outcome, index) => {
+    if (outcome.status === "fulfilled") {
+      if (outcome.value) results.push(outcome.value);
+    } else {
+      console.warn("[RouteMosaic planner] Regional extension candidate research failed", JSON.stringify({ cityName: candidateNames[index], code: outcome.reason?.code || "REGIONAL_EXTENSION_CANDIDATE_FAILED" }));
     }
-  }
+  });
   return results;
 }
 
