@@ -214,8 +214,15 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
   // candidates costs only a couple of seconds against a now-healthy ~30s
   // budget out of ~58-60s available, and avoids that peak.
   const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(30000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
+  // The first candidate (index 0) still raced against the primary
+  // destination's own initial call burst even with later candidates
+  // staggered behind it -- live-tested, it kept failing while a
+  // later-starting candidate kept succeeding. Delay every candidate,
+  // including the first, so none of them start at the exact instant this
+  // whole batch (itself started concurrently with the caller's primary
+  // research) kicks off.
   const settled = await Promise.allSettled(candidateNames.map(async (cityName, index) => {
-    if (index > 0) await new Promise((resolve) => setTimeout(resolve, index * 2500));
+    await new Promise((resolve) => setTimeout(resolve, 1500 + index * 2500));
     return researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig);
   }));
   const results = [];
