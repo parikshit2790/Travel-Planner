@@ -579,7 +579,17 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
   const archetype = plan?.generationMetadata?.destinationArchetype?.primaryArchetype || plan?.generationMetadata?.destinationProfile?.primaryArchetype || "";
   if (/mountain|national park/.test(archetype)) {
     const hasScenicOrTrail = included.some((node) => /\b(outdoor|park|trail|mountain|waterfall|scenic|overlook|corridor|parkway|kuwohi|gap|cove|fork|river road)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
-    const hasGatewayOrEntertainment = included.some((node) => /\b(neighborhood|district|downtown|gateway|entertainment|theme park|island|dollywood|anakeesta|skypark|gatlinburg|pigeon forge)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
+    // This vocabulary was originally written for Great Smoky Mountains-style
+    // gateway towns (Gatlinburg, Pigeon Forge, Dollywood) and doesn't
+    // generalize to other mountain destinations whose "second category"
+    // anchor is a genuine culture/landmark stop instead of a literal gateway
+    // town -- confirmed live: an Asheville leg with Biltmore Estate as its
+    // best non-nature candidate still failed this check, since neither
+    // "Biltmore" nor its museum/historical-landmark categorization matched
+    // any of the gateway-town-specific keywords below. Accept a real
+    // culture/landmark anchor as an equally valid second category, matching
+    // the vocabulary the urban branch below already uses for hasCulture.
+    const hasGatewayOrEntertainment = included.some((node) => /\b(neighborhood|district|downtown|gateway|entertainment|theme park|island|dollywood|anakeesta|skypark|gatlinburg|pigeon forge|museum|culture|historic|landmark|estate|heritage)\b/.test(`${node.primaryType} ${node.secondaryTypes?.join(" ")} ${normalizeText(node.canonicalName)}`));
     if (tripDays <= 2) return included.length < requiredIncluded || !(hasScenicOrTrail || hasGatewayOrEntertainment);
     return included.length < requiredIncluded || !(hasScenicOrTrail && hasGatewayOrEntertainment);
   }
