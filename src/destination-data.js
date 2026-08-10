@@ -460,9 +460,25 @@ function normalizeGeneratedDestinationProfile(profile) {
   if (!canonicalName) return null;
   const id = String(profile.id || `generated-${canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`).slice(0, 72);
   const aliases = Array.isArray(profile.aliases) && profile.aliases.length ? profile.aliases : [canonicalName.toLowerCase()];
-  const regions = Array.isArray(profile.regions) ? profile.regions.filter((item) => item?.id && item?.name).slice(0, 18) : [];
-  const places = Array.isArray(profile.places) ? profile.places.filter((item) => item?.id && item?.name && item?.regionId).slice(0, 42) : [];
-  const foodAreas = Array.isArray(profile.foodAreas) ? profile.foodAreas.filter((item) => item?.id && item?.name && item?.regionId).slice(0, 14) : [];
+  // Regional-extension data (an approved multi-city base like Grand Canyon or
+  // Sedona) is always appended after the primary destination's own regions/
+  // places/food areas by the merge step. A flat slice(0, N) on the combined
+  // list silently drops every extension entry whenever the primary
+  // destination alone already has N+ real entries -- confirmed live: Phoenix
+  // alone filled the 42-place cap, so both approved extensions (20 real,
+  // researched places) were truncated away entirely and their days had zero
+  // scheduled activities. Cap only the primary destination's own entries and
+  // always keep every "regional-ext-" entry (already bounded upstream by
+  // discoverRegionalExtensions' candidate limit).
+  const isExtensionEntry = (item) => String(item?.regionId || item?.id || "").startsWith("regional-ext-");
+  const capKeepingExtensions = (list, limit) => {
+    const extension = list.filter(isExtensionEntry);
+    const primary = list.filter((item) => !isExtensionEntry(item));
+    return [...primary.slice(0, limit), ...extension];
+  };
+  const regions = capKeepingExtensions(Array.isArray(profile.regions) ? profile.regions.filter((item) => item?.id && item?.name) : [], 18);
+  const places = capKeepingExtensions(Array.isArray(profile.places) ? profile.places.filter((item) => item?.id && item?.name && item?.regionId) : [], 42);
+  const foodAreas = capKeepingExtensions(Array.isArray(profile.foodAreas) ? profile.foodAreas.filter((item) => item?.id && item?.name && item?.regionId) : [], 14);
   const scenicRoutes = Array.isArray(profile.scenicRoutes) ? profile.scenicRoutes.filter((item) => item?.id && item?.originRegionId && item?.destinationRegionId).slice(0, 14) : [];
   if (regions.length < 4 || places.length < 8 || foodAreas.length < 3) return null;
   return {
