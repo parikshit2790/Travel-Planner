@@ -501,6 +501,7 @@ function normalizeGeneratedDestinationProfile(profile) {
     regions: regions.map((item) => ({
       id: String(item.id),
       name: String(item.name),
+      requestedName: String(item.requestedName || item.name),
       summary: String(item.summary || ""),
       centerCoordinates: item.centerCoordinates || { lat: 0, lng: 0 },
       tags: arrayOfStrings(item.tags, 8),

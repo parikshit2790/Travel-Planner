@@ -314,6 +314,18 @@ function resolveApprovedTripShapeSchedule(profile, input) {
     }
     const name = normalizeText(base?.canonicalName || base?.shortName || "");
     if (!name) return null;
+    // Google's canonicalized region name can bear zero textual resemblance
+    // to what was actually approved -- confirmed live: an approved "Lake
+    // Norman, North Carolina" base resolved to "Cornelius, North Carolina"
+    // (a real town on the lake, but no substring relationship at all). That
+    // silently failed every fuzzy check below, which failed the whole
+    // multi-city schedule closed and fell back to generic single-city
+    // rotation -- which is what actually caused a "signature attraction
+    // coverage" quality-gate rejection, not thin candidate data. Regions
+    // merged from an approved regional extension carry the exact string
+    // that was requested (requestedName) specifically to make this an exact
+    // match instead of a guess.
+    const exactRequestedMatch = profile.regions.find((candidate) => candidate.requestedName && normalizeText(candidate.requestedName) === name);
     // A researched region's name is often Google's fully canonicalized form
     // (e.g. "Grand Canyon National Park, Arizona, United States"), which can
     // drop or add words relative to what the traveler approved (e.g. "Grand
@@ -321,7 +333,7 @@ function resolveApprovedTripShapeSchedule(profile, input) {
     // direction fails for real place names like this. Also compare against
     // just the part before the first comma (the actual place name, without
     // the trailing state/country), which is far more likely to line up.
-    const region = profile.regions.find((candidate) => {
+    const region = exactRequestedMatch || profile.regions.find((candidate) => {
       const candidateName = normalizeText(candidate.name);
       const candidateCore = normalizeText(String(candidate.name || "").split(",")[0]);
       return candidateName === name || candidateName.includes(name) || name.includes(candidateName)

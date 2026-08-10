@@ -2157,7 +2157,7 @@ function comfortStep() {
           `<tr><td>Total Budget</td><td>${input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget")}${budgetHint(trip)}</td></tr>`,
           `<tr><td>Budget Strictness</td><td>${select("trip.budget.strictness", trip.budget.strictness, ["Strict", "Flexible"], "Budget Strictness")}</td></tr>`,
           `<tr><td>Maximum Nightly Lodging Budget</td><td>${input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget")}</td></tr>`,
-          `<tr><td>Maximum Hotel Changes</td><td>${select("trip.lodging.changeHotels", trip.lodging.changeHotels, ["Stay in one place", "Minimize hotel changes", "Open to moving"], "Maximum Hotel Changes")}</td></tr>`,
+          `<tr><td>Lodging Flexibility</td><td>${select("trip.lodging.changeHotels", trip.lodging.changeHotels, ["Stay in one place", "Minimize hotel changes", "Open to moving"], "Lodging Flexibility")}<small class="field-helper">Shapes packing and checkout tips. The hotel-change limit used to build route options is set in Trip Basics → Route-shaping details.</small></td></tr>`,
           `<tr><td>Accommodation Preferences</td><td>${esc(chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel", "Free parking", "Free breakfast"]))} <button class="small" data-action="openLodging">Edit</button></td></tr>`
         ]))}
     </div>
