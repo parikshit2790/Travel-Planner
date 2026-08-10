@@ -39,8 +39,11 @@ const REJECTED_TYPES = new Set([
   "parking"
 ]);
 
-export async function googleLocationSearch(query, config) {
+export async function googleLocationSearch(query, config, locationBias = null) {
   const input = String(query || "").trim();
+  const bias = locationBias && Number.isFinite(locationBias.latitude) && Number.isFinite(locationBias.longitude)
+    ? { circle: { center: { latitude: locationBias.latitude, longitude: locationBias.longitude }, radius: 50000 } }
+    : undefined;
   const json = await googlePlacesRequest("/places:autocomplete", {
     config,
     operation: "places-autocomplete",
@@ -48,7 +51,8 @@ export async function googleLocationSearch(query, config) {
     body: {
       input,
       includedPrimaryTypes: ["locality", "administrative_area_level_1", "country", "tourist_attraction", "national_park"],
-      languageCode: "en"
+      languageCode: "en",
+      ...(bias ? { locationBias: bias } : {})
     }
   });
   const suggestions = Array.isArray(json?.suggestions) ? json.suggestions : [];
@@ -61,7 +65,7 @@ export async function googleLocationSearch(query, config) {
     if (location) locations.push(location);
   }
   if (!locations.length) {
-    const fallback = await googleTextSearch(`${input}`, config, "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents,places.types", 5);
+    const fallback = await googleTextSearch(`${input}`, config, "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents,places.types", 5, locationBias);
     locations.push(...fallback.map((place) => normalizeGoogleLocation(place, input)).filter(Boolean));
   }
   return dedupeBy(locations, (item) => item.providerPlaceId).slice(0, 8);
@@ -170,7 +174,12 @@ const INTEREST_KEYWORDS = {
 };
 
 async function researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, config) {
-  const candidateProfile = await googleDestinationResearch(cityName, {}, config);
+  // Resolve with a bias toward the primary destination first, then hand the
+  // already-resolved location to googleDestinationResearch (via
+  // locationFromTrip) instead of letting it re-resolve unbiased -- see
+  // resolveDestination's own comment for why this matters.
+  const biasedLocation = primaryLocation ? await resolveDestination(cityName, config, primaryLocation).catch(() => null) : null;
+  const candidateProfile = await googleDestinationResearch(cityName, biasedLocation ? { destinationLocation: biasedLocation, destinationDisplay: biasedLocation.canonicalName } : {}, config);
   const candidateCenter = candidateProfile.regions[0]?.centerCoordinates;
   if (!primaryLocation || !candidateCenter) return null;
   const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
@@ -346,9 +355,21 @@ async function healthOperation(requestId, provider, operation, callback) {
   }
 }
 
-export async function resolveDestination(destination, config) {
-  const locations = await googleLocationSearch(destination, config);
-  return locations[0] || null;
+// A short or slightly misspelled regional-extension name (e.g. "Ashville"
+// for Asheville, NC, or "Smokey Mountain" for Great Smoky Mountains
+// National Park) can resolve to an exact-spelling match hundreds of miles
+// away in a different state entirely -- confirmed live: an approved
+// Charlotte-area multi-city route resolved "Ashville" to Ashville,
+// Virginia and "Smokey Mountain" to Newport, Tennessee. Google's
+// locationBias only weakly re-ranks results that far from the bias point,
+// so also explicitly prefer whichever returned candidate is geographically
+// closest to the primary destination when one is supplied, rather than
+// trusting rank-order alone.
+export async function resolveDestination(destination, config, locationBias = null) {
+  const locations = await googleLocationSearch(destination, config, locationBias);
+  if (!locations.length) return null;
+  if (!locationBias || !Number.isFinite(locationBias.latitude) || !Number.isFinite(locationBias.longitude)) return locations[0];
+  return [...locations].sort((a, b) => distanceMiles(locationBias, a) - distanceMiles(locationBias, b))[0];
 }
 
 // AI-sourced destination research (openai-destination-provider.js) discovers
@@ -458,12 +479,15 @@ async function googlePlaceDetails(placeId, config) {
   });
 }
 
-async function googleTextSearch(textQuery, config, fieldMask = placeFieldMask(), pageSize = 10) {
+async function googleTextSearch(textQuery, config, fieldMask = placeFieldMask(), pageSize = 10, locationBias = null) {
+  const bias = locationBias && Number.isFinite(locationBias.latitude) && Number.isFinite(locationBias.longitude)
+    ? { circle: { center: { latitude: locationBias.latitude, longitude: locationBias.longitude }, radius: 50000 } }
+    : undefined;
   const json = await googlePlacesRequest("/places:searchText", {
     config,
     operation: "places-text-search",
     fieldMask,
-    body: { textQuery, languageCode: "en", pageSize }
+    body: { textQuery, languageCode: "en", pageSize, ...(bias ? { locationBias: bias } : {}) }
   });
   return Array.isArray(json?.places) ? json.places : [];
 }
