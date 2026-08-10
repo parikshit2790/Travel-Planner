@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const app = readFileSync("src/app.js", "utf8");
 const css = readFileSync("src/styles.css", "utf8");
 
-const foodStep = app.match(/function foodStep\(\) \{([\s\S]*?)\nfunction foodSummaryRow/)?.[1] || "";
+const foodStep = app.match(/function foodStep\(\) \{([\s\S]*?)\nfunction foodSummaryLine/)?.[1] || "";
 const foodOverlay = app.match(/function foodSectionOverlay\(\) \{([\s\S]*?)\nfunction createFoodDraft/)?.[1] || "";
 const detailsCard = foodStep.match(/<section class="food-summary-card details-card">([\s\S]*?)<\/section>/)?.[1] || "";
 

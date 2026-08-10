@@ -129,8 +129,15 @@ assert.ok(app.includes("TravelHeaderIllustration"));
 assert.ok(app.includes("SidebarScenicIllustration"));
 assert.ok(app.includes("visibleTripBasicsIssues"));
 assert.ok(app.includes("visibleReviewIssues"));
-assert.ok(app.includes("reviewLocationReadinessIssues"));
 assert.ok(app.includes("mockDestinationDataAvailable"));
+// locationVerificationIssues is UI-only (unlike domain.js's tripBasicsIssues,
+// which also gates generateTripPlan's server-side pre-flight check, where
+// dozens of test fixtures construct trips without ever setting
+// fromLocation/destinationLocation). It's wired into visibleTripBasicsIssues
+// and the continueBasics handler so an unverified location blocks advancing
+// past Trip Basics itself, not just the final Review step.
+assert.ok(app.includes("function locationVerificationIssues"));
+assert.ok(app.includes("...locationVerificationIssues(state.trip)"));
 assert.ok(app.includes("Traveling From must be selected from location suggestions before building."));
 assert.ok(app.includes("Destination must be selected from location suggestions before building."));
 assert.ok(app.includes("This destination is not available in the current demo data."));

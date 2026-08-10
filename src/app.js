@@ -1103,7 +1103,7 @@ function visibleReviewIssues() {
 }
 
 function visibleTripBasicsIssues() {
-  return tripBasicsIssues(state.trip).filter((issue) => {
+  return [...tripBasicsIssues(state.trip), ...locationVerificationIssues(state.trip)].filter((issue) => {
     if (!issue.blocking) return true;
     const locationField = issue.field === "trip.from" ? "from" : issue.field === "trip.destination" ? "destination" : "";
     return ui.basicsSubmitAttempted || ui.touchedBasicsFields.has(issue.field) || (locationField && ui.touchedBasicsFields.has(locationField));
@@ -1901,7 +1901,7 @@ function foodStep() {
       </div>
     </div>
     <section class="food-summary-card details-card">
-      <div class="food-card-title"><span aria-hidden="true">${iconSvg("dollar")}</span><h3>Food Planning Details</h3><button class="small" data-action="openFoodSection:details">Edit</button></div>
+      <div class="food-card-title"><span aria-hidden="true">${iconSvg("dollar")}</span><h3>Food Planning Details</h3><button class="small" aria-label="Edit Food Planning Details" data-action="openFoodSection:details">Edit</button></div>
       <div class="food-detail-row">
         ${foodDetailItem("dollar", "Food Budget per Person", trip.food.foodBudgetPerPerson || "$15 - $30 per day")}
         ${foodDetailItem("car", "Drive for Food", trip.food.driveForFood || "Short drives OK")}
@@ -1913,11 +1913,6 @@ function foodStep() {
     ${foodWarnings.length ? `<div class="warning-list"><strong>${foodWarnings.length} food planning warning${foodWarnings.length === 1 ? "" : "s"}</strong>${foodWarnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
     ${wizardFooter("Back", "Save and Exit", "Continue")}
   </section>`;
-}
-
-function foodSummaryRow(key, title, values) {
-  const summary = values.length ? values.slice(0, 4).join(" · ") + (values.length > 4 ? ` +${values.length - 4}` : "") : "No selections yet";
-  return `<article class="summary-row"><div><strong>${esc(title)}</strong><span>${esc(summary)}</span></div><button data-action="openFoodSection:${esc(key)}">Edit</button></article>`;
 }
 
 function foodSummaryLine(label, values, emptyText, key) {
@@ -1948,12 +1943,12 @@ function foodValuePills(values, max = 3) {
 function foodCuisinePreview(values) {
   const hasValues = values.length > 0;
   if (!hasValues) {
-    return `<div class="cuisine-preview empty"><p>No cuisine preferences selected</p><small>We can recommend varied local options.</small><button class="small" data-action="openFoodSection:cuisine">Add</button></div>`;
+    return `<div class="cuisine-preview empty"><p>No cuisine preferences selected</p><small>We can recommend varied local options.</small><button class="small" aria-label="Add Cuisine Interests" data-action="openFoodSection:cuisine">Add</button></div>`;
   }
   const shown = values.slice(0, 4);
   return `<div class="cuisine-preview">
-    <div class="cuisine-preview-grid">${shown.map((option) => `<div class="cuisine-preview-card"><span aria-hidden="true">${cuisineIcon(option)}</span><strong>${esc(option)}</strong></div>`).join("")}<button class="cuisine-add-card" data-action="openFoodSection:cuisine"><span aria-hidden="true">${iconSvg("plus")}</span>Add more</button></div>
-    <div class="cuisine-preview-footer"><span>${values.length} selected</span><button class="small" data-action="openFoodSection:cuisine">${hasValues ? "Edit" : "Add"}</button></div>
+    <div class="cuisine-preview-grid">${shown.map((option) => `<div class="cuisine-preview-card"><span aria-hidden="true">${cuisineIcon(option)}</span><strong>${esc(option)}</strong></div>`).join("")}<button class="cuisine-add-card" aria-label="Add more Cuisine Interests" data-action="openFoodSection:cuisine"><span aria-hidden="true">${iconSvg("plus")}</span>Add more</button></div>
+    <div class="cuisine-preview-footer"><span>${values.length} selected</span><button class="small" aria-label="${esc(hasValues ? "Edit Cuisine Interests" : "Add Cuisine Interests")}" data-action="openFoodSection:cuisine">${hasValues ? "Edit" : "Add"}</button></div>
   </div>`;
 }
 
@@ -2318,7 +2313,7 @@ function reviewIssues() {
     });
   }
   if (state.activeStep === 6) {
-    issues.unshift(...reviewLocationReadinessIssues(state.trip));
+    issues.unshift(...locationVerificationIssues(state.trip));
     if (state.providerStatus?.mode === "mock" && !mockDestinationDataAvailable(state.trip.destinationDisplay || state.trip.destination)) {
       issues.unshift({
         severity: "Critical",
@@ -2333,13 +2328,14 @@ function reviewIssues() {
   return issues;
 }
 
-function approvedRouteSummary(trip) {
-  if (!routeRecommendationRequired(trip)) return "Single-city route";
-  if (!approvedRouteStillValid(trip)) return "Needs route approval";
-  return `${trip.approvedTripShape.sequence.join(" → ")} · ${trip.approvedTripShape.hotelChanges} hotel change${trip.approvedTripShape.hotelChanges === 1 ? "" : "s"}`;
-}
-
-function reviewLocationReadinessIssues(trip) {
+// A UI-only check, deliberately kept out of the shared domain.js
+// tripBasicsIssues/getTripIssues -- those also gate generateTripPlan's own
+// server-side pre-flight validation, and dozens of planner tests construct
+// trip objects directly (bypassing the location-autocomplete UI entirely)
+// without ever setting fromLocation/destinationLocation. Requiring
+// verification there rejected every one of those fixtures. This check only
+// needs to run where a human is actually driving the wizard.
+function locationVerificationIssues(trip) {
   const issues = [];
   if (String(trip.from || "").trim() && trip.fromLocation?.verificationStatus !== "Verified") {
     issues.push({
@@ -2362,6 +2358,12 @@ function reviewLocationReadinessIssues(trip) {
     });
   }
   return issues;
+}
+
+function approvedRouteSummary(trip) {
+  if (!routeRecommendationRequired(trip)) return "Single-city route";
+  if (!approvedRouteStillValid(trip)) return "Needs route approval";
+  return `${trip.approvedTripShape.sequence.join(" → ")} · ${trip.approvedTripShape.hotelChanges} hotel change${trip.approvedTripShape.hotelChanges === 1 ? "" : "s"}`;
 }
 
 function mockDestinationDataAvailable(destination) {
@@ -2693,6 +2695,7 @@ function selectLocationSuggestion(field, index) {
   const suggestion = ui.locationSuggestions[field]?.[index];
   if (!suggestion) return;
   ui.touchedBasicsFields.add(field);
+  const hadApprovedRoute = (field === "from" || field === "destination") && Boolean(state.trip.approvedTripShape);
   if (field === "from") {
     state.trip.from = suggestion.normalizedName;
     state.trip.fromDisplay = suggestion.normalizedName;
@@ -2713,6 +2716,10 @@ function selectLocationSuggestion(field, index) {
     state.trip.destinationAirportCode = suggestion.airportCode || "";
     state.trip.destinationLocation = suggestion;
     state.trip.destinationRefinementStatus = isBroadLocation(suggestion) ? "Needs Refinement" : "Refined";
+  }
+  if (hadApprovedRoute) {
+    resetRouteApproval(state.trip);
+    ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
   }
   ui.activeLocationField = null;
   ui.locationSuggestions[field] = [];
@@ -2847,7 +2854,11 @@ function updateField(path, value) {
     if (["trip.days", "trip.startDate", "trip.endDate"].includes(path)) reconcileTripDates(state.trip, path);
     if (["trip.groupType", "trip.adults", "trip.children", "trip.seniors"].includes(path)) syncTravelersToCounts(state.trip);
     if (path === "trip.description") state.trip.originalText = value;
-    if (routeRelevantField(path)) resetRouteApproval(state.trip);
+    if (routeRelevantField(path)) {
+      const hadApprovedRoute = Boolean(state.trip.approvedTripShape);
+      resetRouteApproval(state.trip);
+      if (hadApprovedRoute) ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
+    }
   }
   persist();
 }
@@ -2886,7 +2897,11 @@ function updateFieldDraft(path, value) {
   }
   if (["trip.days", "trip.startDate", "trip.endDate"].includes(path)) reconcileTripDates(state.trip, path);
   if (path === "trip.description") state.trip.originalText = value;
-  if (routeRelevantField(path)) resetRouteApproval(state.trip);
+  if (routeRelevantField(path)) {
+    const hadApprovedRoute = Boolean(state.trip.approvedTripShape);
+    resetRouteApproval(state.trip);
+    if (hadApprovedRoute) ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
+  }
 }
 
 function canChangeTravelerCount(path, value) {
@@ -3223,7 +3238,7 @@ function action(name) {
   }
   if (name === "continueBasics") {
     ui.basicsSubmitAttempted = true;
-    if (tripBasicsIssues(state.trip).some((issue) => issue.blocking)) {
+    if ([...tripBasicsIssues(state.trip), ...locationVerificationIssues(state.trip)].some((issue) => issue.blocking)) {
       ui.showWarnings = true;
       ui.toast = "Resolve Step 1 issues before continuing.";
     } else {
