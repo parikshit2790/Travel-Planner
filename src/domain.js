@@ -191,8 +191,10 @@ export function createTripDraft() {
       tripStructure: "recommend",
       placesInMind: "",
       placesInMindVerified: [],
+      placesInMindLocations: {},
       mustDoPlaces: "",
       mustDoPlacesVerified: [],
+      mustDoPlacesLocations: {},
       placesToAvoid: "",
       openToNearbyCities: "Yes",
       maxHotelChanges: "1",
@@ -351,8 +353,10 @@ export function migrateTripState(trip) {
   trip.routePreferences.tripStructure ||= "recommend";
   trip.routePreferences.placesInMind ||= "";
   trip.routePreferences.placesInMindVerified ||= [];
+  trip.routePreferences.placesInMindLocations ||= {};
   trip.routePreferences.mustDoPlaces ||= "";
   trip.routePreferences.mustDoPlacesVerified ||= [];
+  trip.routePreferences.mustDoPlacesLocations ||= {};
   trip.routePreferences.placesToAvoid ||= "";
   trip.routePreferences.openToNearbyCities ||= "Yes";
   trip.routePreferences.maxHotelChanges ||= "1";

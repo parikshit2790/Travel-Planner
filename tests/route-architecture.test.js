@@ -116,4 +116,26 @@ smallCity.routePreferences.placesInMind = "Nearby Lake Town";
 const score = destinationExpansionScore(smallCity, "Smallville", { name: "Nearby Lake Town", driveMinutes: 80, type: "lake" }, estimateDestinationDepth(smallCity));
 assert.ok(score.total >= 58, "Small city with explicit nearby interest should allow nearby proposal");
 
+// A verified place with a real geocoded location that turns out to be
+// effectively the same metro area (confirmed live: "Lake Norman" is a ~25
+// minute drive from Charlotte) must not be proposed as its own multi-city
+// hotel base -- it belongs as a day trip, not a separate overnight stay.
+const sameMetroSuburb = trip({
+  destination: "Charlotte, North Carolina, United States",
+  destinationDisplay: "Charlotte, North Carolina, United States",
+  destinationLat: 35.2271,
+  destinationLng: -80.8431
+});
+sameMetroSuburb.routePreferences.tripStructure = "multi-city";
+sameMetroSuburb.routePreferences.maxHotelChanges = "3";
+sameMetroSuburb.routePreferences.maxTransferDriveTime = "5 hours";
+sameMetroSuburb.routePreferences.placesInMind = "Lake Norman";
+sameMetroSuburb.routePreferences.placesInMindVerified = ["Lake Norman"];
+sameMetroSuburb.routePreferences.placesInMindLocations = { "Lake Norman": { lat: 35.4874, lng: -80.8873 } };
+const suburbOptions = generateRouteArchitectureOptions(sameMetroSuburb);
+assert.ok(
+  !suburbOptions.some((option) => option.tripShapeType === "multi-city" && option.sequence.some((stop) => /lake norman/i.test(stop))),
+  "A same-metro-area suburb with a real nearby location must not be proposed as a multi-city hotel base"
+);
+
 console.log("Route architecture tests passed");

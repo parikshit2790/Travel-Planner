@@ -2788,12 +2788,25 @@ function addVerifiedPlaceTag(field, suggestion) {
   const prefs = state.trip.routePreferences;
   const existing = String(prefs[field] || "").split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
   const verifiedKey = `${field}Verified`;
+  const locationsKey = `${field}Locations`;
   prefs[verifiedKey] ||= [];
+  prefs[locationsKey] ||= {};
   if (!existing.some((item) => item.toLowerCase() === name.toLowerCase())) {
     existing.push(name);
     prefs[field] = existing.join(", ");
   }
   if (!prefs[verifiedKey].includes(name)) prefs[verifiedKey].push(name);
+  // Without a real coordinate, the route-shape recommender falls back to a
+  // blind guess (see inferDriveMinutes in route-architecture.js) that can be
+  // wildly wrong for anything it doesn't specifically recognize -- confirmed
+  // live: "Lake Norman" (a ~25 minute drive from Charlotte, effectively the
+  // same metro area) got guessed at 90 minutes and proposed as its own
+  // multi-city hotel base instead of a same-base day trip. A verified
+  // suggestion already carries a real geocoded location, so save it for the
+  // recommender to use instead of guessing.
+  if (Number.isFinite(suggestion.latitude) && Number.isFinite(suggestion.longitude)) {
+    prefs[locationsKey][name] = { lat: suggestion.latitude, lng: suggestion.longitude };
+  }
   const hadApprovedRoute = Boolean(state.trip.approvedTripShape);
   if (hadApprovedRoute) {
     resetRouteApproval(state.trip);
@@ -2811,7 +2824,11 @@ function removePlaceTag(field, index) {
   const [removed] = existing.splice(index, 1);
   prefs[field] = existing.join(", ");
   const verifiedKey = `${field}Verified`;
-  if (removed) prefs[verifiedKey] = (prefs[verifiedKey] || []).filter((item) => item.toLowerCase() !== removed.toLowerCase());
+  const locationsKey = `${field}Locations`;
+  if (removed) {
+    prefs[verifiedKey] = (prefs[verifiedKey] || []).filter((item) => item.toLowerCase() !== removed.toLowerCase());
+    if (prefs[locationsKey]) delete prefs[locationsKey][removed];
+  }
   if (state.trip.approvedTripShape) {
     resetRouteApproval(state.trip);
     ui.toast = "Your approved route was reset because trip details changed. Re-approve it before building your trip.";
