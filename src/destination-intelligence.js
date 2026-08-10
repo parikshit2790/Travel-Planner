@@ -20,11 +20,22 @@ export const intelligenceCategories = [
 
 export function buildDestinationIntelligence(profile, input, constraints = {}) {
   const baseRegionId = profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
+  // A multi-city trip has a hotel base in each approved region, not just the
+  // primary one -- confirmed live: an Asheville-based day of a Charlotte ->
+  // Great Smoky Mountains -> Asheville -> Lake Norman trip kept failing the
+  // quality gate because DuPont State Recreational Forest and Pisgah National
+  // Forest (both a short local drive FROM Asheville) were being scored as a
+  // "long-day-trip" from Charlotte, the only base this function ever knew
+  // about. That route-burden penalty (and the resulting exclusion from
+  // "topLocal" signature-coverage counting) discouraged scheduling exactly
+  // the attractions each non-primary leg was built around. Evaluate distance
+  // from whichever approved base is closest, not only the primary.
+  const baseRegionIds = [baseRegionId, ...approvedBaseRegionIds(profile, input)].filter(Boolean);
   const selectedText = preferenceText(input);
   const maxRoundTripMinutes = Math.max(90, Number(input.maxDrivingMinutes || 240));
   const regionalDestinationProfile = buildRegionalDestinationProfile(profile, input);
   const opportunities = profile.places.map((place) => {
-    const feasibility = routeFeasibilityForPlace(profile, baseRegionId, place, maxRoundTripMinutes);
+    const feasibility = bestRouteFeasibilityForPlace(profile, baseRegionIds, place, maxRoundTripMinutes);
     const classification = classifyPlaceForPlanning(place, profile, input, feasibility);
     const categorySet = classifyPlace(place, feasibility, classification);
     const userFitScore = userInterestScore(place, selectedText);
@@ -278,6 +289,36 @@ function routeFeasibility(profile, baseRegionId, regionId, maxRoundTripMinutes) 
     estimatedRoundTripMinutes: roundTrip,
     classification
   };
+}
+
+// Mirrors the base-matching logic in planner.js's resolveApprovedTripShapeSchedule
+// (base 0 is the primary destination itself and is already covered by
+// defaultHotelRegion above; only secondary approved bases need matching
+// here). Kept as a self-contained duplicate rather than an import from
+// planner.js to avoid a circular dependency (planner.js imports from this
+// file to build destination intelligence in the first place).
+function approvedBaseRegionIds(profile, input) {
+  const bases = Array.isArray(input?.approvedTripShape?.hotelBases) ? input.approvedTripShape.hotelBases : [];
+  if (bases.length < 2) return [];
+  const ids = [];
+  bases.slice(1).forEach((base) => {
+    const name = normalizeText(base?.canonicalName || base?.shortName || "");
+    if (!name) return;
+    const exactRequestedMatch = profile.regions.find((region) => region.requestedName && normalizeText(region.requestedName) === name);
+    const region = exactRequestedMatch || profile.regions.find((candidate) => {
+      const candidateName = normalizeText(candidate.name);
+      const candidateCore = normalizeText(String(candidate.name || "").split(",")[0]);
+      return candidateName === name || candidateName.includes(name) || name.includes(candidateName)
+        || (candidateCore && (candidateCore === name || name.includes(candidateCore) || candidateCore.includes(name)));
+    });
+    if (region) ids.push(region.id);
+  });
+  return ids;
+}
+
+function bestRouteFeasibilityForPlace(profile, baseRegionIds, place, maxRoundTripMinutes) {
+  const options = (baseRegionIds.length ? baseRegionIds : [""]).map((baseRegionId) => routeFeasibilityForPlace(profile, baseRegionId, place, maxRoundTripMinutes));
+  return options.reduce((best, current) => (current.estimatedRoundTripMinutes < best.estimatedRoundTripMinutes ? current : best));
 }
 
 function routeFeasibilityForPlace(profile, baseRegionId, place, maxRoundTripMinutes) {

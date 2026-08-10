@@ -195,12 +195,39 @@ async function researchRegionalExtensionCandidate(cityName, primaryLocation, max
   const isFoodPlace = (place) => place.categories?.includes("restaurant") || place.categories?.includes("food");
   const nonFoodPlaces = rankedPlaces.filter((place) => !isFoodPlace(place));
   const foodPlaces = rankedPlaces.filter(isFoodPlace);
+  // Same problem, different category: the interest-keyword boost above gives
+  // every nature/hiking-tagged place a +1000 bump, so a traveler with strong
+  // outdoor interests gets a top-7 slice that is ENTIRELY nature places --
+  // confirmed live for an Asheville extension researched for a hiking/
+  // mountains/national-parks traveler, where Biltmore Estate (the region's
+  // single best-known non-nature landmark) never survived the slice. That
+  // left the region with no landmark/museum/entertainment candidate at all,
+  // which then fails the quality critic's gateway-or-entertainment coverage
+  // check regardless of how strong the nature coverage is. Guarantee at
+  // least one non-nature "character" place survives, mirroring the
+  // restaurant guarantee just above.
+  // "landmark" alone is too loose a signal to guarantee against -- Google's
+  // own categorization cascade (see googleCategory) falls through to
+  // "landmark" for anything tagged tourist_attraction that isn't already
+  // food/nature/museum/entertainment, which silently catches things like a
+  // working orchard. Confirmed live: that false-positive let an orchard
+  // satisfy this guarantee and Biltmore Estate (a real "museum"-categorized
+  // landmark) never got promoted. Require the reliable, Google-verified
+  // "museum" or "entertainment" categorization first; only fall back to the
+  // broader landmark/culture bucket if neither exists.
+  const isCharacterPlace = (place) => ["museum", "entertainment"].includes(place.categories?.[0]);
+  const isBroadCharacterPlace = (place) => ["landmark", "culture"].includes(place.categories?.[0]);
+  let selectedNonFood = nonFoodPlaces.slice(0, 7);
+  if (!selectedNonFood.some(isCharacterPlace)) {
+    const bestCharacterPlace = nonFoodPlaces.find(isCharacterPlace) || nonFoodPlaces.find(isBroadCharacterPlace);
+    if (bestCharacterPlace) selectedNonFood = [...selectedNonFood.slice(0, 6), bestCharacterPlace];
+  }
   return {
     cityName,
     canonicalName: candidateProfile.canonicalName,
     centerCoordinates: candidateCenter,
     route,
-    places: [...nonFoodPlaces.slice(0, 7), ...foodPlaces.slice(0, 3)],
+    places: [...selectedNonFood, ...foodPlaces.slice(0, 3)],
     foodAreas: candidateProfile.foodAreas.slice(0, 3)
   };
 }
