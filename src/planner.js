@@ -3424,7 +3424,7 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     secondary,
     primaryPlaceId: primaryPlace?.id || "",
     secondaryPlaceId: secondaryPlace?.id || "",
-    text: `${primary}. Backup: ${secondary}. Cuisine fit: ${titleCase(cuisine)} / local options. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
+    text: `${primary}. Backup: ${secondary}. ${titleCase(cuisine)} cuisine. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
     cuisine: titleCase(cuisine),
     price,
     reservation,
