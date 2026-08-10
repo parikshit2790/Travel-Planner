@@ -202,29 +202,17 @@ export async function discoverRegionalExtensions(primaryLocation, candidateCityN
     .filter(([key]) => interests.some((label) => label.includes(key)))
     .map(([, pattern]) => pattern);
   const candidateNames = (candidateCityNames || []).slice(0, maxCandidates);
-  // The real cause of extension candidates failing turned out to be
-  // OpenAI's primary-research timeout eating almost the entire shared
-  // request budget (fixed separately, see openAiRequestTimeoutMs) -- a
-  // standalone candidate now reliably succeeds in ~30s. But live-tested
-  // after that fix: candidates still fail when researched fully
-  // simultaneously with each other (Promise.all with zero stagger),
-  // consistent with a brief peak-concurrency burst against the Google API
-  // (this batch's own N*4 parallel calls landing at the same instant as the
-  // primary destination's own fallback calls). A small stagger between
-  // candidates costs only a couple of seconds against a now-healthy ~30s
-  // budget out of ~58-60s available, and avoids that peak.
-  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(30000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
-  // The first candidate (index 0) still raced against the primary
-  // destination's own initial call burst even with later candidates
-  // staggered behind it -- live-tested, it kept failing while a
-  // later-starting candidate kept succeeding. Delay every candidate,
-  // including the first, so none of them start at the exact instant this
-  // whole batch (itself started concurrently with the caller's primary
-  // research) kicks off.
-  const settled = await Promise.allSettled(candidateNames.map(async (cityName, index) => {
-    await new Promise((resolve) => setTimeout(resolve, 1500 + index * 2500));
-    return researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig);
-  }));
+  // Earlier revisions staggered/delayed candidates here to work around what
+  // looked like a load-related failure. The actual root cause (confirmed via
+  // a direct, isolated route-estimate call) was Google's Directions API
+  // failing outright for a specific origin/destination pair regardless of
+  // timing or concurrency -- now handled with a coordinate-distance fallback
+  // in googleRouteEstimate, so candidates no longer need artificial
+  // staggering to succeed. Research every candidate concurrently.
+  const extendedTimeoutConfig = { ...config, googleRequestTimeoutMs: Math.max(20000, Number(config?.googleRequestTimeoutMs || config?.timeoutMs || 10000)) };
+  const settled = await Promise.allSettled(candidateNames.map((cityName) =>
+    researchRegionalExtensionCandidate(cityName, primaryLocation, maxDriveMinutes, activeKeywordPatterns, extendedTimeoutConfig)
+  ));
   const results = [];
   settled.forEach((outcome, index) => {
     if (outcome.status === "fulfilled") {
@@ -242,6 +230,21 @@ export async function googleRouteEstimate(origin, destination, mode = "driving",
   if (!originCoordinates || !destinationCoordinates) {
     throw googleProviderError("ROUTE_POINTS_REQUIRED", "Origin and destination coordinates are required.", false, 400);
   }
+  // Directly measured live: Google's Directions API can genuinely fail to
+  // compute a route for a real, legitimate origin/destination pair (seen
+  // reproducibly for Phoenix -> Grand Canyon National Park South Rim, while
+  // Phoenix -> Sedona succeeds cleanly) -- most likely the destination's
+  // resolved point (a large park's geocoded center) doesn't snap to Google's
+  // road network the way a town center does. The coordinates themselves
+  // resolved successfully above; only the turn-by-turn directions call
+  // failed. A traveler-approved overnight base must not silently disappear
+  // from the trip because one geocoded point is awkward for a directions
+  // API -- fall back to a straight-line-distance estimate rather than
+  // dropping the candidate entirely.
+  // Configuration, auth, quota, and timeout failures must keep propagating
+  // as real errors (provider health checks and callers depend on seeing
+  // them) -- only a *successful* API call that comes back with no usable
+  // route should fall back to a coordinate-based estimate below.
   const json = await googleRoutesRequest("/directions/v2:computeRoutes", {
     config,
     operation: "routes-compute",
@@ -255,7 +258,22 @@ export async function googleRouteEstimate(origin, destination, mode = "driving",
   });
   const route = json?.routes?.[0];
   if (!route?.duration || !Number.isFinite(Number(route.distanceMeters))) {
-    throw googleProviderError("INVALID_PROVIDER_RESPONSE", "Google Routes did not return duration and distance.", true, 502);
+    console.warn("[RouteMosaic planner] Google Directions returned no usable route, falling back to coordinate-based estimate", JSON.stringify({ mode }));
+    const miles = distanceMiles(originCoordinates, destinationCoordinates);
+    const averageMph = mode === "walking" ? 3 : 43;
+    const durationMinutes = Math.max(1, Math.round((miles / averageMph) * 60) + (mode === "walking" ? 0 : 20));
+    return {
+      durationMinutes,
+      distanceMiles: Math.max(0.1, Math.round(miles * 10) / 10),
+      mode,
+      profile: routeTravelMode(mode).toLowerCase(),
+      provider: "coordinate-approximation",
+      retrievedAt: new Date().toISOString(),
+      trafficAware: false,
+      fromCoordinates: originCoordinates,
+      toCoordinates: destinationCoordinates,
+      disclaimer: "Turn-by-turn directions were unavailable for this route; estimated from straight-line distance. Verify actual travel time before booking."
+    };
   }
   return {
     durationMinutes: Math.max(1, Math.round(durationSeconds(route.duration) / 60)),
