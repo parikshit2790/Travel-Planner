@@ -34,10 +34,15 @@ export const defaultRoutePreferences = {
   // Ashville, Virginia). These arrays track which comma-separated segments
   // of placesInMind/mustDoPlaces were added via a verified, geocoded
   // autocomplete suggestion (see placeTagsField in app.js) rather than
-  // typed free text, so the UI can show which entries are trustworthy.
+  // typed free text, so the UI can show which entries are trustworthy. The
+  // *Locations maps carry that suggestion's real coordinates, keyed by name
+  // -- candidateStops() below uses them for a real distance estimate instead
+  // of guessing (see inferDriveMinutes).
   placesInMindVerified: [],
+  placesInMindLocations: {},
   mustDoPlaces: "",
   mustDoPlacesVerified: [],
+  mustDoPlacesLocations: {},
   placesToAvoid: "",
   openToNearbyCities: "Yes",
   maxHotelChanges: "1",
@@ -59,6 +64,8 @@ export const defaultRoutePreferences = {
   remoteAreaComfort: "Moderate",
   offlineMaps: "Yes"
 };
+
+const MIN_MULTI_CITY_TRANSFER_MINUTES = 45;
 
 export function ensureRouteArchitecture(trip) {
   trip.routePreferences = { ...defaultRoutePreferences, ...(trip.routePreferences || {}) };
@@ -122,7 +129,17 @@ export function generateRouteArchitectureOptions(trip) {
   if (["multi-city", "recommend"].includes(prefs.tripStructure) && maxHotelChanges > 0) {
     const scored = candidates
       .map((candidate) => ({ candidate, score: destinationExpansionScore(trip, destination, candidate, depth) }))
-      .filter((item) => item.score.total >= 58 && item.score.transferBurdenMinutes <= maxTransferMinutes)
+      // A place close enough to be a same-day excursion isn't worth checking
+      // out of one hotel and into another for -- confirmed live: "Lake
+      // Norman" (a ~25 minute drive from Charlotte, effectively the same
+      // metro area) had nothing here stopping it from being proposed as its
+      // own multi-city hotel base once it cleared the score threshold, since
+      // this filter previously only capped the burden from above, never
+      // required a minimum. MIN_MULTI_CITY_TRANSFER_MINUTES mirrors the
+      // server's own "local" classification boundary (round-trip <= 90 min,
+      // i.e. one-way <= 45 min) so a place this close routes into a day trip
+      // instead of a separate hotel base.
+      .filter((item) => item.score.total >= 58 && item.score.transferBurdenMinutes <= maxTransferMinutes && item.score.transferBurdenMinutes >= MIN_MULTI_CITY_TRANSFER_MINUTES)
       .sort((a, b) => Number(b.candidate.explicit) - Number(a.candidate.explicit) || b.score.total - a.score.total);
     const stops = scored.slice(0, maxHotelChanges);
     if (stops.length) options.push(multiCityOption({ trip, destination, days, nights, stops, maxHotelChanges, signature, primaryFromRefinement, remainingExplicit }));
@@ -355,8 +372,21 @@ function candidateStops(trip, destination) {
     ...splitList(trip.routePreferences?.placesInMind),
     ...splitList(trip.routePreferences?.mustDoPlaces)
   ].filter((item) => item && normalizePlaceName(item) !== destination);
+  const knownLocations = {
+    ...(trip.routePreferences?.placesInMindLocations || {}),
+    ...(trip.routePreferences?.mustDoPlacesLocations || {})
+  };
+  const locationsByKey = Object.fromEntries(Object.entries(knownLocations).map(([name, coords]) => [name.toLowerCase(), coords]));
   const described = inferNearbyCandidates(`${destination} ${trip.description || ""}`);
-  const merged = [...explicit.map((name) => ({ name: normalizePlaceName(name), driveMinutes: inferDriveMinutes(name), type: inferStopType(name), explicit: true })), ...described];
+  const merged = [
+    ...explicit.map((name) => ({
+      name: normalizePlaceName(name),
+      driveMinutes: driveMinutesFor(trip, locationsByKey[String(name).toLowerCase()], name),
+      type: inferStopType(name),
+      explicit: true
+    })),
+    ...described
+  ];
   const seen = new Set();
   return merged.filter((candidate) => {
     const key = candidate.name.toLowerCase();
@@ -427,6 +457,34 @@ function parseHoursToMinutes(value) {
   if (minuteMatch) return Number(minuteMatch[1]);
   const number = Number(text.replace(/[^0-9.]/g, ""));
   return Number.isFinite(number) && number > 0 ? Math.round(number * 60) : 0;
+}
+
+// A verified suggestion carries a real geocoded location -- use it instead
+// of the blind inferDriveMinutes() guess whenever one is available. Falls
+// back to the guess only for free-typed or hard-coded-list candidates that
+// were never resolved through the autocomplete.
+function driveMinutesFor(trip, location, name) {
+  const destLat = trip.destinationLat ?? trip.destinationLocation?.latitude;
+  const destLng = trip.destinationLng ?? trip.destinationLocation?.longitude;
+  if (location && Number.isFinite(location.lat) && Number.isFinite(location.lng) && Number.isFinite(destLat) && Number.isFinite(destLng)) {
+    const miles = haversineMiles(destLat, destLng, location.lat, location.lng);
+    // Same rough miles-to-minutes conversion the server's live route
+    // feasibility estimator uses (see routeFeasibilityForPlace in
+    // destination-intelligence.js), kept in sync so this client-side
+    // recommendation and the server's eventual research agree on what
+    // counts as a nearby day trip versus a genuine multi-city stop.
+    if (Number.isFinite(miles) && miles > 0) return Math.round(miles / 0.7) + (miles > 25 ? 20 : 8);
+  }
+  return inferDriveMinutes(name);
+}
+
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const toRad = (value) => (Number(value) * Math.PI) / 180;
+  const radiusMiles = 3958.8;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function inferDriveMinutes(name) {
