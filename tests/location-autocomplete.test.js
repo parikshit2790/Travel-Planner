@@ -192,6 +192,14 @@ assert.ok(domain.includes("placesInMindVerified"));
 assert.ok(domain.includes("mustDoPlacesVerified"));
 assert.ok(!app.includes('input("trip.routePreferences.placesInMind"'));
 assert.ok(!app.includes('input("trip.routePreferences.mustDoPlaces"'));
+// Regression: a verified suggestion's full "City, State, Country" name must
+// never be stored as-is in the comma-joined tag string -- it gets re-split
+// on commas (both by this same chip renderer and by splitList() downstream)
+// which shredded one place into multiple bogus fragments and fed fake
+// hotel-base names like "North Carolina" into the route planner. Confirmed
+// live: "Asheville, North Carolina, United States" became three chips.
+assert.ok(app.includes('rawName.split(",")[0]'));
+assert.ok(!/const name = String\(suggestion\.normalizedName \|\| suggestion\.displayName \|\| ""\)\.trim\(\);/.test(app));
 
 assert.ok(css.includes(".place-tag-list"));
 assert.ok(css.includes(".place-tag.verified"));
