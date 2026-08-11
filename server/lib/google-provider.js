@@ -440,8 +440,20 @@ export async function resolveDestination(destination, config, locationBias = nul
   // cities (e.g. "Charlotte, NC" vs "Charlotte, FL") -- restrict it to
   // candidates whose own city name actually matches what was typed, and
   // only fall through to the full result set if none do.
+  // AI-suggested regional candidate cities always arrive in "City, State"
+  // form (enforced by normalizeRegionalDestinationProfile's own validation
+  // regex), not a bare name -- comparing the FULL query string against
+  // location.city (always just the bare city) would never match that
+  // format at all, silently falling through to the same unfiltered
+  // closest-wins bug for every AI-suggested extension. Compare on each
+  // side's own leading segment so both a bare name ("Orlando") and a
+  // qualified one ("Fort Lauderdale, FL") match correctly.
   const query = String(destination || "").trim().toLowerCase();
-  const exactMatches = locations.filter((location) => String(location.city || "").trim().toLowerCase() === query);
+  const queryCore = query.split(",")[0].trim();
+  const exactMatches = locations.filter((location) => {
+    const city = String(location.city || "").trim().toLowerCase();
+    return city === query || city === queryCore;
+  });
   const pool = exactMatches.length ? exactMatches : locations;
   return [...pool].sort((a, b) => distanceMiles(locationBias, a) - distanceMiles(locationBias, b))[0];
 }
