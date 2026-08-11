@@ -2808,7 +2808,23 @@ function userRejectedBeach(input) {
 }
 
 function hasUnverifiedArrivalRoute(plan) {
-  const travel = plan.days
+  // Only the very first (arrival) and very last (departure) day's travel leg
+  // is ever backed by a real, pre-fetched provider route estimate -- see
+  // estimateArrivalRouteForGeneration in planner-actions.js, which only
+  // estimates the origin<->primary-destination leg. A multi-city trip's
+  // internal transfer days between hotel bases always carry a
+  // coordinate-based estimate (see regionalTransferContext), by design,
+  // since there's no equivalent pre-fetch for every possible internal leg.
+  // Checking every "Travel to "/"Depart " item -- including those internal
+  // transfers -- meant this failed for EVERY multi-city driving trip
+  // regardless of whether the actual arrival route was verified. Confirmed
+  // live for a Charlotte -> Asheville -> Great Smoky Mountains trip: day 0
+  // and the final day both correctly carried a real Google route estimate,
+  // but the two transfer days in between always fail this check, so the
+  // whole plan was rejected every time.
+  const days = plan.days || [];
+  const travel = [days[0], days[days.length - 1]]
+    .filter(Boolean)
     .flatMap((day) => day.scheduleItems || [])
     .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")));
   if (!travel.length) return false;
