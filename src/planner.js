@@ -1018,7 +1018,6 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
       }
     }
     if (!isLongDriveArrivalDay(profile, input, index)) selected.forEach((item) => scheduled.add(item.place.id));
-    const region = profile.regions.find((item) => item.id === selected[0]?.place.regionId) || profile.regions.find((item) => item.id === themeRegions[0]) || profile.regions[0];
     const regionalTransfer = approvedSchedule && approvedSchedule.transferDayIndexes.has(index)
       ? (() => {
           const fromRegionId = approvedSchedule.dayRegionIds[index - 1];
@@ -1038,19 +1037,50 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     const dailyBudget = estimateDayBudget(input, scheduleItems);
     const contentItems = scheduleItems.filter((item) => item.type === "activity" || item.type === "evening");
     const actualRegionIds = [...new Set(contentItems.map((item) => item.regionId).filter(Boolean))];
+    // selected[0] is a pre-scheduling guess -- scheduleDay can drop it
+    // entirely (isTimeSensitiveClosed, budget/duration limits) without that
+    // ever showing up here, so a day's title and region label could name a
+    // place that never actually appears in the day at all. Confirmed live: a
+    // day titled "The Metropolitan Museum of Art area parks and scenery" had
+    // Central Park, the High Line, and The Battery as its actual scheduled
+    // activities -- the Met never made it into the final schedule. Derive
+    // the region from what was actually scheduled (actualRegionIds, already
+    // computed above from the same activity-and-evening item set the day's
+    // own summary and dayRouteLabel use), falling back to the pre-scheduling
+    // guess only when nothing got scheduled at all.
+    const region = profile.regions.find((item) => item.id === actualRegionIds[0])
+      || profile.regions.find((item) => item.id === selected[0]?.place.regionId)
+      || profile.regions.find((item) => item.id === themeRegions[0])
+      || profile.regions[0];
     const summaryRegionNames = (actualRegionIds.length ? actualRegionIds : themeRegions).map((id) => regionName(profile, id));
     const isLogisticsOnlyDay = contentItems.length === 0;
     const isMultiRegionDay = actualRegionIds.length > 1;
-    const summary = isLogisticsOnlyDay
-      ? `A lighter ${input.pace.toLowerCase()} day for checkout, travel logistics, and a final meal before departure.`
-      : isMultiRegionDay
-        ? `A ${input.pace.toLowerCase()} day spanning ${summaryRegionNames.join(" and ")}, with about ${Math.round(dailyDriveMinutes)} minutes of driving between stops.`
-        : `A ${input.pace.toLowerCase()} day focused on ${summaryRegionNames.join(" and ")}, grouped to avoid unnecessary cross-city travel.`;
-    const generationReasoningSummary = isLogisticsOnlyDay
-      ? `Kept the day light for checkout and departure logistics, with time for a final meal.`
-      : isMultiRegionDay
-        ? `Selected activities across ${summaryRegionNames.join(" + ")} that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`
-        : `Grouped ${summaryRegionNames.join(" + ")} stops for route efficiency and selected activities that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`;
+    // A logistics-only day's copy was always written for a departure
+    // ("checkout... before departure"), even on an arrival day (which has no
+    // checkout at all -- the traveler just checked IN) -- confirmed live: a
+    // day titled "Arrival in New York" carried the summary "A lighter
+    // balanced day for checkout, travel logistics, and a final meal before
+    // departure." Distinguish which logistics-only day this actually is.
+    const isArrivalLogisticsDay = isLogisticsOnlyDay && scheduleItems.some((item) => item.title.startsWith("Travel to "));
+    const isDepartureLogisticsDay = isLogisticsOnlyDay && scheduleItems.some((item) => item.title.startsWith("Depart "));
+    const summary = isArrivalLogisticsDay
+      ? `A lighter ${input.pace.toLowerCase()} day for travel, hotel check-in, and a first meal after arrival.`
+      : isDepartureLogisticsDay
+        ? `A lighter ${input.pace.toLowerCase()} day for checkout, travel logistics, and a final meal before departure.`
+        : isLogisticsOnlyDay
+          ? `A lighter ${input.pace.toLowerCase()} day built around travel logistics.`
+          : isMultiRegionDay
+            ? `A ${input.pace.toLowerCase()} day spanning ${summaryRegionNames.join(" and ")}, with about ${Math.round(dailyDriveMinutes)} minutes of driving between stops.`
+            : `A ${input.pace.toLowerCase()} day focused on ${summaryRegionNames.join(" and ")}, grouped to avoid unnecessary cross-city travel.`;
+    const generationReasoningSummary = isArrivalLogisticsDay
+      ? `Kept the day light for travel and check-in logistics, with time for a first meal after arrival.`
+      : isDepartureLogisticsDay
+        ? `Kept the day light for checkout and departure logistics, with time for a final meal.`
+        : isLogisticsOnlyDay
+          ? `Kept the day light for travel logistics.`
+          : isMultiRegionDay
+            ? `Selected activities across ${summaryRegionNames.join(" + ")} that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`
+            : `Grouped ${summaryRegionNames.join(" + ")} stops for route efficiency and selected activities that fit ${input.pace.toLowerCase()} pace, stated interests, and traveler constraints.`;
     return {
       id: uid("day"),
       dayNumber: index + 1,
