@@ -404,6 +404,14 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   const isOrdinaryBusiness = isHotel || has(/\b(insurance|bank|atm|pharmacy|clinic|hospital|dentist|doctor|law office|attorney|auto repair|tire|gas station|parking garage|storage|school|academy|realty|realtor|office|warehouse|funeral|police|fire station|post office)\b/);
   const isSensitiveOrExplicitContent = has(/\b(nude beach|nudist|clothing[- ]optional|swingers?|strip club|gentlemen s club|adult entertainment club|sex shop)\b/);
   const isGamblingVenue = has(/\b(casino|racino|slot machines|gambling|off track betting|poker room)\b/);
+  // A stadium/arena is only a genuine plan-worthy stop if the traveler
+  // actually wants a game/event/tour -- otherwise it's just a huge, mostly-
+  // empty building most of the year. Confirmed live: MetLife Stadium (a
+  // football venue in New Jersey, not even in the trip's own city)
+  // appeared as a generic evening pick for a traveler with no stated
+  // sports/event interest at all. See hasStatedInterest in planner.js for
+  // how this gets enforced.
+  const isSportsVenue = has(/\b(stadium|arena|ballpark|speedway|motor speedway|fieldhouse|coliseum)\b/) && !isEntertainmentCenter;
   const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
@@ -456,6 +464,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isAdultFocused: isBar || has(/\b(cocktail|wine|brewery|distillery|nightlife|fine dining)\b/),
     isSensitiveOrExplicitContent,
     isGamblingVenue,
+    isSportsVenue,
     isThinResearchAttraction,
     isMuseum,
     isPark,

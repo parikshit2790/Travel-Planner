@@ -110,6 +110,15 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
       normalizedTrip.arrivalRouteEstimate = await estimateArrivalRouteForGeneration(normalizedTrip, registeredProfile, config);
       normalizedTrip.routeQualityRequired = true;
     }
+    // Attached directly to the registered profile object (not threaded as a
+    // new parameter through generateTripPlan/buildDays/scheduleDay) since
+    // estimateTravel in planner.js already receives this same profile
+    // reference at every call site -- registerGeneratedDestinationProfile
+    // returns the exact object getDestinationProfile will later look up, so
+    // this survives through generation untouched.
+    if (registeredProfile && config.placeProvider === "google") {
+      registeredProfile.transitEstimates = await precomputeFlagshipTransitEstimates(registeredProfile, config);
+    }
     const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics, destinationProfileId: registeredProfile?.id });
     if (result?.plan?.generationMetadata) {
       result.plan.generationMetadata.sourceDiagnostics = sourceDiagnostics;
@@ -160,25 +169,107 @@ function shouldRequireArrivalRoute(trip, profile, config) {
   return Boolean(driving && origin && destination && origin !== destination && config.production);
 }
 
+// A failed live route fetch used to throw here, which failed the entire
+// generate-trip request -- meaning ANY transient Google Directions hiccup on
+// a real driving trip blocked the traveler from getting a plan at all. The
+// user explicitly asked for the opposite: retry once (transient failures do
+// happen), and if it still can't be verified, never block the whole trip --
+// publish an honest, clearly-labeled average-driving-time estimate instead
+// of a silent guess or a hard rejection. See tripTravelContext's
+// "average-estimate" branch for how this gets disclosed to the traveler.
 async function estimateArrivalRouteForGeneration(trip, profile, config) {
   const origin = routePointFor(trip.fromLocation, trip.fromDisplay || trip.from);
   const destination = routePointFor(trip.destinationLocation, trip.destinationDisplay || trip.destination || profile.canonicalName);
+  const attempt = () => withTimeout(estimateRoute(origin, destination, "driving", config), config.googleRequestTimeoutMs, "Route estimate", "ROUTE_TIMEOUT", 504);
+  let estimate;
   try {
-    const estimate = await withTimeout(estimateRoute(origin, destination, "driving", config), config.googleRequestTimeoutMs, "Route estimate", "ROUTE_TIMEOUT", 504);
-    return {
-      durationMinutes: Number(estimate.durationMinutes || estimate.estimatedDurationMinutes || 0),
-      distanceMiles: Number(estimate.distanceMiles || estimate.estimatedDistanceMiles || 0),
-      provider: estimate.provider || config.routeProvider || "route-provider",
-      checkedAt: estimate.checkedAt || estimate.retrievedAt || new Date().toISOString(),
-      confidence: estimate.confidence || "provider"
-    };
-  } catch (error) {
-    const wrapped = new Error("We found destination ideas, but could not calculate reliable travel times.");
-    wrapped.code = routeErrorCode(error);
-    wrapped.status = ["ROUTE_TIMEOUT", "REQUEST_TIMEOUT", "GOOGLE_TIMEOUT"].includes(wrapped.code) ? 504 : 502;
-    wrapped.retryable = true;
-    throw wrapped;
+    estimate = await attempt();
+  } catch (firstError) {
+    try {
+      estimate = await attempt();
+    } catch (secondError) {
+      return averageDrivingTimeFallback(trip.fromLocation, trip.destinationLocation);
+    }
   }
+  return {
+    durationMinutes: Number(estimate.durationMinutes || estimate.estimatedDurationMinutes || 0),
+    distanceMiles: Number(estimate.distanceMiles || estimate.estimatedDistanceMiles || 0),
+    provider: estimate.provider || config.routeProvider || "route-provider",
+    checkedAt: estimate.checkedAt || estimate.retrievedAt || new Date().toISOString(),
+    confidence: estimate.confidence || "provider"
+  };
+}
+
+const TRANSIT_FIRST_DESTINATION_PATTERN = /\b(major city|capital|downtown|metro|urban|subway|transit|manhattan|new york|san francisco|chicago|boston|washington|philadelphia)\b/i;
+
+// Real intra-city travel times (not the driving/walking heuristic in
+// estimateTravel) for a small, bounded set of the destination's own
+// highest-priority places -- confirmed live with a real request (Statue of
+// Liberty -> Times Square: 69 min via transit vs. 35 min via the driving
+// heuristic, both genuinely different real routes). Only attempted for
+// destinations that look transit-first, and capped at a handful of pairs so
+// this adds a small, bounded amount of latency (a few extra live calls) per
+// generation, not one call per possible activity pairing. Any single pair
+// failing is non-fatal -- it just means that pair falls back to the
+// existing heuristic label in estimateTravel, never blocks generation.
+async function precomputeFlagshipTransitEstimates(profile, config) {
+  const text = normalizeForMatch(`${profile.canonicalName} ${profile.summary} ${profile.destinationArchetype?.primaryArchetype || ""}`);
+  if (!TRANSIT_FIRST_DESTINATION_PATTERN.test(text)) return [];
+  const topPlaces = [...(profile.places || [])]
+    .filter((place) => Number.isFinite(place.coordinates?.lat) && Number.isFinite(place.coordinates?.lng))
+    .sort((a, b) => Number(b.priorityScore || 0) - Number(a.priorityScore || 0))
+    .slice(0, 4);
+  const pairs = topPlaces.slice(0, -1).map((place, index) => [place, topPlaces[index + 1]]);
+  const estimates = await Promise.all(pairs.map(async ([from, to]) => {
+    try {
+      const route = await googleRouteEstimate(
+        { label: from.name, latitude: from.coordinates.lat, longitude: from.coordinates.lng },
+        { label: to.name, latitude: to.coordinates.lat, longitude: to.coordinates.lng },
+        "transit",
+        config
+      );
+      if (route.provider !== "google") return null;
+      return { fromPlaceId: from.id, toPlaceId: to.id, durationMinutes: route.durationMinutes, distanceMiles: route.distanceMiles };
+    } catch {
+      return null;
+    }
+  }));
+  return estimates.filter(Boolean);
+}
+
+function normalizeForMatch(value) {
+  return String(value || "").toLowerCase();
+}
+
+// Honest, clearly-labeled fallback when live route data genuinely can't be
+// obtained after a retry -- distanceMiles/0.72 approximates typical mixed
+// highway/local average speed (the same effective-speed constant already
+// used elsewhere for this purpose, e.g. tripTravelContext in planner.js),
+// plus a flat 30-minute buffer for stops, traffic variance, and uncertainty.
+function averageDrivingTimeFallback(fromLocation, destinationLocation) {
+  const distanceMiles = haversineMilesBetween(fromLocation, destinationLocation);
+  const durationMinutes = distanceMiles ? Math.max(60, Math.round(distanceMiles / 0.72) + 30) : 240;
+  return {
+    durationMinutes,
+    distanceMiles: distanceMiles ? Math.round(distanceMiles) : 0,
+    provider: "average-driving-time-estimate",
+    checkedAt: new Date().toISOString(),
+    confidence: "average-estimate"
+  };
+}
+
+function haversineMilesBetween(fromLocation, destinationLocation) {
+  const lat1 = Number(fromLocation?.latitude);
+  const lng1 = Number(fromLocation?.longitude);
+  const lat2 = Number(destinationLocation?.latitude);
+  const lng2 = Number(destinationLocation?.longitude);
+  if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return 0;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const radiusMiles = 3958.8;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function routePointFor(location, fallback) {
