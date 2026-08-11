@@ -1400,7 +1400,18 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   // Grand Canyon) is scheduled like an arrival day -- light morning,
   // dedicated travel block, check-in -- but using the inter-base drive
   // instead of the trip's overall origin-to-destination travel.
-  const travelContext = regionalTransfer ? regionalTransferContext(regionalTransfer.travel) : tripTravelContext(profile, input);
+  // The final day of a multi-city trip needs the same kind of override: the
+  // traveler may be departing from an approved base that is not the primary
+  // destination (e.g. leaving from Great Smoky Mountains, not Charlotte), in
+  // which case the return trip must be estimated from that base's actual
+  // location, not the primary destination's.
+  const defaultBaseRegionId = profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
+  const departsFromNonPrimaryBase = !regionalTransfer && dayIndex === input.numberOfDays - 1 && homeRegionId && homeRegionId !== defaultBaseRegionId;
+  const travelContext = regionalTransfer
+    ? regionalTransferContext(regionalTransfer.travel)
+    : departsFromNonPrimaryBase
+      ? departureFromRegionContext(profile, input, homeRegionId)
+      : tripTravelContext(profile, input);
   const isArrivalDay = Boolean(regionalTransfer) || (dayIndex === 0 && travelContext.needsArrivalLogistics);
   const isDepartureDay = !regionalTransfer && dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
   const parkRouteDay = shouldPackLunchForDay(places);
@@ -1495,7 +1506,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   const dinnerRegion = places.at(-1)?.regionId || firstRegion;
   if (isDepartureDay) {
     items.push(simpleItem("lodging", 10 * 60, 30, "Hotel checkout", "Check out, load bags, and keep the final day lighter so the return trip is not rushed."));
-    const departureItem = departureTravelItem(profile, input, travelContext);
+    const departureItem = departureTravelItem(profile, input, travelContext, travelContext.fromLabel || profile.canonicalName);
     items.push(departureItem);
     // A long return drive that already lands late in the evening should end
     // the trip at arrival, not force a generic "dinner after return" block
@@ -1525,7 +1536,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
         ...dayPlaces.map((place) => place.id),
         ...items.map((item) => item.placeId).filter(Boolean)
       ]);
-      const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds, eveningUsage);
+      const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds, eveningUsage, homeRegionId);
       if (evening?.placeId) eveningUsage.set(evening.placeId, (eveningUsage.get(evening.placeId) || 0) + 1);
       if (evening.endTimeMinutes <= constraints.latestReturnMinutes || input.pace === "Packed") items.push(evening);
     } else if (isArrivalDay) {
@@ -1762,6 +1773,46 @@ function knownLocationCoordinates(value) {
   return null;
 }
 
+// A multi-city trip's departure day travel is only ever computed via
+// tripTravelContext's origin<->primary-destination distance, even when the
+// traveler is actually leaving from a completely different, farther-away
+// approved base (e.g. Great Smoky Mountains, not the primary Charlotte
+// base) -- confirmed live: the departure item showed "Depart Charlotte" with
+// Charlotte's ~2.5 hour drive time back to origin, when the real return
+// drive from the actual last base would take meaningfully longer. Only used
+// when the trip's departure region genuinely differs from the primary/
+// default hotel region; estimateArrivalRouteForGeneration never pre-fetches
+// a live route for this leg specifically, so it is always coordinate-based.
+function departureFromRegionContext(profile, input, departureRegionId) {
+  const region = profile.regions.find((candidate) => candidate.id === departureRegionId);
+  const transportText = `${input.transportation || ""} ${input.transport?.mode || ""}`.toLowerCase();
+  const driving = /drive|car|rent/.test(transportText) && !/fly/.test(transportText);
+  const originCoordinates = input.fromLocation?.latitude && input.fromLocation?.longitude
+    ? { lat: Number(input.fromLocation.latitude), lng: Number(input.fromLocation.longitude) }
+    : knownLocationCoordinates(input.origin);
+  const regionCoordinates = region?.centerCoordinates;
+  const distance = originCoordinates && regionCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, regionCoordinates.lat, regionCoordinates.lng) : 0;
+  const driveMinutes = distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150;
+  const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
+  const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
+  const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
+  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : Math.min(23 * 60, 9 * 60 + flyMinutes);
+  return {
+    needsArrivalLogistics: true,
+    needsDepartureLogistics: true,
+    transportMode: driving ? "drive" : "fly",
+    departureMinutes: driving ? 8 * 60 : 9 * 60,
+    arrivalMinutes,
+    originDriveMinutes: driveMinutes,
+    originDistanceMiles: Math.round(distance),
+    routeSource: "",
+    routeCheckedAt: "",
+    routeConfidence: distance ? "coordinate" : "fallback",
+    estimateType: distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate",
+    fromLabel: region?.name || profile.canonicalName
+  };
+}
+
 function normalizedArrivalRouteEstimate(value) {
   if (!value || typeof value !== "object") return null;
   const rawMinutes = Number(value.durationMinutes || value.estimatedDurationMinutes || value.minutes || 0);
@@ -1839,19 +1890,19 @@ function arrivalTravelItem(profile, input, context, fromLabel = input.origin || 
   };
 }
 
-function departureTravelItem(profile, input, context) {
+function departureTravelItem(profile, input, context, fromLabel = profile.canonicalName) {
   const duration = context.transportMode === "drive" ? Math.max(60, context.originDriveMinutes) : Math.max(120, context.arrivalMinutes - context.departureMinutes);
   const start = Math.max(12 * 60 + 30, 18 * 60 - duration);
   const description = context.transportMode === "drive"
-    ? `Return drive toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
+    ? `Return drive from ${fromLabel} toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
     : "Departure buffer for checkout, luggage, airport/station transfer, security or boarding time, and contingency.";
   return {
-    ...simpleItem("travel", start, duration, `Depart ${profile.canonicalName}`, description),
+    ...simpleItem("travel", start, duration, `Depart ${fromLabel}`, description),
     travelFromPrevious: {
       mode: context.transportMode === "drive" ? "Drive" : "Departure transfer",
       durationMinutes: duration,
       distanceMiles: context.originDistanceMiles,
-      fromLabel: profile.canonicalName,
+      fromLabel,
       toLabel: input.origin || "Origin",
       estimateType: context.estimateType,
       provider: context.routeSource,
@@ -1889,8 +1940,8 @@ function groundTravelMinutes(scheduleItems) {
     .reduce((sum, item) => sum + item.durationMinutes, 0);
 }
 
-function eveningItem(profile, input, constraints, regionId, start, dayIndex, usedActivityIds = new Set(), eveningUsage = new Map()) {
-  const anchor = eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds, start, eveningUsage);
+function eveningItem(profile, input, constraints, regionId, start, dayIndex, usedActivityIds = new Set(), eveningUsage = new Map(), homeRegionId = null) {
+  const anchor = eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds, start, eveningUsage, homeRegionId);
   if (anchor) {
     const classification = classifyPlaceForPlanning(anchor, profile, input);
     return {
@@ -1929,9 +1980,19 @@ function eveningItem(profile, input, constraints, regionId, start, dayIndex, use
   };
 }
 
-function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds = new Set(), start = 19 * 60, eveningUsage = new Map()) {
+function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityIds = new Set(), start = 19 * 60, eveningUsage = new Map(), homeRegionId = null) {
+  // Daytime activity selection already refuses to let one approved
+  // multi-city base's candidates leak into another base's day (see
+  // belongsToAnotherApprovedBase in buildDays), but evening-anchor selection
+  // searched every place in the whole merged profile regardless of region --
+  // confirmed live: a Charlotte-area whitewater center got scheduled as the
+  // 8 PM evening block on a day the traveler had already checked into a
+  // Great Smoky Mountains hotel, hours away. Mirror the same base-isolation
+  // rule daytime scheduling already uses.
+  const homeIsExtensionBase = String(homeRegionId || "").startsWith("regional-ext-");
   const candidates = profile.places
     .map((place) => ({ place, classification: classifyPlaceForPlanning(place, profile, input), travel: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
+    .filter(({ place }) => !homeRegionId || (homeIsExtensionBase ? place.regionId === homeRegionId : !String(place.regionId || "").startsWith("regional-ext-")))
     .filter(({ classification }) => classification.isEveningAnchor || classification.isBoardwalk || classification.isBeachOrWaterfront || (!constraints.noAlcohol && classification.isBar))
     // A restaurant tagged "evening" (meaning it's a good dinner spot) trips
     // the isEveningAnchor keyword match, which would schedule it as a
@@ -2808,22 +2869,22 @@ function userRejectedBeach(input) {
 }
 
 function hasUnverifiedArrivalRoute(plan) {
-  // Only the very first (arrival) and very last (departure) day's travel leg
-  // is ever backed by a real, pre-fetched provider route estimate -- see
-  // estimateArrivalRouteForGeneration in planner-actions.js, which only
-  // estimates the origin<->primary-destination leg. A multi-city trip's
-  // internal transfer days between hotel bases always carry a
-  // coordinate-based estimate (see regionalTransferContext), by design,
-  // since there's no equivalent pre-fetch for every possible internal leg.
-  // Checking every "Travel to "/"Depart " item -- including those internal
-  // transfers -- meant this failed for EVERY multi-city driving trip
-  // regardless of whether the actual arrival route was verified. Confirmed
-  // live for a Charlotte -> Asheville -> Great Smoky Mountains trip: day 0
-  // and the final day both correctly carried a real Google route estimate,
-  // but the two transfer days in between always fail this check, so the
-  // whole plan was rejected every time.
+  // Only the very first (arrival) day's travel leg is ever backed by a real,
+  // pre-fetched provider route estimate -- see estimateArrivalRouteForGeneration
+  // in planner-actions.js, which only estimates the origin<->primary-destination
+  // leg. Neither a multi-city trip's internal transfer days (see
+  // regionalTransferContext) nor its final departure day (see
+  // departureFromRegionContext, used whenever the trip's last base isn't the
+  // primary destination) can ever be provider-verified without an extra live
+  // route fetch for every possible leg, so requiring it there rejected every
+  // multi-city driving trip regardless of whether the actual arrival route
+  // was verified. Confirmed live for a Charlotte -> Asheville -> Great Smoky
+  // Mountains trip: day 0 correctly carried a real Google route estimate, but
+  // both the internal transfer days AND the final departure day (leaving from
+  // the Smoky Mountains, not Charlotte) always fail this check on their own,
+  // so the whole plan was rejected every time.
   const days = plan.days || [];
-  const travel = [days[0], days[days.length - 1]]
+  const travel = [days[0]]
     .filter(Boolean)
     .flatMap((day) => day.scheduleItems || [])
     .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")));
