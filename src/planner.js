@@ -1559,7 +1559,16 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   const isDepartureDay = !regionalTransfer && dayIndex === input.numberOfDays - 1 && travelContext.needsDepartureLogistics;
   const parkRouteDay = shouldPackLunchForDay(places);
   const breakfastStart = constraints.breakfastMinutes;
-  const longArrivalDrive = isArrivalDay && travelContext.originDriveMinutes >= 360;
+  // originDriveMinutes is always populated (a hypothetical "if you drove
+  // instead" reference distance/time, used elsewhere for things like the
+  // departure block's driving-mode formula), regardless of the trip's
+  // actual transport mode -- confirmed live: a Charlotte -> Los Angeles
+  // FLIGHT (~2100mi) has a huge hypothetical drive-time estimate, which
+  // misfired this flag to true even though nobody is driving, silently
+  // skipping both arrival-day lunch code paths (line ~1604 and the lunch
+  // safety net) and leaving Day 1 with no lunch at all. Long-arrival-drive
+  // handling only makes sense when the traveler is actually driving.
+  const longArrivalDrive = isArrivalDay && travelContext.transportMode === "drive" && travelContext.originDriveMinutes >= 360;
   const arrivalActivityStart = isArrivalDay
     ? Math.max(16 * 60, travelContext.arrivalMinutes + (longArrivalDrive ? 105 : 60))
     : 0;

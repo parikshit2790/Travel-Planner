@@ -296,9 +296,18 @@ function buildRegions(destinationLocation, poiFeatures) {
     neighboringRegionIds: ["arts-landmarks", "dining-evenings"],
     typicalTravelMinutesToRegions: {}
   };
-  const culture = regionFromFeature("arts-landmarks", "Museums and landmark district", poiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || poiFeatures[0], ["culture", "landmark"], ["downtown-core", "dining-evenings"]);
-  const nature = regionFromFeature("parks-outdoors", "Parks, gardens, and outdoor routes", poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[1] || poiFeatures[0], ["nature", "viewpoint"], ["downtown-core", "arts-landmarks"]);
-  const food = regionFromFeature("dining-evenings", "Restaurant and evening neighborhoods", poiFeatures.find((feature) => poiCategory(feature) === "food") || poiFeatures[2] || poiFeatures[0], ["food", "evening"], ["downtown-core", "arts-landmarks"]);
+  // Each core region's representative feature must come from the CORE
+  // (in-city) candidate pool, not the wider nearby-excursion pool (30km+
+  // radius) mixed into the same poiFeatures array -- confirmed live: the
+  // "dining-evenings" region ended up centered on a genuinely 30+ mile-away
+  // restaurant, making every restaurant near it estimate at 112-114 minutes
+  // from downtown, which starved arrival-day (and other) meal recommendations
+  // of any candidate within the 90-minute cross-region cap. Reserve the wider
+  // pool for the "nearby-excursions" region itself, below.
+  const corePoiFeatures = poiFeatures.filter((feature) => featureDistanceMiles(centerCoordinates, feature) < 18);
+  const culture = regionFromFeature("arts-landmarks", "Museums and landmark district", corePoiFeatures.find((feature) => ["culture", "museum", "history", "landmark", "entertainment"].includes(poiCategory(feature))) || corePoiFeatures[0] || poiFeatures[0], ["culture", "landmark"], ["downtown-core", "dining-evenings"]);
+  const nature = regionFromFeature("parks-outdoors", "Parks, gardens, and outdoor routes", corePoiFeatures.find((feature) => poiCategory(feature) === "nature") || corePoiFeatures[1] || corePoiFeatures[0] || poiFeatures[0], ["nature", "viewpoint"], ["downtown-core", "arts-landmarks"]);
+  const food = regionFromFeature("dining-evenings", "Restaurant and evening neighborhoods", corePoiFeatures.find((feature) => poiCategory(feature) === "food") || corePoiFeatures[2] || corePoiFeatures[0] || poiFeatures[0], ["food", "evening"], ["downtown-core", "arts-landmarks"]);
   const nearby = regionFromFeature("nearby-excursions", "Nearby regional options", poiFeatures.find((feature) => featureDistanceMiles(centerCoordinates, feature) >= 18) || poiFeatures.find((feature) => poiCategory(feature) === "nature") || poiFeatures[3] || poiFeatures[0], ["nearby", "day-trip", "scenic"], ["downtown-core", "parks-outdoors"]);
   return [center, culture, nature, food, nearby];
 }
