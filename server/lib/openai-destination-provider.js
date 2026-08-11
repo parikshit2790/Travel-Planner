@@ -542,7 +542,19 @@ function cleanPublicPlanningText(value) {
     .replace(/\bCentral area\b/g, "Downtown area")
     .replace(/\bCulture and landmarks\b/g, "Museums and landmarks")
     .replace(/\bFood and evening area\b/g, "Restaurant and evening area")
-    .replace(/\braw slug\b/ig, "planning label");
+    .replace(/\braw slug\b/ig, "planning label")
+    // The model occasionally shows its own internal reasoning about a
+    // place's regionId/categorization assignment directly inside the
+    // place's name instead of a separate field -- confirmed live:
+    // "Versailles Restaurant (South Beach miscategorized for regionId
+    // rules only)" was displayed to the traveler verbatim. Strip any
+    // parenthetical that references our own internal vocabulary; a real
+    // place name would never legitimately contain these terms, so this is
+    // always safe to drop entirely (unlike a genuinely useful parenthetical
+    // such as "(closed Mondays)").
+    .replace(/\s*\((?:[^()]*\b(?:regionid|region id|miscategor\w*|categoriz(?:ed|ation)\w*|backend|schema|debug|internal(?:\s+use)?|placeholder|rules?\s+only|not applicable)\b[^()]*)\)/ig, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function slug(value) {
