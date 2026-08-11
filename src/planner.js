@@ -1266,7 +1266,16 @@ function ensureNearbyUrbanRegionalCoverage(profile, input, dayIndex, selected, c
     .filter(({ item, flag, routeRank: rank }) => {
       if (rank > 1 || flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness || flag.isChildrenFocused || flag.isGamblingVenue) return false;
       const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
-      return flag.isDayTrip || flag.isRegionalDestination || /\b(university|gardens|garden|downtown|college town|nearby|regional|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
+      // "downtown" alone is too generic a signal here -- it also matches an
+      // ordinary in-city museum's own category tag (e.g. a "museum, downtown,
+      // indoor" fixture), which can then outscore a genuinely regional pick
+      // like Duke Gardens and win this slot despite not being a day trip at
+      // all. Confirmed live: this exact false-positive bumped Duke Gardens
+      // out of a Raleigh itinerary in favor of a downtown Raleigh museum
+      // once an unrelated scheduling shift changed which day this ran on.
+      // Keep the more specific words that actually indicate a regional
+      // excursion rather than just "is downtown."
+      return flag.isDayTrip || flag.isRegionalDestination || /\b(university|gardens|garden|college town|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
     })
     .sort((a, b) => a.routeRank - b.routeRank || Number(b.item.place.priorityScore || 0) - Number(a.item.place.priorityScore || 0) || b.item.score - a.item.score)[0]?.item;
   if (!nearby) return selected;
@@ -1891,7 +1900,7 @@ function tripTravelContext(profile, input) {
   const distance = originCoordinates && destinationCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, destinationCoordinates.lat, destinationCoordinates.lng) : 0;
   const liveDriveMinutes = routeEstimate && driving && !isAverageEstimate ? routeEstimate.durationMinutes : 0;
   const averageDriveMinutes = routeEstimate && driving && isAverageEstimate ? routeEstimate.durationMinutes : 0;
-  const driveMinutes = liveDriveMinutes || averageDriveMinutes || (distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150);
+  const driveMinutes = liveDriveMinutes || averageDriveMinutes || (distance ? estimatedArrivalDriveMinutes(distance) : driving ? 180 : 150);
   const routeDistance = routeEstimate?.distanceMiles || Math.round(distance);
   const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
   const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
@@ -1981,7 +1990,7 @@ function departureFromRegionContext(profile, input, departureRegionId) {
     : knownLocationCoordinates(input.origin);
   const regionCoordinates = region?.centerCoordinates;
   const distance = originCoordinates && regionCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, regionCoordinates.lat, regionCoordinates.lng) : 0;
-  const driveMinutes = distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150;
+  const driveMinutes = distance ? estimatedArrivalDriveMinutes(distance) : driving ? 180 : 150;
   const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
   const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
   const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
@@ -3614,7 +3623,17 @@ function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
   }
   if (fromCoordinates && toCoordinates) {
     const distanceMiles = haversineMiles(fromCoordinates.lat, fromCoordinates.lng, toCoordinates.lat, toCoordinates.lng);
-    const minimum = Math.ceil(distanceMiles / (route?.tags?.includes("scenic") || distanceMiles > 18 ? 0.65 : 0.45));
+    // The 0.65-miles-per-minute (~39mph) pace used for anything past 18
+    // miles is tuned for regional roads, not genuine highway legs -- fine
+    // for a 20-40 mile regional hop, badly wrong for an inter-city transfer.
+    // Confirmed live: Miami to Orlando (~205 miles) came out around 5 hours,
+    // versus a real ~3.5-4 hour drive. Keep the existing pace for scenic
+    // routes (deliberately slow/twisty) and short-to-regional distances;
+    // step up to a real highway speed only past 100 miles, where the route
+    // is realistically dominated by interstate driving.
+    const isScenic = Boolean(route?.tags?.includes("scenic"));
+    const impliedMph = isScenic ? 39 : distanceMiles > 150 ? 60 : distanceMiles > 18 ? 39 : 27;
+    const minimum = Math.ceil((distanceMiles / impliedMph) * 60);
     const routeMinutes = route?.estimatedDriveMinutes;
     let durationMinutes = Math.max(8, Math.round(routeMinutes ? Math.max(routeMinutes, minimum) : minimum + (distanceMiles > 20 ? 18 : 8)));
     if (fromRegionId !== toRegionId && isMountainRegionalTransfer(profile, fromPlaceOrRegion, toPlaceOrRegion)) {
@@ -3835,13 +3854,30 @@ function mealCandidatePlace(profile, regionId, mealType, excludedIds = new Set()
       return mealQualityScore(b) - mealQualityScore(a);
     });
   if (regionMatches.length) return regionMatches[0];
-  return profile.places
+  // A regional-extension base's own food pool is a handful of researched
+  // restaurants (see researchRegionalExtensionCandidate), which a multi-day
+  // stay there can genuinely exhaust -- the cross-region fallback below has
+  // no distance limit at all once that happens, so it can reach all the way
+  // back into a different, 100+ mile away city. Confirmed live: a 3-night
+  // Orlando stay ran out of local restaurants by day 2 and started serving
+  // Miami restaurants (200+ miles away) for Orlando breakfasts. Reusing an
+  // already-used local restaurant a third time is a far smaller compromise
+  // than that -- try relaxing the SAME region's reuse cap before ever
+  // considering another region at all.
+  const relaxedSameRegionMatches = profile.places
+    .filter((place) => place.regionId === regionId)
     .filter(byMealFit)
-    .sort((a, b) => {
-      const routeA = estimateTravel(profile, regionId, a.regionId).durationMinutes;
-      const routeB = estimateTravel(profile, regionId, b.regionId).durationMinutes;
-      return routeA - routeB || (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || cuisineRank(a) - cuisineRank(b) || mealQualityScore(b) - mealQualityScore(a);
-    })[0] || null;
+    .sort((a, b) => (mealUsage.get(a.id) || 0) - (mealUsage.get(b.id) || 0) || cuisineRank(a) - cuisineRank(b) || mealQualityScore(b) - mealQualityScore(a));
+  if (relaxedSameRegionMatches.length) return relaxedSameRegionMatches[0];
+  const crossRegionMatches = profile.places
+    .filter(byMealFit)
+    .map((place) => ({ place, routeMinutes: estimateTravel(profile, regionId, place.regionId).durationMinutes }))
+    .sort((a, b) => a.routeMinutes - b.routeMinutes || (mealUsage.get(a.place.id) || 0) - (mealUsage.get(b.place.id) || 0) || cuisineRank(a.place) - cuisineRank(b.place) || mealQualityScore(b.place) - mealQualityScore(a.place));
+  // A meal genuinely more than 90 minutes from where the traveler actually
+  // is that day is worse than no verified pick at all -- the caller already
+  // falls back to a generic "explore this area" placeholder when this
+  // returns null (see mealRecommendation's specificFoodAreaLabel path).
+  return crossRegionMatches.find((entry) => entry.routeMinutes <= 90)?.place || null;
 }
 
 function isMealCandidate(place, mealType) {
@@ -4064,6 +4100,18 @@ function haversineMiles(lat1, lon1, lat2, lon2) {
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return radiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// A flat ~50mph-equivalent (distance/0.72 + 35min buffer) badly understates
+// a genuine long-haul arrival/departure drive -- confirmed live: Miami to
+// Orlando (~205 miles) came out around 5 hours versus a real ~3.5-4 hours.
+// Keep the existing pace for shorter drives (a fixed 35-minute buffer
+// dominates the estimate there anyway) and step up to a real highway speed
+// only once the distance is genuinely highway-scale.
+function estimatedArrivalDriveMinutes(distanceMiles) {
+  if (!distanceMiles) return 0;
+  const impliedMph = distanceMiles > 100 ? 60 : 43.2;
+  return Math.max(60, Math.round((distanceMiles / impliedMph) * 60) + 35);
 }
 
 function internalOutputTerms() {

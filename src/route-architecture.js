@@ -199,8 +199,22 @@ export function estimateDestinationDepth(trip, candidates = []) {
   const days = Math.max(1, Number(trip.days || 1));
   const destination = normalizePlaceName(trip.destinationDisplay || trip.destination || "");
   const geocodedType = String(trip.destinationLocation?.locationType || "");
+  // The un-geocoded fallback below is meant to catch a destination that IS
+  // simply a state/region/country (the traveler typed "Florida" with
+  // nothing more specific) -- testing the FULL destination string for that
+  // false-positives on every ordinary city in one of these states, since a
+  // normally-formatted "City, State, Country" name always contains the
+  // state name too. Confirmed live: "Miami, Florida, United States" (without
+  // a resolved locationType, e.g. free-typed rather than picked from
+  // autocomplete) read as "broad", which silently replaced Miami with the
+  // first explicit "Places Already in Mind" city as the trip's real primary
+  // destination -- Miami itself disappeared from a Miami + Orlando trip.
+  // Test only the destination's own leading segment (before any state/
+  // country suffix), matching the same "core name" pattern already used for
+  // candidate matching elsewhere in this file.
+  const destinationCore = destination.split(",")[0].trim();
   const broad = ["Country", "State or region", "State", "Region"].includes(geocodedType)
-    || (!geocodedType && /\b(california|michigan|texas|florida|europe|japan|italy|southern california|northern michigan)\b/i.test(destination));
+    || (!geocodedType && /\b(california|michigan|texas|florida|europe|japan|italy|southern california|northern michigan)\b/i.test(destinationCore));
   const explicitRegions = splitList(trip.destinationRegions).length + splitList(trip.routePreferences?.placesInMind).length;
   const interestCount = (trip.preferences || []).filter((pref) => pref.category === "experiences").length;
   let attractionCapacity = broad ? 8 : 6;
@@ -278,7 +292,15 @@ function buildMultiCityChain(trip, destination, primaryCoordinates, candidates, 
   while (chain.length < maxHotelChanges && remaining.length) {
     const withLeg = remaining
       .map((candidate) => ({ candidate, legMinutes: chainLegMinutes(position, candidate) }))
-      .sort((a, b) => Number(b.candidate.explicit) - Number(a.candidate.explicit) || a.legMinutes - b.legMinutes);
+      // candidate.explicit is `true` for traveler-named places and simply
+      // absent (undefined) for auto-suggested ones -- Number(undefined) is
+      // NaN, and `NaN - 1` is also NaN, which silently breaks a numeric sort
+      // comparator (most engines treat a NaN result as "equal," leaving
+      // explicit and inferred candidates in whatever order they happened to
+      // already be in). Confirmed live: an explicit "San Diego" request lost
+      // to an auto-suggested "Malibu" purely because of this. Coerce to a
+      // real boolean before subtracting.
+      .sort((a, b) => Number(Boolean(b.candidate.explicit)) - Number(Boolean(a.candidate.explicit)) || a.legMinutes - b.legMinutes);
     // A place close enough to be a same-day excursion isn't worth checking
     // out of one hotel and into another for -- confirmed live: "Lake Norman"
     // (a ~25 minute drive from Charlotte, effectively the same metro area)
@@ -439,7 +461,7 @@ function candidateStops(trip, destination) {
         explicit: true
       };
     }),
-    ...described.map((item) => ({ ...item, coordinates: null }))
+    ...described.map((item) => ({ ...item, coordinates: null, explicit: false }))
   ];
   const seen = new Set();
   return merged.filter((candidate) => {
