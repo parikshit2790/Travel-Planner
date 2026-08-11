@@ -127,21 +127,8 @@ export function generateRouteArchitectureOptions(trip) {
   }
 
   if (["multi-city", "recommend"].includes(prefs.tripStructure) && maxHotelChanges > 0) {
-    const scored = candidates
-      .map((candidate) => ({ candidate, score: destinationExpansionScore(trip, destination, candidate, depth) }))
-      // A place close enough to be a same-day excursion isn't worth checking
-      // out of one hotel and into another for -- confirmed live: "Lake
-      // Norman" (a ~25 minute drive from Charlotte, effectively the same
-      // metro area) had nothing here stopping it from being proposed as its
-      // own multi-city hotel base once it cleared the score threshold, since
-      // this filter previously only capped the burden from above, never
-      // required a minimum. MIN_MULTI_CITY_TRANSFER_MINUTES mirrors the
-      // server's own "local" classification boundary (round-trip <= 90 min,
-      // i.e. one-way <= 45 min) so a place this close routes into a day trip
-      // instead of a separate hotel base.
-      .filter((item) => item.score.total >= 58 && item.score.transferBurdenMinutes <= maxTransferMinutes && item.score.transferBurdenMinutes >= MIN_MULTI_CITY_TRANSFER_MINUTES)
-      .sort((a, b) => Number(b.candidate.explicit) - Number(a.candidate.explicit) || b.score.total - a.score.total);
-    const stops = scored.slice(0, maxHotelChanges);
+    const primaryCoordinates = primaryDestinationCoordinates(trip);
+    const stops = buildMultiCityChain(trip, destination, primaryCoordinates, candidates, depth, maxHotelChanges, maxTransferMinutes);
     if (stops.length) options.push(multiCityOption({ trip, destination, days, nights, stops, maxHotelChanges, signature, primaryFromRefinement, remainingExplicit }));
   }
 
@@ -251,6 +238,65 @@ export function destinationExpansionScore(trip, primaryDestination, candidate, d
   return { total, addedExperienceValue, uniqueness, transferBurden, transferBurdenMinutes, lodgingBurden, routeCompatibility, interestMatch, budgetImpact, dayCountFit };
 }
 
+function primaryDestinationCoordinates(trip) {
+  const lat = trip.destinationLat ?? trip.destinationLocation?.latitude;
+  const lng = trip.destinationLng ?? trip.destinationLocation?.longitude;
+  return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) ? { lat: Number(lat), lng: Number(lng) } : null;
+}
+
+// A candidate's driveMinutes (from candidateStops) is always measured from
+// the PRIMARY destination, regardless of what order stops actually end up
+// in -- confirmed live against real routes: Las Vegas to LA is a reasonable
+// 4h15m, but LA measured from Phoenix (the primary destination on a
+// Phoenix -> Grand Canyon -> Vegas -> LA trip) reads as a ~9-hour leg and
+// gets rejected, even though the traveler would never actually drive that
+// leg -- they'd drive from Vegas. Recompute the leg from wherever the chain
+// actually is right now when we know real coordinates for both ends; fall
+// back to the precomputed hub-relative/guessed value when we don't (a
+// keyword-based guess has no reference point to recompute from anyway).
+function chainLegMinutes(fromCoordinates, entry) {
+  if (fromCoordinates && entry.coordinates) {
+    const miles = haversineMiles(fromCoordinates.lat, fromCoordinates.lng, entry.coordinates.lat, entry.coordinates.lng);
+    if (Number.isFinite(miles) && miles > 0) return estimatedDriveMinutesForMiles(miles);
+  }
+  return entry.driveMinutes || 120;
+}
+
+// Builds the multi-city stop sequence leg by leg from wherever the chain
+// currently ends (starting at the primary destination), instead of picking
+// the top-scored candidates by their distance from the primary destination
+// alone. Explicitly-requested places are always tried first at each step;
+// among those, the nearest reachable one from the current position wins.
+// Quality (destinationExpansionScore) is evaluated using the REAL leg the
+// stop would travel in this chain position, not its hub-relative distance,
+// so a place that's a poor fit from the hub but a good fit from the
+// previous stop scores correctly.
+function buildMultiCityChain(trip, destination, primaryCoordinates, candidates, depth, maxHotelChanges, maxTransferMinutes) {
+  const chain = [];
+  let position = primaryCoordinates;
+  let remaining = [...candidates];
+  while (chain.length < maxHotelChanges && remaining.length) {
+    const withLeg = remaining
+      .map((candidate) => ({ candidate, legMinutes: chainLegMinutes(position, candidate) }))
+      .sort((a, b) => Number(b.candidate.explicit) - Number(a.candidate.explicit) || a.legMinutes - b.legMinutes);
+    // A place close enough to be a same-day excursion isn't worth checking
+    // out of one hotel and into another for -- confirmed live: "Lake Norman"
+    // (a ~25 minute drive from Charlotte, effectively the same metro area)
+    // had nothing stopping it from being proposed as its own multi-city
+    // hotel base. MIN_MULTI_CITY_TRANSFER_MINUTES mirrors the server's own
+    // "local" classification boundary (round-trip <= 90 min, i.e. one-way
+    // <= 45 min) so a place this close routes into a day trip instead.
+    const next = withLeg.find((item) => item.legMinutes <= maxTransferMinutes && item.legMinutes >= MIN_MULTI_CITY_TRANSFER_MINUTES);
+    if (!next) break;
+    const score = destinationExpansionScore(trip, destination, { ...next.candidate, driveMinutes: next.legMinutes }, depth);
+    remaining = remaining.filter((item) => item !== next.candidate);
+    if (score.total < 58) continue;
+    chain.push({ candidate: next.candidate, score });
+    position = next.candidate.coordinates || position;
+  }
+  return chain;
+}
+
 function oneCityOption({ trip, origin, destination, days, nights, depth, signature, primaryFromRefinement, remainingExplicit }) {
   const coverage = refinementCoverage({
     primaryFromRefinement,
@@ -350,7 +396,10 @@ function multiCityOption({ trip, destination, days, nights, stops, maxHotelChang
     hotelBases: [tripBase(destination, primaryNights, trip), ...stops.map((item, index) => tripBase(item.candidate.name, stopNights[index], trip))],
     nightsPerBase: [{ base: destination, nights: primaryNights }, ...stops.map((item, index) => ({ base: item.candidate.name, nights: stopNights[index] }))],
     transferDays: stops.map((item) => `Transfer to ${item.candidate.name}`),
-    majorDriveDays: stops.map((item) => `${destination} to ${item.candidate.name}`),
+    // Each leg now travels from wherever the chain actually was at that
+    // point, not always from the primary destination -- label it that way
+    // (e.g. "Las Vegas to Los Angeles", not "Phoenix to Los Angeles").
+    majorDriveDays: stops.map((item, index) => `${[destination, ...stopNames][index]} to ${item.candidate.name}`),
     dayTripCandidates: [],
     hotelChanges: stops.length,
     approximateTransferTime: formatMinutes(totalTransferMinutes),
@@ -379,13 +428,18 @@ function candidateStops(trip, destination) {
   const locationsByKey = Object.fromEntries(Object.entries(knownLocations).map(([name, coords]) => [name.toLowerCase(), coords]));
   const described = inferNearbyCandidates(`${destination} ${trip.description || ""}`);
   const merged = [
-    ...explicit.map((name) => ({
-      name: normalizePlaceName(name),
-      driveMinutes: driveMinutesFor(trip, locationsByKey[String(name).toLowerCase()], name),
-      type: inferStopType(name),
-      explicit: true
-    })),
-    ...described
+    ...explicit.map((name) => {
+      const coords = locationsByKey[String(name).toLowerCase()];
+      const coordinates = coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng) ? { lat: Number(coords.lat), lng: Number(coords.lng) } : null;
+      return {
+        name: normalizePlaceName(name),
+        driveMinutes: driveMinutesFor(trip, coords, name),
+        coordinates,
+        type: inferStopType(name),
+        explicit: true
+      };
+    }),
+    ...described.map((item) => ({ ...item, coordinates: null }))
   ];
   const seen = new Set();
   return merged.filter((candidate) => {
@@ -468,14 +522,26 @@ function driveMinutesFor(trip, location, name) {
   const destLng = trip.destinationLng ?? trip.destinationLocation?.longitude;
   if (location && Number.isFinite(location.lat) && Number.isFinite(location.lng) && Number.isFinite(destLat) && Number.isFinite(destLng)) {
     const miles = haversineMiles(destLat, destLng, location.lat, location.lng);
-    // Same rough miles-to-minutes conversion the server's live route
-    // feasibility estimator uses (see routeFeasibilityForPlace in
-    // destination-intelligence.js), kept in sync so this client-side
-    // recommendation and the server's eventual research agree on what
-    // counts as a nearby day trip versus a genuine multi-city stop.
-    if (Number.isFinite(miles) && miles > 0) return Math.round(miles / 0.7) + (miles > 25 ? 20 : 8);
+    if (Number.isFinite(miles) && miles > 0) return estimatedDriveMinutesForMiles(miles);
   }
   return inferDriveMinutes(name);
+}
+
+// A flat ~42mph-equivalent conversion badly understates genuine long-haul
+// interstate legs -- confirmed against real Google Maps routes: Phoenix to
+// LA is 372 road miles in 5h38m (~66mph), and Las Vegas to LA is 270 road
+// miles in 4h15m (~63mph), both far faster than the old flat factor implied
+// once compounded with the straight-line-vs-road-distance gap (it estimated
+// Phoenix-to-LA at over 9 hours). Short, traffic-heavy local hops really are
+// slower than that on average, so use a distance-tiered speed instead of one
+// constant: this is a straight-line estimate feeding a "day trip vs.
+// overnight base" decision, not a routing engine, so it only needs to be in
+// the right neighborhood, not precise.
+function estimatedDriveMinutesForMiles(miles) {
+  if (!Number.isFinite(miles) || miles <= 0) return 0;
+  const impliedMph = miles <= 30 ? 32 : miles <= 100 ? 46 : 62;
+  const buffer = miles > 25 ? 20 : 8;
+  return Math.round((miles / impliedMph) * 60) + buffer;
 }
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
