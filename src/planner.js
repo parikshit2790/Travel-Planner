@@ -990,8 +990,44 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     const belongsToAnotherApprovedBase = approvedSchedule
       ? (regionId) => (todayIsExtensionDay ? !themeRegions.includes(regionId) : isRegionalExtensionRegionId(regionId))
       : () => false;
-    const themeCandidates = scored.filter((item) => themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
-    const fillCandidates = scored.filter((item) => !themeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !belongsToAnotherApprovedBase(item.place.regionId));
+    // Multi-region day themes are picked by category signal (a signature
+    // landmark, a museum, a neighborhood spot) without regard to how far
+    // apart those regions actually are, and a compact borough like Manhattan
+    // is small enough that most of it stays under keepNearbyThemeRegions'
+    // 45-minute cap by transit -- confirmed live: 9/11 Memorial (Lower
+    // Manhattan) and Times Square (Midtown), about 4.5 miles apart, both
+    // stayed in-theme and got scheduled the same day. Use a tighter
+    // geographic cap just for picking the day's OWN activities in a dense
+    // urban core; themeRegions itself stays untouched below (backups, the
+    // day's region label, and multi-city logic all still need the wider
+    // set), so this only narrows what's preferred, never what's reachable as
+    // a fallback.
+    const activityThemeRegions = isUrbanDestinationProfile(profile)
+      ? themeRegions.filter((regionId) => {
+          if (regionId === themeRegions[0]) return true;
+          const anchor = profile.regions.find((candidate) => candidate.id === themeRegions[0]);
+          const region = profile.regions.find((candidate) => candidate.id === regionId);
+          if (!anchor?.centerCoordinates || !region?.centerCoordinates) return true;
+          return haversineMiles(anchor.centerCoordinates.lat, anchor.centerCoordinates.lng, region.centerCoordinates.lat, region.centerCoordinates.lng) <= 3;
+        })
+      : themeRegions;
+    const themeCandidates = scored.filter((item) => activityThemeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input));
+    // When a day's theme region(s) run short, filler used to come from
+    // whichever other region had the next-highest-scored candidate,
+    // regardless of distance -- confirmed live: Central Park (a different,
+    // non-adjacent NYC region) filled in behind Times Square purely on
+    // score, spreading a single day across Midtown and Upper Manhattan.
+    // Prefer the geographically nearest other region's candidates first, so
+    // filler still respects the day's own geography when it has to reach
+    // outside the theme at all.
+    const themeAnchorRegionId = activityThemeRegions[0];
+    const fillCandidates = scored
+      .filter((item) => !activityThemeRegions.includes(item.place.regionId) && !scheduled.has(item.place.id) && item.score > -200 && isActivityCandidateForSchedule(item, profile, input) && !belongsToAnotherApprovedBase(item.place.regionId))
+      .sort((a, b) => {
+        const minutesA = themeAnchorRegionId ? estimateTravel(profile, themeAnchorRegionId, a.place.regionId).durationMinutes : 0;
+        const minutesB = themeAnchorRegionId ? estimateTravel(profile, themeAnchorRegionId, b.place.regionId).durationMinutes : 0;
+        return minutesA - minutesB || b.score - a.score;
+      });
     const candidates = [...themeCandidates, ...fillCandidates.slice(0, Math.max(0, input.maxActivities - themeCandidates.length))];
     const fullDay = candidates.find((item) => item.place.bestTimeOfDay === "full-day");
     const isTrueAllDay = fullDay && Number(fullDay.place.typicalDurationMinutes || 0) >= 300;
@@ -1474,10 +1510,20 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   // own approved base region (homeRegionId) before that trip-wide default.
   const firstRegion = places[0]?.regionId || homeRegionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
   if (isArrivalDay) {
-    addMeal(items, "breakfast", breakfastStart, 45, "Pre-departure breakfast", {
-      primary: "Breakfast before leaving or on the first route stop",
-      secondary: "Simple cafe or hotel breakfast before departure",
-      text: "Keep breakfast simple before the arrival travel block. Choose a cafe, hotel breakfast, or route stop that fits the group; verify menus and timing directly.",
+    // Breakfast sits at a fixed early-morning slot regardless of when the
+    // arrival travel block itself lands -- confirmed live: an 8:00 AM flight
+    // arrival (the assumed default when no exact time was entered) left
+    // breakfast's normal ~8 AM slot falling AFTER arrival, yet it was still
+    // titled "Pre-departure breakfast" and described as coming "before the
+    // arrival travel block." Once the traveler has already landed, this is
+    // just their first breakfast in town, not a pre-departure meal.
+    const breakfastAfterArrival = travelContext.transportMode === "fly" && breakfastStart >= travelContext.arrivalMinutes;
+    addMeal(items, "breakfast", breakfastStart, 45, breakfastAfterArrival ? "Arrival-morning breakfast" : "Pre-departure breakfast", {
+      primary: breakfastAfterArrival ? "Breakfast after arrival, near the hotel or first stop" : "Breakfast before leaving or on the first route stop",
+      secondary: "Simple cafe or hotel breakfast",
+      text: breakfastAfterArrival
+        ? "A simple first breakfast after arrival. Choose a cafe, hotel breakfast, or a stop near wherever you're headed first; verify menus and timing directly."
+        : "Keep breakfast simple before the arrival travel block. Choose a cafe, hotel breakfast, or route stop that fits the group; verify menus and timing directly.",
       cuisine: "Flexible",
       price: moneyRange(mealCost(input, "breakfast").low, mealCost(input, "breakfast").high),
       reservation: "No reservation needed for a simple travel-morning breakfast."
@@ -1713,8 +1759,15 @@ const EXPERIENCE_OVERHEAD_MINUTES = [
 ];
 const EXPERIENCE_OVERHEAD_CEILING_MINUTES = 300;
 
+// Matching against shortDescription as well as name caused false positives --
+// confirmed live: "The Battery" (a park with VIEWS of and ferry ACCESS to
+// Liberty/Ellis Island, not the island experience itself) got its own
+// description text "Ellis Island & Statue of Liberty views" matched by these
+// keywords, inflating a 90-minute park stop to 190 minutes. Match on the
+// place's own name only, since the overhead is specific to actually visiting
+// that landmark, not places that merely mention or overlook it.
 function experienceOverheadMinutes(place) {
-  const text = `${place?.name || ""} ${place?.shortDescription || ""}`;
+  const text = place?.name || "";
   return EXPERIENCE_OVERHEAD_MINUTES.find(([pattern]) => pattern.test(text))?.[1] || 0;
 }
 
@@ -3665,16 +3718,24 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   const area = profile.foodAreas.find((candidate) => candidate.regionId === regionId && candidate.mealTypes.includes(mealType)) || profile.foodAreas.find((candidate) => candidate.mealTypes.includes(mealType));
   const preferredCuisines = input.food.cuisine || [];
   const primaryPlace = mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, false, anchorPlace, preferredCuisines) || mealCandidatePlace(profile, regionId, mealType, new Set(), mealUsage, true, anchorPlace, preferredCuisines);
+  const classification = primaryPlace ? classifyPlaceForPlanning(primaryPlace, profile, input) : null;
   // The selected restaurant's own real cuisine (from its name/description/
   // Google place types) is a much stronger signal than the traveler's
   // stated cuisine interest, which is often unset -- falling back straight
   // to "local" regardless of what the venue actually serves is why a French
   // bistro or a Mediterranean restaurant both showed up as "Cuisine fit:
   // Local" even after real, diverse restaurants were being selected.
-  const cuisine = cuisineFromPlace(primaryPlace)
-    || (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item))))
-    || (input.food.cuisine || [])[0]
-    || "local";
+  // A food hall (Time Out Market, Vanderbilt Market, ...) hosts dozens of
+  // independent vendors -- matching one incidental keyword from its own
+  // description (e.g. a mention of a pizza stall) and presenting that as
+  // "Pizza cuisine" misrepresents the whole venue. Skip the keyword match
+  // entirely for food halls and say what it actually is instead.
+  const cuisine = classification?.isFoodHall
+    ? "Food hall"
+    : cuisineFromPlace(primaryPlace)
+      || (input.food.cuisine || []).find((item) => area?.cuisines.some((cuisineName) => normalizeText(cuisineName).includes(normalizeText(item))))
+      || (input.food.cuisine || [])[0]
+      || "local";
   const excluded = new Set([primaryPlace?.id].filter(Boolean));
   const secondaryPlace = mealCandidatePlace(profile, regionId, mealType, excluded, mealUsage, true, anchorPlace, preferredCuisines) || mealCandidatePlace(profile, area?.regionId, mealType, excluded, mealUsage, true, anchorPlace, preferredCuisines);
   const primary = primaryPlace?.name || specificFoodAreaLabel(profile, area, regionId, mealType);
@@ -3682,7 +3743,6 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
   const price = moneyRange(mealCost(input, mealType).low, mealCost(input, mealType).high);
   const reservation = mealType === "dinner" ? "Reserve if this is a must-do meal or the group is larger; otherwise verify hours day-of." : "Reservations usually optional; verify hours and menus day-of.";
   const routeMinutes = primaryPlace ? estimateTravel(profile, regionId, primaryPlace.regionId).durationMinutes : 0;
-  const classification = primaryPlace ? classifyPlaceForPlanning(primaryPlace, profile, input) : null;
   const anchorPreciseCoordinates = preciseCoordinatesFor(anchorPlace);
   const primaryPreciseCoordinates = preciseCoordinatesFor(primaryPlace);
   const anchorDistanceMiles = anchorPreciseCoordinates && primaryPreciseCoordinates
@@ -3702,7 +3762,9 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     // region, once the actual restaurant is known.
     primaryPlaceRegionId: primaryPlace?.regionId || regionId,
     secondaryPlaceId: secondaryPlace?.id || "",
-    text: `${primary}. Backup: ${secondary}. ${titleCase(cuisine)} cuisine. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
+    text: classification?.isFoodHall
+      ? `${primary}. Backup: ${secondary}. Food hall with multiple independent vendors -- pick what you're in the mood for. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with each vendor.`
+      : `${primary}. Backup: ${secondary}. ${titleCase(cuisine)} cuisine. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
     cuisine: titleCase(cuisine),
     price,
     reservation,
