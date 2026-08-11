@@ -645,6 +645,16 @@ function improveUrbanDestinationSelection(profile, input, dayIndex, selected, ca
   const selectedText = normalizeText(selected.map((item) => `${item.place.name} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`).join(" "));
   const pick = (pattern) => candidates.find((item) => {
     if (scheduled.has(item.place.id) || selectedIds.has(item.place.id) || isRegionalExcursionPlace(item.place)) return false;
+    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
+    // Unlike every other coverage-guarantee "pick" helper in this file, this
+    // one had no restaurant/food/bar exclusion at all -- a restaurant whose
+    // own AI-generated name or description naturally mentions its
+    // neighborhood (e.g. "La Mar by Gastón Acurio (Downtown / Bayside)")
+    // matches these coverage patterns (waterfront, district, landmark) just
+    // as easily as a real attraction. Confirmed live: two restaurants got
+    // scheduled as standalone sightseeing "activities" (in addition to
+    // their own separate meal slots), and one even became the day's title.
+    if (flag.isRestaurant || flag.isFoodHall || flag.isBar || flag.isOrdinaryBusiness) return false;
     const text = normalizeText(`${item.place.name} ${item.place.shortDescription || ""} ${(item.place.categories || []).join(" ")} ${(item.place.tags || []).join(" ")}`);
     return pattern.test(text);
   });
@@ -1182,6 +1192,15 @@ function diversifyDuplicateMuseumDay(profile, input, selected, candidates, sched
 }
 
 function isProtectedSignatureAnchor(place) {
+  // A highly-rated or glowingly-described restaurant (a real, common
+  // pattern in AI-generated place descriptions -- "world renowned",
+  // "one of the largest" wine lists, priorityScore 88+) can trip these same
+  // flowery-language and high-score signals just as easily as an actual
+  // landmark. This flag exists to protect a day's headline attraction from
+  // being swapped out, not to protect a restaurant -- exclude food/bar
+  // places up front regardless of how they score or read.
+  const categories = (place.categories || []).map((category) => String(category).toLowerCase());
+  if (categories.includes("restaurant") || categories.includes("food") || categories.includes("bar")) return false;
   const text = normalizeText(`${place.name} ${place.shortDescription || ""} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
   return /\b(aquarium|botanical garden|civil rights|human rights|national historical park|national historic site|official tourism|world class|world renowned|one of the largest)\b/.test(text)
     || Number(place.priorityScore || 0) >= 88;
