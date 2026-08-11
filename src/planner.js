@@ -3067,7 +3067,18 @@ function dayArchetype(day, input, index) {
 function dayRouteLabel(profile, day, input, index) {
   if (index === 0 && day.scheduleItems.some((item) => item.title.startsWith("Travel to "))) return `${input.origin || "Origin"} -> ${profile.canonicalName}`;
   if (index === input.numberOfDays - 1 && day.scheduleItems.some((item) => item.title.startsWith("Depart "))) return `${profile.canonicalName} -> ${input.origin || "Origin"}`;
-  const activityRegions = [...new Set(day.scheduleItems.filter((item) => item.regionId).map((item) => regionName(profile, item.regionId)))].slice(0, 3);
+  // Meals carry a regionId too (the theme region the food search targeted,
+  // not necessarily where the restaurant landed -- see mealRecommendation's
+  // profile-wide fallback), and breakfast always comes first chronologically.
+  // Including them here let a day's "Route / Location" label be built almost
+  // entirely from meal regions while its actual "Don't Miss" activities (a
+  // separate, activity-only computation -- see buildDetailedTripDays) sat in
+  // totally different, unrelated regions. Confirmed live: a New York day's
+  // route read "The Met area -> Brooklyn Bridge area -> Intrepid Museum
+  // area" while its Don't Miss items were Central Park and The Battery --
+  // neither of which appeared in that list at all. Match the same
+  // activity-and-evening-only item set the day's own summary/Don't Miss use.
+  const activityRegions = [...new Set(day.scheduleItems.filter((item) => item.regionId && (item.type === "activity" || item.type === "evening")).map((item) => regionName(profile, item.regionId)))].slice(0, 3);
   return activityRegions.length ? activityRegions.join(" -> ") : day.region;
 }
 
