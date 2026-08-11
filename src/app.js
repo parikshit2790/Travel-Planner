@@ -2489,9 +2489,20 @@ function bind() {
       });
     }
   });
-  document.querySelectorAll("[data-details]").forEach((el) => el.addEventListener("toggle", () => {
-    ui[el.dataset.details] = el.open;
-  }));
+  // <details>'s native "toggle" event is queued, not synchronous -- it can
+  // still be pending when a field changed right after opening the panel
+  // triggers its own synchronous re-render, so that re-render reads the OLD
+  // ui state and the panel appears to snap shut. Confirmed live: open
+  // "Comfort and preparation preferences" then immediately change a select
+  // inside it and the panel collapses. Listen on the summary's click
+  // instead -- it fires synchronously, before the browser's native toggle
+  // or any event a later action might trigger, so we can record the state
+  // the click is ABOUT to produce (the inverse of the current open state)
+  // immediately, with no race window at all.
+  document.querySelectorAll("[data-details]").forEach((el) => {
+    const summary = el.querySelector("summary");
+    if (summary) summary.addEventListener("click", () => { ui[el.dataset.details] = !el.open; });
+  });
   document.querySelectorAll(".restriction-search").forEach((el) => el.addEventListener("input", () => updateField(el.dataset.field, el.value)));
   document.querySelectorAll("[data-check]").forEach((el) => el.addEventListener("change", () => updateCheck(el.dataset.check, el.checked)));
   document.querySelectorAll("[data-location-field]").forEach((el) => {
