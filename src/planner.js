@@ -1680,7 +1680,19 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   if (!items.some((item) => item.type === "lunch") && !longArrivalDrive) {
     const lunchRegion = places[0]?.regionId || firstRegion;
     const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage, places[0]);
-    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
+    // On a departure day, the return-travel block (computed backward from a
+    // fixed departure anchor) can span the fixed 12:30 PM lunch slot --
+    // confirmed live that on a long-haul flight home, sortAndFormat's
+    // generic overlap-avoidance pushed this "lunch" forward past the whole
+    // travel block, landing it at 8:08 PM -- still labeled lunch, right
+    // before the day's real "dinner after return". Anchor departure-day
+    // lunch before that block instead of at the fixed default time, with a
+    // late-morning floor so an unusually early departure doesn't push it
+    // to an implausible hour.
+    const lunchStart = isDepartureDay
+      ? Math.max(10 * 60, Math.min(constraints.lunchMinutes, departureTravelBlock(travelContext).start - mealDuration - buffers))
+      : constraints.lunchMinutes;
+    addMeal(items, "lunch", lunchStart, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
   // A long-drive arrival day is already at or past a reasonable dinner hour
@@ -2210,9 +2222,14 @@ function arrivalTravelItem(profile, input, context, fromLabel = input.origin || 
   };
 }
 
-function departureTravelItem(profile, input, context, fromLabel = profile.canonicalName) {
+function departureTravelBlock(context) {
   const duration = context.transportMode === "drive" ? Math.max(60, context.originDriveMinutes) : Math.max(120, context.flyMinutes);
   const start = context.transportMode === "drive" ? Math.max(12 * 60 + 30, 18 * 60 - duration) : Math.max(0, context.flyDepartureAnchorMinutes - duration);
+  return { start, duration };
+}
+
+function departureTravelItem(profile, input, context, fromLabel = profile.canonicalName) {
+  const { start, duration } = departureTravelBlock(context);
   const description = context.transportMode === "drive"
     ? `Return drive from ${fromLabel} toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
     : "Departure buffer for checkout, luggage, airport/station transfer, security or boarding time, and contingency.";
