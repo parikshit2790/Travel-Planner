@@ -1449,11 +1449,13 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     // lunch entirely when the drive is long; the day's one real meal is the
     // dinner scheduled after check-in below.
     if (!longArrivalDrive) {
-      addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
+      const arrivalLunchRecommendation = mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]);
+      addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, arrivalLunchRecommendation.primaryPlaceRegionId, "lunch"), arrivalLunchRecommendation, firstRegion, input, constraints, mealUsage);
     }
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
   } else {
-    addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
+    const breakfastRecommendation = mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage, places[0]);
+    addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, breakfastRecommendation.primaryPlaceRegionId, "breakfast"), breakfastRecommendation, firstRegion, input, constraints, mealUsage);
   }
   let cursor = activityStart;
   // On a long-drive arrival day, dinner comes first (a tired traveler eats,
@@ -1493,7 +1495,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     }
     if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30) {
       const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage, place);
-      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, place.regionId, "lunch"), lunchRecommendation, place.regionId, input, constraints, parkRouteDay ? null : mealUsage);
+      addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, place.regionId, input, constraints, parkRouteDay ? null : mealUsage);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
     }
     const scheduledActivity = activityItem(place, cursor, constraints, index);
@@ -1508,7 +1510,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   if (!items.some((item) => item.type === "lunch") && !longArrivalDrive) {
     const lunchRegion = places[0]?.regionId || firstRegion;
     const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage, places[0]);
-    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
+    addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
   // A long-drive arrival day is already at or past a reasonable dinner hour
@@ -1540,7 +1542,8 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     }
   } else {
     const dinnerStart = Math.max(constraints.dinnerMinutes, cursor);
-    addMeal(items, "dinner", dinnerStart, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRegion, "dinner"), mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1)), dinnerRegion, input, constraints, mealUsage);
+    const dinnerRecommendation = mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1));
+    addMeal(items, "dinner", dinnerStart, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRecommendation.primaryPlaceRegionId, "dinner"), dinnerRecommendation, dinnerRegion, input, constraints, mealUsage);
     // Arrival day already gets at most one light evening-friendly activity
     // via dayPlaces above (or none, on a long-drive day). Stacking a second,
     // independent evening block on top -- blind to how late the day already
@@ -1584,6 +1587,7 @@ function packedLunchRecommendation(profile, input, regionId) {
     primary: "Packed lunch or picnic supplies",
     secondary: `${region} cafe or market before the park route`,
     primaryPlaceId: "",
+    primaryPlaceRegionId: regionId,
     secondaryPlaceId: "",
     text: `Pack lunch, water, and snacks before the scenic or trail block, or buy picnic supplies near ${region} before leaving the town area. This avoids forcing a weak restaurant stop into a park route. Dietary and allergy safety must be confirmed directly when buying food.`,
     cuisine: "Flexible picnic",
@@ -3527,6 +3531,15 @@ function mealRecommendation(profile, input, regionId, mealType, mealUsage = new 
     primary,
     secondary,
     primaryPlaceId: primaryPlace?.id || "",
+    // mealCandidatePlace() falls back to a profile-wide search (any region,
+    // ranked by travel time) whenever the intended theme region has no valid
+    // meal candidate -- so the restaurant actually recommended can end up in
+    // a completely different region than regionId. Confirmed live: a lunch
+    // titled "Cape May County Park & Zoo area lunch" recommended Gordon
+    // Ramsay Pub & Grill, an Atlantic City restaurant. Callers must derive
+    // the display title from this resolved region, not the original theme
+    // region, once the actual restaurant is known.
+    primaryPlaceRegionId: primaryPlace?.regionId || regionId,
     secondaryPlaceId: secondaryPlace?.id || "",
     text: `${primary}. Backup: ${secondary}. ${titleCase(cuisine)} cuisine. Estimated ${price} per person. ${reservation} Dietary and allergy safety must be confirmed directly with the restaurant.`,
     cuisine: titleCase(cuisine),
