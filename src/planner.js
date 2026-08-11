@@ -1862,6 +1862,17 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   const base = Number(place.typicalDurationMinutes || 90);
   const source = place.sourceMetadata?.provider || "";
   const overhead = experienceOverheadMinutes(place);
+  // A destination-scale ticketed resort park (Universal Studios Florida,
+  // Islands of Adventure/Hogsmeade, Magic Kingdom, ...) needs parking,
+  // security, park entry, internal transport, and ride queues on top of the
+  // core visit -- treating it like an ordinary attraction produced a
+  // 60-minute "Universal Studios Florida" block. This must return before the
+  // normal min/max clamp below: confirmed live that flooring `adjusted` to
+  // 300 there still got clamped straight back down to 165 by the place's
+  // own (also-wrong) maximumDurationMinutes, since that clamp exists to
+  // respect provider-set bounds for ordinary attractions, not to
+  // second-guess a resort-park floor.
+  if (classification.isDestinationScalePark) return Math.max(300, base, overhead ? base + overhead : 0);
   if (source === "curated" || base >= 210) return overhead ? Math.min(EXPERIENCE_OVERHEAD_CEILING_MINUTES, base + overhead) : base;
   const text = normalizeText(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
   const seed = stableNumber(`${place.id || place.name}-${index}`);
@@ -1869,12 +1880,6 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   if (/short stop|viewpoint|landmark|capitol|market/.test(text)) adjusted = Math.min(adjusted, 75);
   if (classification.isMuseum) adjusted = Math.max(90, adjusted);
   if (classification.isPark || classification.isBeachOrWaterfront) adjusted = Math.max(70, adjusted);
-  // A destination-scale ticketed resort park (Universal Studios Florida,
-  // Islands of Adventure/Hogsmeade, Magic Kingdom, ...) needs parking,
-  // security, park entry, internal transport, and ride queues on top of the
-  // core visit -- treating it like an ordinary attraction produced a
-  // 60-minute "Universal Studios Florida" block. Floor it at a half-day.
-  if (classification.isDestinationScalePark) adjusted = Math.max(300, adjusted);
   adjusted += ((seed % 5) - 2) * 8;
   const clamped = Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
   return overhead ? Math.min(EXPERIENCE_OVERHEAD_CEILING_MINUTES, clamped + overhead) : clamped;
