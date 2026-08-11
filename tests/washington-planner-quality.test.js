@@ -39,7 +39,7 @@ assert.ok(profile, "Washington generated provider fixture should register.");
 
 const badValidation = validateTripPlan(washingtonBadPlan(profile, trip));
 const badCodes = badValidation.blocking.map((issue) => issue.id).join(" ");
-assert.match(badCodes, /arrival-route-implausible|arrival-route-unverified/, "Three-hour Charlotte-to-Washington travel must fail.");
+assert.match(badCodes, /arrival-route-implausible/, "Three-hour Charlotte-to-Washington travel (implausible 132mph) must fail.");
 assert.match(badCodes, /meal-repetition/, "Repeated Union Market/The Roost meal pattern must fail.");
 assert.match(badCodes, /generic-pricing/, "Fake generic attraction pricing must fail.");
 assert.match(badCodes, /template-language|internal-language/, "Stale/generated area labels must fail.");
@@ -176,7 +176,7 @@ function washingtonBadPlan(destinationProfile, sourceTrip) {
         endTimeMinutes: 11 * 60 + 55,
         durationMinutes: 180,
         estimatedCostPerPerson: { low: 0, high: 0 },
-        travelFromPrevious: { mode: "Drive", durationMinutes: 180, estimateType: "conservative-arrival-estimate" }
+        travelFromPrevious: { mode: "Drive", durationMinutes: 180, distanceMiles: 398, estimateType: "conservative-arrival-estimate" }
       } : meal("breakfast", 8 * 60),
       meal("lunch", 12 * 60 + 30),
       activity(index === 2 ? "Great Falls Park" : "National Museum of Natural History", index === 2 ? "great-falls" : "mall", 14 * 60),

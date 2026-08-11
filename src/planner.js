@@ -524,6 +524,9 @@ export function scoreCandidates(profile, input, constraints, intelligence = buil
     if (childFreeAdultTrip(input) && classification.isChildrenFocused) {
       score += planningWeights.hardExclusion;
       reasons.push("Rejected because children-focused stops do not fit a child-free adult trip unless explicitly requested.");
+    } else if (classification.isSportsVenue && !hasStatedInterest(input, "Sports") && !explicitlyRequestedPlace(input, place)) {
+      score += planningWeights.hardExclusion;
+      reasons.push("Rejected because a sports venue does not fit without a stated sports/event interest or an explicit request.");
     } else if (classification.travelerFit?.score) {
       score += classification.travelerFit.score;
       if (classification.travelerFit.score < 0) reasons.push(classification.travelerFit.reasons?.[0] || "Reduced for traveler fit.");
@@ -1063,7 +1066,18 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     // departure." Distinguish which logistics-only day this actually is.
     const isArrivalLogisticsDay = isLogisticsOnlyDay && scheduleItems.some((item) => item.title.startsWith("Travel to "));
     const isDepartureLogisticsDay = isLogisticsOnlyDay && scheduleItems.some((item) => item.title.startsWith("Depart "));
-    const summary = isArrivalLogisticsDay
+    // A mid-trip regional-transfer day (moving to a new approved hotel base)
+    // has the same "arrival day" shape as Day 1 -- light morning, a dedicated
+    // travel block, check-in -- but was falling through to the generic
+    // multi-region/single-region branches below, which read like an ordinary
+    // sightseeing day instead of naming the move. Give it its own copy,
+    // checked ahead of the logistics/region branches since a transfer day is
+    // the more specific and more accurate category whether or not activities
+    // got scheduled alongside the move.
+    const isTransferDay = Boolean(regionalTransfer);
+    const summary = isTransferDay
+      ? `A lighter ${input.pace.toLowerCase()} day for the move to ${regionalTransfer.toLabel}, with time to settle in.`
+      : isArrivalLogisticsDay
       ? `A lighter ${input.pace.toLowerCase()} day for travel, hotel check-in, and a first meal after arrival.`
       : isDepartureLogisticsDay
         ? `A lighter ${input.pace.toLowerCase()} day for checkout, travel logistics, and a final meal before departure.`
@@ -1072,7 +1086,9 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
           : isMultiRegionDay
             ? `A ${input.pace.toLowerCase()} day spanning ${summaryRegionNames.join(" and ")}, with about ${Math.round(dailyDriveMinutes)} minutes of driving between stops.`
             : `A ${input.pace.toLowerCase()} day focused on ${summaryRegionNames.join(" and ")}, grouped to avoid unnecessary cross-city travel.`;
-    const generationReasoningSummary = isArrivalLogisticsDay
+    const generationReasoningSummary = isTransferDay
+      ? `Kept the day light for the move to ${regionalTransfer.toLabel}, with time to settle in.`
+      : isArrivalLogisticsDay
       ? `Kept the day light for travel and check-in logistics, with time for a first meal after arrival.`
       : isDepartureLogisticsDay
         ? `Kept the day light for checkout and departure logistics, with time for a final meal.`
@@ -1684,10 +1700,29 @@ function publicActivityTags(place, classification = classifyPlaceForPlanning(pla
   return tags;
 }
 
+// A "typical duration" reflects on-site time only, not the real-world
+// overhead around it -- confirmed live: Statue of Liberty scheduled for
+// 1h15m, which doesn't account for ferry ticketing/security, the ferry
+// crossing itself, or the return trip. Layered on top of the existing
+// duration (not replacing it), matching the reusable keyword-boost pattern
+// already used for scoring in firstTimeVisitorValueFor
+// (src/destination-intelligence.js).
+const EXPERIENCE_OVERHEAD_MINUTES = [
+  [/statue of liberty|ellis island|alcatraz|island ferry|ferry terminal/i, 90],
+  [/empire state|one world observatory|top of the rock|skydeck|observation deck/i, 45]
+];
+const EXPERIENCE_OVERHEAD_CEILING_MINUTES = 300;
+
+function experienceOverheadMinutes(place) {
+  const text = `${place?.name || ""} ${place?.shortDescription || ""}`;
+  return EXPERIENCE_OVERHEAD_MINUTES.find(([pattern]) => pattern.test(text))?.[1] || 0;
+}
+
 function scheduledDurationForPlace(place, classification = classifyPlaceForPlanning(place), index = 0) {
   const base = Number(place.typicalDurationMinutes || 90);
   const source = place.sourceMetadata?.provider || "";
-  if (source === "curated" || base >= 210) return base;
+  const overhead = experienceOverheadMinutes(place);
+  if (source === "curated" || base >= 210) return overhead ? Math.min(EXPERIENCE_OVERHEAD_CEILING_MINUTES, base + overhead) : base;
   const text = normalizeText(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`);
   const seed = stableNumber(`${place.id || place.name}-${index}`);
   let adjusted = base;
@@ -1695,7 +1730,8 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   if (classification.isMuseum) adjusted = Math.max(90, adjusted);
   if (classification.isPark || classification.isBeachOrWaterfront) adjusted = Math.max(70, adjusted);
   adjusted += ((seed % 5) - 2) * 8;
-  return Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
+  const clamped = Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
+  return overhead ? Math.min(EXPERIENCE_OVERHEAD_CEILING_MINUTES, clamped + overhead) : clamped;
 }
 
 function addMeal(items, type, start, duration, title, recommendation, regionId, input, constraints, mealUsage = null, structurallyUnbacked = false) {
@@ -1788,6 +1824,11 @@ function tripTravelContext(profile, input) {
   const sameDestination = origin && destination && (origin === destination || destination.includes(origin) || origin.includes(destination));
   const driving = /drive|car|rent/.test(transportText) && !/fly/.test(transportText);
   const routeEstimate = normalizedArrivalRouteEstimate(input.arrivalRouteEstimate);
+  // estimateArrivalRouteForGeneration (planner-actions.js) now always resolves
+  // -- a live Google route on success, or an "average-estimate"-confidence
+  // fallback after a retry fails -- so a populated routeEstimate no longer
+  // implies it was actually live-verified. Distinguish the two explicitly.
+  const isAverageEstimate = routeEstimate?.confidence === "average-estimate";
   const originCoordinates = input.fromLocation?.latitude && input.fromLocation?.longitude
     ? { lat: Number(input.fromLocation.latitude), lng: Number(input.fromLocation.longitude) }
     : knownLocationCoordinates(input.origin);
@@ -1795,26 +1836,72 @@ function tripTravelContext(profile, input) {
     ? { lat: Number(input.destinationLocation.latitude), lng: Number(input.destinationLocation.longitude) }
     : profile.regions[0]?.centerCoordinates;
   const distance = originCoordinates && destinationCoordinates ? haversineMiles(originCoordinates.lat, originCoordinates.lng, destinationCoordinates.lat, destinationCoordinates.lng) : 0;
-  const liveDriveMinutes = routeEstimate && driving ? routeEstimate.durationMinutes : 0;
-  const driveMinutes = liveDriveMinutes || (distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150);
+  const liveDriveMinutes = routeEstimate && driving && !isAverageEstimate ? routeEstimate.durationMinutes : 0;
+  const averageDriveMinutes = routeEstimate && driving && isAverageEstimate ? routeEstimate.durationMinutes : 0;
+  const driveMinutes = liveDriveMinutes || averageDriveMinutes || (distance ? Math.max(60, Math.round(distance / 0.72) + 35) : driving ? 180 : 150);
   const routeDistance = routeEstimate?.distanceMiles || Math.round(distance);
   const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
   const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
   const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
-  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : Math.min(23 * 60, 9 * 60 + flyMinutes);
+  // Flying has no live time source anywhere in this app (no flight-search API
+  // is integrated), so a distance-based flight-duration guess was never
+  // actually verifiable as an arrival TIME -- it just looked like a real
+  // number. Use the traveler's own stated arrival/departure time when they
+  // gave one (routePreferences.arrivalDateTime/departureDateTime --
+  // previously collected by the UI but never read by the planner), and
+  // otherwise fall back to a clearly-disclosed default (8:00 AM arrival,
+  // 8:00 PM departure) instead of pretending distance/speed math produces a
+  // real ETA. flyMinutes is still used as the travel block's estimated
+  // DURATION (a reasonable distance-based guess is fine for "how long is
+  // this block on the schedule"); it just no longer decides the CLOCK TIME
+  // everything else gets anchored to.
+  const providedArrivalMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.arrivalDateTime);
+  const providedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureDateTime);
+  const defaultFlyArrivalMinutes = 8 * 60;
+  const defaultFlyDepartureMinutes = 20 * 60;
+  const flyArrivalMinutes = providedArrivalMinutes ?? defaultFlyArrivalMinutes;
+  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : flyArrivalMinutes;
+  const flyEstimateType = providedArrivalMinutes !== null ? "traveler-provided-time" : "assumed-default-time";
+  const flyDepartureAnchorMinutes = providedDepartureMinutes ?? defaultFlyDepartureMinutes;
+  const flyDepartureEstimateType = providedDepartureMinutes !== null ? "traveler-provided-time" : "assumed-default-time";
   return {
     needsArrivalLogistics: Boolean(input.origin && !sameDestination),
     needsDepartureLogistics: Boolean(input.origin && !sameDestination && input.numberOfDays > 1),
     transportMode: driving ? "drive" : "fly",
-    departureMinutes: driving ? 8 * 60 : 9 * 60,
+    // For flying, the travel block's start is derived backward from the
+    // honest arrival-clock-time anchor (so the block visually ends exactly
+    // when the traveler said/was told they'd arrive), not the other way
+    // around like the old departure-time-forward model.
+    departureMinutes: driving ? 8 * 60 : Math.max(0, flyArrivalMinutes - flyMinutes),
     arrivalMinutes,
+    flyMinutes,
+    // Only meaningful for the departure day when flying; driving's departure
+    // timing is still derived from originDriveMinutes as before.
+    flyDepartureAnchorMinutes,
+    flyDepartureEstimateType,
     originDriveMinutes: driveMinutes,
     originDistanceMiles: routeDistance,
     routeSource: routeEstimate?.provider || "",
     routeCheckedAt: routeEstimate?.checkedAt || routeEstimate?.retrievedAt || "",
-    routeConfidence: routeEstimate?.confidence || (liveDriveMinutes ? "provider" : distance ? "coordinate" : "fallback"),
-    estimateType: liveDriveMinutes ? "provider-route-estimate" : distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate"
+    routeConfidence: driving
+      ? (routeEstimate?.confidence || (liveDriveMinutes ? "provider" : "fallback"))
+      : flyEstimateType,
+    estimateType: driving
+      ? (liveDriveMinutes ? "provider-route-estimate" : averageDriveMinutes ? "average-estimate" : distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate")
+      : flyEstimateType
   };
+}
+
+// Parses the time-of-day portion of a <input type="datetime-local"> value
+// (e.g. "2026-09-05T14:30") into minutes since midnight, ignoring the date
+// component -- only the time matters for anchoring the day's schedule.
+function parseTimeOfDayMinutes(value) {
+  const match = /T(\d{2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
 }
 
 function knownLocationCoordinates(value) {
@@ -1845,19 +1932,25 @@ function departureFromRegionContext(profile, input, departureRegionId) {
   const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
   const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
   const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
-  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : Math.min(23 * 60, 9 * 60 + flyMinutes);
+  const providedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureDateTime);
+  const flyDepartureAnchorMinutes = providedDepartureMinutes ?? 20 * 60;
+  const flyDepartureEstimateType = providedDepartureMinutes !== null ? "traveler-provided-time" : "assumed-default-time";
+  const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : flyDepartureAnchorMinutes;
   return {
     needsArrivalLogistics: true,
     needsDepartureLogistics: true,
     transportMode: driving ? "drive" : "fly",
-    departureMinutes: driving ? 8 * 60 : 9 * 60,
+    departureMinutes: driving ? 8 * 60 : Math.max(0, flyDepartureAnchorMinutes - flyMinutes),
     arrivalMinutes,
+    flyMinutes,
+    flyDepartureAnchorMinutes,
+    flyDepartureEstimateType,
     originDriveMinutes: driveMinutes,
     originDistanceMiles: Math.round(distance),
     routeSource: "",
     routeCheckedAt: "",
-    routeConfidence: distance ? "coordinate" : "fallback",
-    estimateType: distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate",
+    routeConfidence: driving ? (distance ? "coordinate" : "fallback") : flyDepartureEstimateType,
+    estimateType: driving ? (distance ? "coordinate-arrival-estimate" : "conservative-arrival-estimate") : flyDepartureEstimateType,
     fromLabel: region?.name || profile.canonicalName
   };
 }
@@ -1912,8 +2005,26 @@ function regionalTransferContext(travel) {
   };
 }
 
+function arrivalTravelNote(context) {
+  if (context.estimateType === "provider-route-estimate") return "Provider route estimate with a conservative arrival buffer; verify live traffic before departure.";
+  if (context.estimateType === "average-estimate") return `We couldn't verify live traffic data for this drive; assuming an average driving time of ${formatDuration(context.originDriveMinutes)}. Verify actual conditions before departure.`;
+  if (context.estimateType === "traveler-provided-time") return "Using the arrival time you entered; verify this against your actual booking.";
+  if (context.estimateType === "assumed-default-time") return "We don't have your exact flight arrival time, so we're assuming an 8:00 AM arrival -- update this once you've booked your flight.";
+  if (context.estimateType === "coordinate-arrival-estimate") return "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking.";
+  return "No distance data available; verify actual flight or drive times before booking.";
+}
+
+function departureTravelNote(context) {
+  if (context.estimateType === "provider-route-estimate") return "Provider route estimate with a conservative return buffer; verify live traffic before departure.";
+  if (context.estimateType === "average-estimate") return `We couldn't verify live traffic data for this drive; assuming an average driving time of ${formatDuration(context.originDriveMinutes)}. Verify actual conditions before departure.`;
+  if (context.flyDepartureEstimateType === "traveler-provided-time") return "Using the departure time you entered; verify this against your actual booking.";
+  if (context.flyDepartureEstimateType === "assumed-default-time") return "We don't have your exact flight departure time, so we're assuming an 8:00 PM departure -- update this once you've booked your flight.";
+  if (context.estimateType === "coordinate-arrival-estimate") return "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking.";
+  return "No distance data available; verify actual flight or drive times before booking.";
+}
+
 function arrivalTravelItem(profile, input, context, fromLabel = input.origin || "your origin", toLabel = profile.canonicalName) {
-  const duration = context.transportMode === "drive" ? context.originDriveMinutes : Math.max(120, context.arrivalMinutes - context.departureMinutes);
+  const duration = context.transportMode === "drive" ? context.originDriveMinutes : Math.max(120, context.flyMinutes);
   const description = context.transportMode === "drive"
     ? `Drive from ${fromLabel} to ${toLabel}; includes conservative fuel, restroom, meal, parking, and arrival buffer. Assumes an ${formatTime(context.departureMinutes)} departure because no exact departure time was entered.`
     : `Arrival logistics for ${toLabel}; includes airport or station buffer, luggage, rental car or transfer pickup, and hotel approach time.`;
@@ -1929,19 +2040,15 @@ function arrivalTravelItem(profile, input, context, fromLabel = input.origin || 
       provider: context.routeSource,
       checkedAt: context.routeCheckedAt,
       confidence: context.routeConfidence,
-      note: context.estimateType === "provider-route-estimate"
-        ? "Provider route estimate with a conservative arrival buffer; verify live traffic before departure."
-        : context.estimateType === "coordinate-arrival-estimate"
-        ? "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking."
-        : "No distance data available; verify actual flight or drive times before booking."
+      note: arrivalTravelNote(context)
     },
     replaceable: false
   };
 }
 
 function departureTravelItem(profile, input, context, fromLabel = profile.canonicalName) {
-  const duration = context.transportMode === "drive" ? Math.max(60, context.originDriveMinutes) : Math.max(120, context.arrivalMinutes - context.departureMinutes);
-  const start = Math.max(12 * 60 + 30, 18 * 60 - duration);
+  const duration = context.transportMode === "drive" ? Math.max(60, context.originDriveMinutes) : Math.max(120, context.flyMinutes);
+  const start = context.transportMode === "drive" ? Math.max(12 * 60 + 30, 18 * 60 - duration) : Math.max(0, context.flyDepartureAnchorMinutes - duration);
   const description = context.transportMode === "drive"
     ? `Return drive from ${fromLabel} toward ${input.origin || "your origin"} with a conservative buffer. Keep final sightseeing short unless you intentionally extend the trip.`
     : "Departure buffer for checkout, luggage, airport/station transfer, security or boarding time, and contingency.";
@@ -1957,19 +2064,23 @@ function departureTravelItem(profile, input, context, fromLabel = profile.canoni
       provider: context.routeSource,
       checkedAt: context.routeCheckedAt,
       confidence: context.routeConfidence,
-      note: context.estimateType === "provider-route-estimate"
-        ? "Provider route estimate with a conservative return buffer; verify live traffic before departure."
-        : context.estimateType === "coordinate-arrival-estimate"
-        ? "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking."
-        : "No distance data available; verify actual flight or drive times before booking."
+      note: departureTravelNote(context)
     },
     replaceable: false
   };
 }
 
+const TRAVEL_MODE_COPY = {
+  "Walk/Metro": { title: "Transfer", description: "Walk, Metro, or short rideshare transfer" },
+  "Rideshare/Transit": { title: "Rideshare or transit", description: "Rideshare or public transit transfer" },
+  Transit: { title: "Transit", description: "Public transit transfer" },
+  Drive: { title: "Estimated drive", description: "Estimated drive" }
+};
+
 function travelItem(fromLabel, toLabel, start, travel) {
+  const copy = TRAVEL_MODE_COPY[travel.mode] || TRAVEL_MODE_COPY.Drive;
   return {
-    ...simpleItem("travel", start, travel.durationMinutes, `${travel.mode === "Walk/Metro" ? "Transfer" : "Estimated drive"} to ${toLabel}`, `${travel.mode === "Walk/Metro" ? "Walk, Metro, or short rideshare transfer" : "Estimated drive"}: ${travel.durationMinutes}-${travel.durationMinutes + 15} minutes depending on traffic.`),
+    ...simpleItem("travel", start, travel.durationMinutes, `${copy.title} to ${toLabel}`, `${copy.description}: ${travel.durationMinutes}-${travel.durationMinutes + 15} minutes depending on traffic.`),
     travelFromPrevious: travel,
     locationLabel: `${fromLabel} to ${toLabel}`,
     replaceable: false
@@ -2050,6 +2161,7 @@ function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityI
     // isBar, since that's a legitimate nightlife stop, not a meal masquerading
     // as an activity.
     .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue && !((classification.isRestaurant || classification.isFoodHall) && !classification.isBar))
+    .filter(({ place, classification }) => !(classification.isSportsVenue && !hasStatedInterest(input, "Sports") && !explicitlyRequestedPlace(input, place)))
     .filter(({ place, classification }) => Number(place.typicalDurationMinutes || 0) < 150 || classification.isBoardwalk || classification.isBeachOrWaterfront || classification.isBar || /evening|nightlife|dessert|rooftop|dinner|promenade|district|walk/i.test(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`))
     .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
     .sort((a, b) => {
@@ -2868,9 +2980,6 @@ export function validateTripPlan(plan) {
   if (hasDuplicateDaytimeEvening(plan)) {
     blocking.push(advisory("duplicated-evening", "blocking", "evening", "Evening repeats daytime activity", "A daytime activity is reused as evening filler on the same day.", "Regenerate with distinct verified evening options."));
   }
-  if (input.routeQualityRequired && hasUnverifiedArrivalRoute(plan)) {
-    blocking.push(advisory("arrival-route-unverified", "blocking", "route", "Arrival route was not verified", "Driving trips that require route quality must use a provider route estimate before scheduling arrival or departure days.", "Retry route estimation before building the detailed itinerary."));
-  }
   if (hasImplausibleArrivalDrive(plan)) {
     blocking.push(advisory("arrival-route-implausible", "blocking", "route", "Arrival route is implausible", "The arrival or return drive is unrealistically short for the selected origin and destination.", "Regenerate with a reliable route provider estimate."));
   }
@@ -2915,30 +3024,6 @@ export function validateTripPlan(plan) {
 
 function userRejectedBeach(input) {
   return /avoid beach|no beach|skip beach|not beach/.test(normalizeText(`${input.mustHavePlaces?.join(" ")} ${input.avoidPlaces?.join(" ")}`));
-}
-
-function hasUnverifiedArrivalRoute(plan) {
-  // Only the very first (arrival) day's travel leg is ever backed by a real,
-  // pre-fetched provider route estimate -- see estimateArrivalRouteForGeneration
-  // in planner-actions.js, which only estimates the origin<->primary-destination
-  // leg. Neither a multi-city trip's internal transfer days (see
-  // regionalTransferContext) nor its final departure day (see
-  // departureFromRegionContext, used whenever the trip's last base isn't the
-  // primary destination) can ever be provider-verified without an extra live
-  // route fetch for every possible leg, so requiring it there rejected every
-  // multi-city driving trip regardless of whether the actual arrival route
-  // was verified. Confirmed live for a Charlotte -> Asheville -> Great Smoky
-  // Mountains trip: day 0 correctly carried a real Google route estimate, but
-  // both the internal transfer days AND the final departure day (leaving from
-  // the Smoky Mountains, not Charlotte) always fail this check on their own,
-  // so the whole plan was rejected every time.
-  const days = plan.days || [];
-  const travel = [days[0]]
-    .filter(Boolean)
-    .flatMap((day) => day.scheduleItems || [])
-    .filter((item) => item.type === "travel" && (/^Travel to |^Depart /.test(item.title || "")));
-  if (!travel.length) return false;
-  return travel.some((item) => item.travelFromPrevious?.estimateType !== "provider-route-estimate");
 }
 
 function hasImplausibleArrivalDrive(plan) {
@@ -3444,12 +3529,36 @@ function dayThemeLabel(regions, intelligence = null) {
   return "Regional highlights";
 }
 
+function precomputedTransitEstimate(profile, fromPlaceOrRegion, toPlaceOrRegion) {
+  const fromId = typeof fromPlaceOrRegion === "object" ? fromPlaceOrRegion?.id : null;
+  const toId = typeof toPlaceOrRegion === "object" ? toPlaceOrRegion?.id : null;
+  if (!fromId || !toId || !Array.isArray(profile.transitEstimates)) return null;
+  return profile.transitEstimates.find((entry) => (entry.fromPlaceId === fromId && entry.toPlaceId === toId) || (entry.fromPlaceId === toId && entry.toPlaceId === fromId)) || null;
+}
+
 function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
   const fromRegionId = typeof fromPlaceOrRegion === "string" ? fromPlaceOrRegion : fromPlaceOrRegion?.regionId;
   const toRegionId = typeof toPlaceOrRegion === "string" ? toPlaceOrRegion : toPlaceOrRegion?.regionId;
   const fromCoordinates = coordinatesFor(profile, fromPlaceOrRegion);
   const toCoordinates = coordinatesFor(profile, toPlaceOrRegion);
   const route = profile.scenicRoutes.find((item) => (item.originRegionId === fromRegionId && item.destinationRegionId === toRegionId) || (item.originRegionId === toRegionId && item.destinationRegionId === fromRegionId));
+  // A small, bounded set of flagship legs get a real, live Google Transit
+  // estimate precomputed before scheduling (see
+  // precomputeFlagshipTransitEstimates in planner-actions.js) -- use it
+  // directly instead of the distance/keyword heuristic below whenever this
+  // exact pair was one of them.
+  const transitMatch = precomputedTransitEstimate(profile, fromPlaceOrRegion, toPlaceOrRegion);
+  if (transitMatch) {
+    return {
+      mode: "Transit",
+      durationMinutes: transitMatch.durationMinutes,
+      distanceMiles: transitMatch.distanceMiles,
+      fromLabel: placeOrRegionLabel(profile, fromPlaceOrRegion, fromRegionId),
+      toLabel: placeOrRegionLabel(profile, toPlaceOrRegion, toRegionId),
+      estimateType: "provider-transit-estimate",
+      note: `Estimated via public transit (${transitMatch.durationMinutes} min); verify current schedules and fares.`
+    };
+  }
   if (fromCoordinates && toCoordinates) {
     const distanceMiles = haversineMiles(fromCoordinates.lat, fromCoordinates.lng, toCoordinates.lat, toCoordinates.lng);
     const minimum = Math.ceil(distanceMiles / (route?.tags?.includes("scenic") || distanceMiles > 18 ? 0.65 : 0.45));
@@ -3458,15 +3567,26 @@ function estimateTravel(profile, fromPlaceOrRegion, toPlaceOrRegion) {
     if (fromRegionId !== toRegionId && isMountainRegionalTransfer(profile, fromPlaceOrRegion, toPlaceOrRegion)) {
       durationMinutes = Math.max(durationMinutes, 25);
     }
-    const urbanTransfer = isUrbanDestinationProfile(profile) && distanceMiles <= 4.5 && !route?.tags?.includes("drive-only");
+    const isUrban = isUrbanDestinationProfile(profile);
+    const driveOnly = route?.tags?.includes("drive-only");
+    const urbanTransfer = isUrban && distanceMiles <= 4.5 && !driveOnly;
+    // Beyond comfortable walking distance, a dense transit-first destination
+    // still shouldn't be told "Drive" by default -- that implies driving and
+    // parking, which is usually the worst option in a city like this.
+    const urbanRideshare = isUrban && !urbanTransfer && !driveOnly;
+    const mode = urbanTransfer ? "Walk/Metro" : urbanRideshare ? "Rideshare/Transit" : "Drive";
     return {
-      mode: urbanTransfer ? "Walk/Metro" : "Drive",
+      mode,
       durationMinutes,
       distanceMiles: Math.max(0.5, Math.round(distanceMiles * 10) / 10),
       fromLabel: placeOrRegionLabel(profile, fromPlaceOrRegion, fromRegionId),
       toLabel: placeOrRegionLabel(profile, toPlaceOrRegion, toRegionId),
       estimateType: route ? "curated-coordinate-estimate" : "coordinate-plausibility-estimate",
-      note: urbanTransfer ? `Walk, Metro, or short rideshare transfer: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify current transit and walking conditions.` : `Estimated drive: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify live traffic before traveling.`
+      note: urbanTransfer
+        ? `Walk, Metro, or short rideshare transfer: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify current transit and walking conditions.`
+        : urbanRideshare
+        ? `Estimated rideshare or public transit: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Driving and parking may be slower in this area -- verify current transit options.`
+        : `Estimated drive: about ${durationMinutes} minutes over ${Math.max(0.5, Math.round(distanceMiles * 10) / 10)} miles. Verify live traffic before traveling.`
     };
   }
   if (fromRegionId === toRegionId) return { mode: isUrbanDestinationProfile(profile) ? "Walk/Metro" : "Drive", durationMinutes: 12, distanceMiles: 3, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), estimateType: "same-area-estimate", note: isUrbanDestinationProfile(profile) ? "Short same-area walk, Metro, or rideshare transfer estimate; verify accessibility and transit conditions." : "Short same-area transfer estimate; verify exact location and parking." };
@@ -3826,6 +3946,27 @@ function budgetBand(input) {
 
 function childFreeAdultTrip(input) {
   return Number(input.childCount || input.children || 0) === 0 && Number(input.travelers || input.adults || 1) >= 1;
+}
+
+// experienceCategories in src/domain.js (the UI's preference picker) already
+// collects a "Sports" interest under Entertainment, alongside "Live music",
+// "Festivals", "Nightlife" -- but nothing previously read that signal back
+// out during planning, so it had no effect on which places got scheduled.
+function hasStatedInterest(input, label) {
+  const normalized = normalizeText(label);
+  return (input.preferences || []).some((pref) => normalizeText(pref.label || "") === normalized);
+}
+
+// A place explicitly named in "Places Already in Mind" or "Must-do Places"
+// (routePreferences.placesInMind/mustDoPlaces) is the traveler's own
+// deliberate request, regardless of what interest categories they happened
+// to also select -- it should never get filtered out on interest-mismatch
+// grounds.
+function explicitlyRequestedPlace(input, place) {
+  const requestedText = normalizeText(`${input.routePreferences?.placesInMind || ""} ${input.routePreferences?.mustDoPlaces || ""}`);
+  if (!requestedText.trim()) return false;
+  const placeName = normalizeText(place?.name || "");
+  return Boolean(placeName) && requestedText.includes(placeName);
 }
 
 function seasonalMismatchPenalty(place, input) {

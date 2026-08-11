@@ -281,6 +281,12 @@ export async function googleRouteEstimate(origin, destination, mode = "driving",
   // as real errors (provider health checks and callers depend on seeing
   // them) -- only a *successful* API call that comes back with no usable
   // route should fall back to a coordinate-based estimate below.
+  const travelMode = routeTravelMode(mode);
+  // TRANSIT mode rejects the DRIVE-only routingPreference field entirely and
+  // needs a departureTime to return real transit schedule data -- there's no
+  // specific travel date/time paired with an intra-day leg estimate like
+  // this, so use a near-future placeholder (next Tuesday 10am local-ish UTC)
+  // purely to get Google to compute a representative transit itinerary.
   const json = await googleRoutesRequest("/directions/v2:computeRoutes", {
     config,
     operation: "routes-compute",
@@ -288,8 +294,8 @@ export async function googleRouteEstimate(origin, destination, mode = "driving",
     body: {
       origin: { location: { latLng: { latitude: originCoordinates.lat, longitude: originCoordinates.lng } } },
       destination: { location: { latLng: { latitude: destinationCoordinates.lat, longitude: destinationCoordinates.lng } } },
-      travelMode: routeTravelMode(mode),
-      routingPreference: mode === "walking" ? undefined : "TRAFFIC_UNAWARE"
+      travelMode,
+      ...(travelMode === "TRANSIT" ? { departureTime: nextRepresentativeTransitDeparture() } : { routingPreference: mode === "walking" ? undefined : "TRAFFIC_UNAWARE" })
     }
   });
   const route = json?.routes?.[0];
@@ -681,21 +687,51 @@ function buildGoogleRegions(destinationLocation, places) {
   // then cluster only the dense remainder with a dedicated budget.
   const isolationThresholdMiles = 3;
   const denseAndIsolated = splitDenseAndIsolated(corePlaces, isolationThresholdMiles);
-  const denseClusterCount = Math.max(3, Math.min(7, Math.round(denseAndIsolated.dense.length / 6) || 3));
+  // A destination's own geographic spread matters as much as how many
+  // candidates it has -- a count-only cluster budget (capped at 7 regardless
+  // of area) forces a geographically large city like New York into the same
+  // number of regions as a compact downtown, so genuinely distant landmarks
+  // (Statue of Liberty, Brooklyn Bridge) end up sharing one cluster. Raise
+  // the ceiling when the core candidate pool itself spans a wide area.
+  const coreDiameterMiles = maxDistanceFromCentroid(denseAndIsolated.dense);
+  const maxClusterCount = coreDiameterMiles > 8 ? 12 : 7;
+  const denseClusterCount = Math.max(3, Math.min(maxClusterCount, Math.round(denseAndIsolated.dense.length / 6) || 3));
   const denseClusters = denseAndIsolated.dense.length ? balancedGeographicClusters(denseAndIsolated.dense, denseClusterCount) : [];
+  // k-means assigns every point to its nearest centroid regardless of how
+  // far away that centroid actually is, so two genuinely distant landmarks
+  // can still land in the same cluster if nothing closer claimed them first
+  // -- confirmed live: Statue of Liberty and Brooklyn Bridge, several miles
+  // apart, ended up in one region named "Brooklyn Bridge area". Peel off any
+  // member farther than a realistic same-neighborhood walking/rideshare
+  // bound from its cluster's own centroid into its own region, the same way
+  // splitDenseAndIsolated already does for places with no nearby neighbor at
+  // all.
+  const maxClusterRadiusMiles = 2.5;
+  const cappedClusters = denseClusters.flatMap((members) => capClusterRadius(members, maxClusterRadiusMiles));
   const clusters = [
-    ...denseClusters,
+    ...cappedClusters,
     ...denseAndIsolated.isolated.map((place) => [place])
   ].filter((members) => members.length);
+  // A neighborhood/sublocality address component is often a borough-level
+  // label in dense cities (e.g. Google tags most of Manhattan's own
+  // sublocality_level_1 as "Manhattan" regardless of which part of it a
+  // place sits in) -- confirmed live: four geographically distinct NYC
+  // clusters all came out named "Manhattan area". Track names as they're
+  // assigned and fall back any collision to the place-based name, which is
+  // per-cluster-representative and so virtually guaranteed to differ.
+  const usedRegionNames = new Set();
   const regions = clusters.map((members) => {
     const representative = [...members].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
     const locations = members.map(placeLocation).filter(Boolean);
     const center = locations.length
       ? { lat: locations.reduce((sum, l) => sum + l.lat, 0) / locations.length, lng: locations.reduce((sum, l) => sum + l.lng, 0) / locations.length }
       : { lat: destinationLocation.latitude, lng: destinationLocation.longitude };
+    let name = regionNameForCluster(city, representative, members);
+    if (usedRegionNames.has(name)) name = regionNameFromPlace(city, representative, "area");
+    usedRegionNames.add(name);
     return {
       id: slug(`area-${displayText(representative?.displayName) || city}`),
-      name: regionNameFromPlace(city, representative, "area"),
+      name,
       summary: `Cluster of nearby visitor stops around ${displayText(representative?.displayName) || city}. Verify exact hours, tickets, access, and travel time before finalizing.`,
       centerCoordinates: center,
       tags: ["geographic-cluster"],
@@ -821,6 +857,58 @@ function geographicClusters(places, k) {
   withLocation.forEach(({ place }, i) => clusters[assignments[i]].push(place));
   if (withoutLocation.length) clusters[0].push(...withoutLocation);
   return clusters;
+}
+
+// Cheap proxy for "how geographically spread out is this candidate pool" --
+// distance from the centroid to the farthest member, rather than a full
+// O(n^2) pairwise diameter (not worth the cost at this candidate-pool size).
+function maxDistanceFromCentroid(places) {
+  const locations = places.map(placeLocation).filter(Boolean);
+  if (locations.length < 2) return 0;
+  const center = {
+    lat: locations.reduce((sum, l) => sum + l.lat, 0) / locations.length,
+    lng: locations.reduce((sum, l) => sum + l.lng, 0) / locations.length
+  };
+  return locations.reduce((max, location) => Math.max(max, distanceMiles(center, location)), 0);
+}
+
+// Recomputes the cluster's own centroid and peels off any member beyond
+// maxRadiusMiles from it into its own singleton region. Recurses once on the
+// remaining (now tighter) cluster in case removing an outlier meaningfully
+// shifts the centroid and exposes another one.
+function capClusterRadius(members, maxRadiusMiles) {
+  if (members.length <= 1) return [members];
+  const locations = members.map((place) => ({ place, location: placeLocation(place) }));
+  const located = locations.filter((item) => item.location);
+  if (located.length <= 1) return [members];
+  const center = {
+    lat: located.reduce((sum, item) => sum + item.location.lat, 0) / located.length,
+    lng: located.reduce((sum, item) => sum + item.location.lng, 0) / located.length
+  };
+  const kept = [];
+  const outliers = [];
+  locations.forEach((item) => {
+    if (item.location && distanceMiles(center, item.location) > maxRadiusMiles) outliers.push(item.place);
+    else kept.push(item.place);
+  });
+  if (!outliers.length || !kept.length) return [members];
+  return [...capClusterRadius(kept, maxRadiusMiles), ...outliers.map((place) => [place])];
+}
+
+// A cluster with more than a couple of members isn't accurately described by
+// just its single highest-scored member's own name -- confirmed live: a
+// cluster containing Central Park (a Google "neighborhood" component of its
+// own) got named "The Metropolitan Museum of Art area" purely because the
+// Met scored higher, even though the cluster genuinely spans both. Prefer a
+// real neighborhood/sublocality name from the representative place's own
+// address components when one exists; keep the existing "<top place> area"
+// pattern for singletons/pairs or when no such component is available.
+function regionNameForCluster(city, representative, members) {
+  if (members.length > 2) {
+    const neighborhood = componentValue(Array.isArray(representative?.addressComponents) ? representative.addressComponents : [], ["neighborhood", "sublocality_level_1", "sublocality"]);
+    if (neighborhood) return `${neighborhood} area`;
+  }
+  return regionNameFromPlace(city, representative, "area");
 }
 
 function regionNameFromPlace(city, place, fallback) {
@@ -1032,7 +1120,11 @@ function stableNumber(value) {
 }
 
 function placeFieldMask() {
-  return "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryType,places.rating,places.userRatingCount,places.editorialSummary";
+  // addressComponents (same billing tier as the already-requested
+  // formattedAddress) is needed to name a multi-member region after a real
+  // neighborhood/sublocality instead of just its single highest-scored
+  // member's own place name -- see regionNameForCluster.
+  return "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryType,places.rating,places.userRatingCount,places.editorialSummary,places.addressComponents";
 }
 
 function componentValue(components, wantedTypes) {
@@ -1076,7 +1168,23 @@ function distanceMiles(a, b) {
 }
 
 function routeTravelMode(mode) {
-  return String(mode || "").toLowerCase().includes("walk") ? "WALK" : "DRIVE";
+  const text = String(mode || "").toLowerCase();
+  if (text.includes("walk")) return "WALK";
+  if (text.includes("transit")) return "TRANSIT";
+  return "DRIVE";
+}
+
+// A representative weekday mid-morning departure a week out -- transit
+// service patterns vary by day/time, so a fixed generic timestamp (e.g. an
+// arbitrary past date, or literal "now" during a late-night generation run)
+// can return sparse or off-hours schedules. This is only meant to produce a
+// plausible transit itinerary for duration estimation, not a real booking.
+function nextRepresentativeTransitDeparture() {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + 7);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 1);
+  date.setUTCHours(15, 0, 0, 0);
+  return date.toISOString();
 }
 
 function durationSeconds(value) {
