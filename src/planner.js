@@ -1759,7 +1759,26 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       }, "", input, constraints, null, true);
     }
   } else {
-    const dinnerStart = Math.max(constraints.dinnerMinutes, cursor);
+    // cursor alone doesn't reflect the arrival day's own travel/check-in
+    // items on a longArrivalDrive day specifically -- those get pushed
+    // straight into `items` in the isArrivalDay branch above without
+    // advancing cursor (dayPlaces stays empty on that path, so the forEach
+    // loop that normally advances cursor never runs). Using cursor alone
+    // here previously computed a too-early dinnerStart (~6:30 PM) even when
+    // check-in itself already landed near 1 AM -- confirmed live: the
+    // late-arrival check below compared against that too-early value,
+    // decided the day *wasn't* late, kept a real restaurant recommendation,
+    // and sortAndFormat's own overlap-avoidance then silently pushed that
+    // "reserved" dinner to 12:55 AM anyway once it collided with the real
+    // check-in end time. Only fold in items' own end times on that specific
+    // path -- every other day already has cursor correctly tracking real
+    // progress via the forEach loop, and widening this unconditionally
+    // shifted dinner timing (and, through shared mealUsage/eveningUsage
+    // state, later days' restaurant picks) on ordinary days that were never
+    // broken.
+    const dinnerStart = longArrivalDrive
+      ? Math.max(constraints.dinnerMinutes, items.reduce((max, item) => Math.max(max, item.endTimeMinutes), cursor) + 10)
+      : Math.max(constraints.dinnerMinutes, cursor);
     // A genuinely long single-day arrival drive (e.g. Denver -> Los Angeles,
     // ~14+ hours) can already push check-in itself past a normal dinner
     // hour -- confirmed live: hotel check-in at 11:28 PM, dinner (a real,
