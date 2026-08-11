@@ -97,8 +97,15 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
   // bigger number of the same kind of place.
   const localRestaurantFetchCount = tripDays >= 7 ? 16 : 12;
   const foodCandidateLimit = tripDays >= 7 ? 24 : 16;
-  const [attractions, nearby, restaurants, localRestaurants] = await Promise.all([
+  // A pure "best attractions IN {city}" query never surfaces well-known
+  // regional day trips just outside the city itself -- confirmed live: for
+  // Miami, this query's top 20 results never included Everglades National
+  // Park, Everglades Safari Park, or Biscayne National Park, even though
+  // all three are among the most commonly recommended Miami day trips. A
+  // "day trips near {city}" query surfaces exactly these in its own top 20.
+  const [attractions, dayTrips, nearby, restaurants, localRestaurants] = await Promise.all([
     googleTextSearch(`best tourist attractions and museums in ${destinationName}`, config, placeFieldMask(), 20),
+    googleTextSearch(`best day trips and nearby attractions from ${destinationName}`, config, placeFieldMask(), 15),
     googleNearbySearch(destinationLocation, config, ["tourist_attraction", "museum", "park"], 50000, 20),
     googleTextSearch(`best restaurants cafes food halls in ${destinationName}`, config, placeFieldMask(), restaurantFetchCount),
     googleTextSearch(`local authentic restaurants and neighborhood eateries in ${destinationName}`, config, placeFieldMask(), localRestaurantFetchCount)
@@ -112,9 +119,23 @@ export async function googleDestinationResearch(destination, trip = {}, config) 
     const location = placeLocation(place);
     return !location || distanceMiles(destinationLocation, location) <= 40;
   };
-  const tourismCandidates = dedupeBy([...attractions, ...nearby], (place) => place.id)
+  // A well-known, iconic day-trip landmark can legitimately sit just past a
+  // tight 40-mile bound -- confirmed live: Everglades National Park's own
+  // visitor entrance is right around that boundary from central Miami and
+  // got silently excluded, even though it's one of the most commonly
+  // recommended Miami day trips. This is a textually correct match (Google's
+  // own relevance ranking found it because it genuinely is a well-known
+  // "attraction near Miami"), unlike the Houston-in-Baton-Rouge case, which
+  // was a text-relevance failure, not a distance one. Give tourism
+  // candidates specifically a wider berth; food stays tight, since a
+  // 45+ mile restaurant is never a reasonable same-day dinner pick.
+  const withinTourismRadius = (place) => {
+    const location = placeLocation(place);
+    return !location || distanceMiles(destinationLocation, location) <= 60;
+  };
+  const tourismCandidates = dedupeBy([...attractions, ...dayTrips, ...nearby], (place) => place.id)
     .filter(isTourismPlace)
-    .filter(withinDestinationRadius)
+    .filter(withinTourismRadius)
     .sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a));
   const foodCandidates = dedupeBy([...restaurants, ...localRestaurants], (place) => place.id)
     .filter(isFoodPlace)
@@ -227,7 +248,13 @@ async function researchRegionalExtensionCandidate(cityName, primaryLocation, max
     canonicalName: candidateProfile.canonicalName,
     centerCoordinates: candidateCenter,
     route,
-    places: [...selectedNonFood, ...foodPlaces.slice(0, 3)],
+    // 3 restaurants (each reusable at most twice) caps a regional-extension
+    // base at 6 meal-fills before its own food pool runs dry -- confirmed
+    // live: a 3-night, 9-meal Orlando stay exhausted it by day 2 and started
+    // falling back to Miami restaurants 200+ miles away. candidateProfile
+    // already fetched a full restaurant list for this city; take more of
+    // what's already there instead of one more API round-trip.
+    places: [...selectedNonFood, ...foodPlaces.slice(0, 8)],
     foodAreas: candidateProfile.foodAreas.slice(0, 3)
   };
 }
@@ -402,7 +429,21 @@ export async function resolveDestination(destination, config, locationBias = nul
   const locations = await googleLocationSearch(destination, config, locationBias);
   if (!locations.length) return null;
   if (!locationBias || !Number.isFinite(locationBias.latitude) || !Number.isFinite(locationBias.longitude)) return locations[0];
-  return [...locations].sort((a, b) => distanceMiles(locationBias, a) - distanceMiles(locationBias, b))[0];
+  // Re-sorting every candidate by raw distance to the bias point -- not just
+  // picking among same-named cities -- lets a textually unrelated place win
+  // by a few miles. Confirmed live: resolving "Orlando" biased toward Miami
+  // returned Orlando FL, Orlando OK, Orlando KY, Azalea Park FL, and Conway
+  // FL (a real Orlando-area neighborhood); Conway sits a few miles closer to
+  // Miami than Orlando's own city center, so it silently won and "Orlando"
+  // was replaced by "Conway, Florida" throughout the whole trip. Distance
+  // bias exists to pick the right one among genuinely same-named
+  // cities (e.g. "Charlotte, NC" vs "Charlotte, FL") -- restrict it to
+  // candidates whose own city name actually matches what was typed, and
+  // only fall through to the full result set if none do.
+  const query = String(destination || "").trim().toLowerCase();
+  const exactMatches = locations.filter((location) => String(location.city || "").trim().toLowerCase() === query);
+  const pool = exactMatches.length ? exactMatches : locations;
+  return [...pool].sort((a, b) => distanceMiles(locationBias, a) - distanceMiles(locationBias, b))[0];
 }
 
 // AI-sourced destination research (openai-destination-provider.js) discovers

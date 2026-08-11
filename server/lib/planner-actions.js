@@ -242,13 +242,18 @@ function normalizeForMatch(value) {
 }
 
 // Honest, clearly-labeled fallback when live route data genuinely can't be
-// obtained after a retry -- distanceMiles/0.72 approximates typical mixed
-// highway/local average speed (the same effective-speed constant already
-// used elsewhere for this purpose, e.g. tripTravelContext in planner.js),
-// plus a flat 30-minute buffer for stops, traffic variance, and uncertainty.
+// obtained after a retry. distanceMiles/0.72 (~43mph-equivalent) approximates
+// typical mixed highway/local average speed for shorter drives, but badly
+// understates a genuine long-haul leg -- confirmed live: Miami to Orlando
+// (~205 miles) came out around 5 hours versus a real ~3.5-4 hours. Step up
+// to a real highway speed past 100 miles, where the drive is realistically
+// interstate-dominated; keep the shorter-distance pace as-is (the 30-minute
+// buffer dominates there anyway), plus a flat buffer for stops, traffic
+// variance, and uncertainty.
 function averageDrivingTimeFallback(fromLocation, destinationLocation) {
   const distanceMiles = haversineMilesBetween(fromLocation, destinationLocation);
-  const durationMinutes = distanceMiles ? Math.max(60, Math.round(distanceMiles / 0.72) + 30) : 240;
+  const impliedMph = distanceMiles > 100 ? 60 : 43.2;
+  const durationMinutes = distanceMiles ? Math.max(60, Math.round((distanceMiles / impliedMph) * 60) + 30) : 240;
   return {
     durationMinutes,
     distanceMiles: distanceMiles ? Math.round(distanceMiles) : 0,
