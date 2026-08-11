@@ -721,11 +721,11 @@ function buildGoogleRegions(destinationLocation, places) {
   // per-cluster-representative and so virtually guaranteed to differ.
   const usedRegionNames = new Set();
   const regions = clusters.map((members) => {
-    const representative = [...members].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
     const locations = members.map(placeLocation).filter(Boolean);
     const center = locations.length
       ? { lat: locations.reduce((sum, l) => sum + l.lat, 0) / locations.length, lng: locations.reduce((sum, l) => sum + l.lng, 0) / locations.length }
       : { lat: destinationLocation.latitude, lng: destinationLocation.longitude };
+    const representative = clusterNamingRepresentative(members, center);
     let name = regionNameForCluster(city, representative, members);
     if (usedRegionNames.has(name)) name = regionNameFromPlace(city, representative, "area");
     usedRegionNames.add(name);
@@ -903,6 +903,27 @@ function capClusterRadius(members, maxRadiusMiles) {
 // real neighborhood/sublocality name from the representative place's own
 // address components when one exists; keep the existing "<top place> area"
 // pattern for singletons/pairs or when no such component is available.
+// Naming a cluster purely by its single highest-rated member picks whoever
+// has the best rating/review count regardless of where in the cluster they
+// sit -- confirmed live: a ~15-member Midtown cluster spanning Times Square,
+// Bryant Park, and Rockefeller Center got named "Intrepid Museum area"
+// because the Intrepid Museum (a distinct attraction on a far-west pier)
+// outscored everything else, even though it sits at the cluster's edge and
+// has nothing to do with the far more central, recognizable places a
+// traveler's day actually contains. Prefer the highest-scored member among
+// those closest to the cluster's own geographic center, so the name reflects
+// somewhere actually representative of the area, not just whoever has the
+// best reviews.
+function clusterNamingRepresentative(members, center) {
+  if (members.length <= 2) return [...members].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
+  const withDistance = members.map((place) => ({ place, distance: (() => {
+    const location = placeLocation(place);
+    return location ? distanceMiles(center, location) : Infinity;
+  })() })).sort((a, b) => a.distance - b.distance);
+  const centralPool = withDistance.slice(0, Math.max(1, Math.ceil(withDistance.length / 2))).map((item) => item.place);
+  return [...centralPool].sort((a, b) => googlePlaceScore(b) - googlePlaceScore(a))[0];
+}
+
 function regionNameForCluster(city, representative, members) {
   if (members.length > 2) {
     const neighborhood = componentValue(Array.isArray(representative?.addressComponents) ? representative.addressComponents : [], ["neighborhood", "sublocality_level_1", "sublocality"]);
