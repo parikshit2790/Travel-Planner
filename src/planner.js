@@ -1535,6 +1535,24 @@ function keepNearbyThemeRegions(profile, regionIds, limit) {
     .slice(0, limit);
 }
 
+// A regional-transfer day's own activities run after hotel check-in and
+// still need to leave room for a normally-timed dinner. Always keeps the
+// first (highest-priority) candidate -- protects the day's headline stop --
+// and only keeps a second one if the combined scheduled duration stays
+// under a budget that leaves realistic room for travel legs and dinner.
+function capRegionalTransferActivities(candidates, budgetMinutes = 200) {
+  if (candidates.length <= 1) return candidates;
+  const kept = [];
+  let total = 0;
+  for (const place of candidates) {
+    const duration = scheduledDurationForPlace(place);
+    if (kept.length && total + duration > budgetMinutes) break;
+    kept.push(place);
+    total += duration;
+  }
+  return kept;
+}
+
 function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null, homeRegionId = null, priorDaysScheduled = new Set()) {
   const items = [];
   const buffers = paceDefaults(input.pace).buffer;
@@ -1642,7 +1660,16 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       ? (longArrivalDrive
           ? []
           : regionalTransfer
-            ? places.slice(0, Math.max(1, Math.min(2, input.maxActivities)))
+            // A regional-transfer day already has hotel check-in ahead of its
+            // activities, unlike an ordinary day -- capping by COUNT alone
+            // (up to 2 activities) still let two genuinely long activities
+            // (e.g. a 150min estate + a 130min nature area) push dinner past
+            // midnight. Confirmed live: check-in at 3:00 PM, two such
+            // activities back to back, dinner didn't start until 11:57 PM.
+            // Cap by total scheduled duration too, so a transfer day that
+            // already picked one substantial activity doesn't also take a
+            // second one big enough to blow the evening.
+            ? capRegionalTransferActivities(places.slice(0, Math.max(1, Math.min(2, input.maxActivities))))
             : places.filter((place) => isArrivalEveningFriendly(place)).slice(0, 1))
       : places;
   let previousScheduledPlace = null;
@@ -1733,8 +1760,30 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     }
   } else {
     const dinnerStart = Math.max(constraints.dinnerMinutes, cursor);
-    const dinnerRecommendation = mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1));
-    addMeal(items, "dinner", dinnerStart, input.pace === "Relaxed" ? 90 : 75, mealTitle(profile, dinnerRecommendation.primaryPlaceRegionId, "dinner"), dinnerRecommendation, dinnerRegion, input, constraints, mealUsage);
+    // A genuinely long single-day arrival drive (e.g. Denver -> Los Angeles,
+    // ~14+ hours) can already push check-in itself past a normal dinner
+    // hour -- confirmed live: hotel check-in at 11:28 PM, dinner (a real,
+    // named restaurant with reservation guidance) scheduled for 12:23 AM,
+    // and that fake midnight reservation then surfaced in the trip guide's
+    // "Must Confirm" list. Past a late cutoff, give a flexible "wherever's
+    // open near your hotel" recommendation instead of a specific restaurant
+    // pick -- every day still needs a dinner entry, but it shouldn't imply
+    // a bookable reservation that no traveler would actually make at
+    // midnight.
+    const lateArrivalCutoff = 21 * 60 + 30;
+    const isLateArrivalDinner = longArrivalDrive && dinnerStart >= lateArrivalCutoff;
+    const dinnerRecommendation = isLateArrivalDinner
+      ? {
+          primary: "Late-arrival dinner near your hotel",
+          secondary: "Choose whatever's open close to check-in",
+          text: "This drive lands late -- skip a planned restaurant and just find something open near the hotel. Keep it simple and confirm hours directly.",
+          cuisine: "Flexible",
+          price: moneyRange(mealCost(input, "dinner").low, mealCost(input, "dinner").high),
+          reservation: "No reservation -- arrival timing is too late to plan around one."
+        }
+      : mealRecommendation(profile, input, dinnerRegion, "dinner", mealUsage, places.at(-1));
+    const dinnerTitle = isLateArrivalDinner ? "Late-arrival dinner" : mealTitle(profile, dinnerRecommendation.primaryPlaceRegionId, "dinner");
+    addMeal(items, "dinner", dinnerStart, input.pace === "Relaxed" ? 90 : 75, dinnerTitle, dinnerRecommendation, dinnerRegion, input, constraints, isLateArrivalDinner ? null : mealUsage, isLateArrivalDinner);
     // Arrival day already gets at most one light evening-friendly activity
     // via dayPlaces above (or none, on a long-drive day). Stacking a second,
     // independent evening block on top -- blind to how late the day already
@@ -3055,7 +3104,7 @@ function buildDetailedTripDays(profile, input, constraints, days, hotelBase) {
     const expectedSpending = dailySpendingBreakdown(day, input);
     return {
       ...day,
-      routeOrLocation: dayRouteLabel(profile, day, input, index),
+      routeOrLocation: dayRouteLabel(profile, day, input, index, hotelBase),
       startingBase: index === 0 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
       endingBase: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? input.origin || "Origin" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
       hotel: index === input.numberOfDays - 1 && !sameAreaTrip(input, profile) ? "Departure / home base" : (hotelBase.forDay ? hotelBase.forDay(index) : hotelBase.primary),
@@ -3369,9 +3418,21 @@ function dayArchetype(day, input, index) {
   return "Full destination day";
 }
 
-function dayRouteLabel(profile, day, input, index) {
+function dayRouteLabel(profile, day, input, index, hotelBase = null) {
   if (index === 0 && day.scheduleItems.some((item) => item.title.startsWith("Travel to "))) return `${input.origin || "Origin"} -> ${profile.canonicalName}`;
-  if (index === input.numberOfDays - 1 && day.scheduleItems.some((item) => item.title.startsWith("Depart "))) return `${profile.canonicalName} -> ${input.origin || "Origin"}`;
+  // On a multi-city trip's departure day, the traveler is leaving from
+  // whichever base they actually slept in last night, not necessarily the
+  // trip's overall primary destination -- confirmed live: a Los Angeles ->
+  // Malibu -> Santa Barbara -> San Diego route's departure day (spent
+  // entirely in San Diego, USS Midway Museum) still labeled its route as
+  // "Los Angeles -> Denver", hardcoding profile.canonicalName regardless of
+  // where the trip actually ended. hotelBase.forDay already computes the
+  // correct per-day base elsewhere (see startingBase below); use the same
+  // source here instead of the trip-wide canonical name.
+  if (index === input.numberOfDays - 1 && day.scheduleItems.some((item) => item.title.startsWith("Depart "))) {
+    const departureBase = hotelBase?.forDay ? hotelBase.forDay(index) : profile.canonicalName;
+    return `${departureBase} -> ${input.origin || "Origin"}`;
+  }
   // Meals carry a regionId too (the theme region the food search targeted,
   // not necessarily where the restaurant landed -- see mealRecommendation's
   // profile-wide fallback), and breakfast always comes first chronologically.
