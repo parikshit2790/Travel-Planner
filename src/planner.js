@@ -1439,7 +1439,18 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     items.push(regionalTransfer
       ? arrivalTravelItem(profile, input, travelContext, regionalTransfer.fromLabel, regionalTransfer.toLabel)
       : arrivalTravelItem(profile, input, travelContext));
-    addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
+    // On a long-drive arrival day (6+ hours), the travel item's own buffer
+    // already accounts for a meal stop along the way -- confirmed live: an
+    // 11h17 drive landing at 8:12 PM still got a separate "lunch" scheduled
+    // for 8:20 PM (timed relative to the real, very late arrival, but never
+    // relabeled or dropped), immediately followed by a correctly-timed
+    // dinner a couple hours later. A traveler does not eat two full meals
+    // back to back after a day spent entirely driving. Skip this pre-arrival
+    // lunch entirely when the drive is long; the day's one real meal is the
+    // dinner scheduled after check-in below.
+    if (!longArrivalDrive) {
+      addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, firstRegion, "lunch"), mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
+    }
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
   } else {
     addMeal(items, "breakfast", breakfastStart, 45, mealTitle(profile, firstRegion, "breakfast"), mealRecommendation(profile, input, firstRegion, "breakfast", mealUsage, places[0]), firstRegion, input, constraints, mealUsage);
@@ -1490,7 +1501,11 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     cursor += scheduledActivity.durationMinutes + buffers;
     previousScheduledPlace = place;
   });
-  if (!items.some((item) => item.type === "lunch")) {
+  // The lunch-safety-net below assumes the traveler is at the destination by
+  // a normal midday hour; on a long-drive arrival day they are still en
+  // route at that point (see the deliberate skip above), so it must not
+  // fire here either.
+  if (!items.some((item) => item.type === "lunch") && !longArrivalDrive) {
     const lunchRegion = places[0]?.regionId || firstRegion;
     const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage, places[0]);
     addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRegion, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
