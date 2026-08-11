@@ -238,8 +238,9 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
 }
 
-function input(path, value, label, type = "text") {
-  return `<input aria-label="${esc(label)}" placeholder="${esc(label)}" data-field="${esc(path)}" type="${type}" value="${esc(value ?? "")}">`;
+function input(path, value, label, type = "text", { min, max } = {}) {
+  const bounds = type === "number" ? `${min !== undefined ? ` min="${esc(min)}"` : ""}${max !== undefined ? ` max="${esc(max)}"` : ""}` : "";
+  return `<input aria-label="${esc(label)}" placeholder="${esc(label)}" data-field="${esc(path)}" type="${type}"${bounds} value="${esc(value ?? "")}">`;
 }
 
 function textarea(path, value, label) {
@@ -1190,7 +1191,7 @@ function basicsStep() {
       <div class="form-grid basics-grid">
         ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
         ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
-        ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number"), "Inclusive trip length.")}
+        ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number", { min: 1, max: 60 }), "Inclusive trip length.")}
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
         ${fieldShell("Start Date", input("trip.startDate", trip.startDate, "Start Date", "date"), "First travel day.")}
         ${fieldShell("End Date", input("trip.endDate", trip.endDate, "End Date", "date"), "Calculated from start date and trip length.")}
@@ -2982,6 +2983,15 @@ function updateField(path, value) {
     if (["trip.groupType", "trip.adults", "trip.children", "trip.seniors"].includes(path) && !canChangeTravelerCount(path, value)) {
       render();
       return;
+    }
+    // The number input's HTML min/max stops the native spinner and
+    // scroll-wheel-while-focused from going out of range in most browsers,
+    // but that's a UX nicety, not a guarantee -- confirmed live that
+    // scrolling over the "Number of Days" field could still drive it
+    // negative. Clamp the committed value here so trip.days can never hold
+    // an invalid number regardless of how the browser's stepper behaves.
+    if (path === "trip.days" && value !== "" && Number.isFinite(Number(value))) {
+      value = String(Math.min(60, Math.max(1, Math.round(Number(value)))));
     }
     setPath(state, path, value);
     if (path === "trip.from") {
