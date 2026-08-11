@@ -101,7 +101,15 @@ let ui = {
   // from the already-added, comma-joined value in trip.routePreferences.
   placeTagDraft: { placesInMind: "", mustDoPlaces: "" },
   touchedBasicsFields: new Set(),
-  basicsSubmitAttempted: false
+  basicsSubmitAttempted: false,
+  // null = no manual toggle yet, so the section falls back to its
+  // content-based default each render. Once the user opens or closes a
+  // <details> panel by hand, remember that explicitly -- otherwise every
+  // full re-render (which fires on any field change anywhere on the page,
+  // including fields inside the panel itself) rebuilds the <details> element
+  // from scratch without an open attribute and it snaps shut.
+  routeDetailsOpen: null,
+  comfortDetailsOpen: null
 };
 
 let globalListenersBound = false;
@@ -1210,7 +1218,8 @@ function tripStructureSection(trip) {
   const showDayTripLimits = ["one-base-day-trips", "recommend"].includes(prefs.tripStructure);
   const showMultiCityLimits = ["multi-city", "recommend"].includes(prefs.tripStructure);
   const showArrivalLogistics = /fly|train|bus/i.test(trip.transportation || "");
-  const routeDetailsOpen = Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || prefs.arrivalPoint || prefs.departurePoint || ui.basicsSubmitAttempted);
+  const routeDetailsOpen = ui.routeDetailsOpen ?? Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || prefs.arrivalPoint || prefs.departurePoint || ui.basicsSubmitAttempted);
+  const comfortDetailsOpen = ui.comfortDetailsOpen ?? false;
   return `<section class="trip-structure-section full">
     <div class="section-kicker"><span>Choose your trip shape</span><strong>Decide how many bases and how much movement feels right.</strong></div>
     <div class="trip-structure-options">
@@ -1220,7 +1229,7 @@ function tripStructureSection(trip) {
         <span><strong>${esc(option.label)}</strong><small>${esc(option.helper)}</small></span>
       </label>`).join("")}
     </div>
-    <details class="progressive-fields route-shaping-fields" ${routeDetailsOpen ? "open" : ""}>
+    <details class="progressive-fields route-shaping-fields" data-details="routeDetailsOpen" ${routeDetailsOpen ? "open" : ""}>
       <summary><span><i aria-hidden="true">${iconSvg("route")}</i>Route-shaping details</span>${preferenceChips(routePreferenceSummary(prefs))}</summary>
       <div class="form-grid route-detail-grid">
         ${placeTagsField("placesInMind", "Places Already in Mind", prefs, "Cities, neighborhoods, parks, or nearby areas you are already considering. Pick a suggestion for each one so it resolves to the right place.")}
@@ -1239,7 +1248,7 @@ function tripStructureSection(trip) {
         ${fieldShell("Existing Reservations", textarea("trip.routePreferences.existingReservations", prefs.existingReservations, "Existing Reservations"), "Booked meals, tours, hotels, shows, ferries, or tickets.")}
       </div>
     </details>
-    <details class="progressive-fields comfort-prep-fields">
+    <details class="progressive-fields comfort-prep-fields" data-details="comfortDetailsOpen" ${comfortDetailsOpen ? "open" : ""}>
       <summary><span><i aria-hidden="true">${iconSvg("moon")}</i>Comfort and preparation preferences</span>${preferenceChips(comfortPreferenceSummary(prefs))}</summary>
       <div class="form-grid route-detail-grid">
         ${fieldShell("Need Recovery Time After Arrival", select("trip.routePreferences.recoveryAfterArrival", prefs.recoveryAfterArrival, ["Yes", "No", "Maybe"], "Need Recovery Time After Arrival"), "Keeps arrival day realistic.")}
@@ -2480,6 +2489,9 @@ function bind() {
       });
     }
   });
+  document.querySelectorAll("[data-details]").forEach((el) => el.addEventListener("toggle", () => {
+    ui[el.dataset.details] = el.open;
+  }));
   document.querySelectorAll(".restriction-search").forEach((el) => el.addEventListener("input", () => updateField(el.dataset.field, el.value)));
   document.querySelectorAll("[data-check]").forEach((el) => el.addEventListener("change", () => updateCheck(el.dataset.check, el.checked)));
   document.querySelectorAll("[data-location-field]").forEach((el) => {
