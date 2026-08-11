@@ -1247,14 +1247,27 @@ function ensureUrbanHistoricalCivicCoverage(profile, input, dayIndex, selected, 
   return replacements.slice(0, input.maxActivities);
 }
 
+// isDayTrip/isRegionalDestination come from routeFeasibility's app-wide
+// 90-minute-round-trip "local" cutoff -- reasonable for most cities, but a
+// genuinely sprawling one has ordinary IN-CITY attractions comfortably over
+// that bound. Confirmed live: Fairchild Tropical Botanic Garden, a regular
+// Miami garden a short drive from downtown, is a 110-minute round trip and
+// got flagged as a "day trip" -- which satisfied nearby-regional-coverage
+// before Everglades National Park (a genuine 200-minute round trip actually
+// outside the city) ever got a chance to be considered. A place's regionId
+// is a more reliable geographic signal here: buildGoogleRegions already
+// buckets genuine geographic outliers into "nearby-region," and an approved
+// regional extension always carries a "regional-ext-" id -- neither
+// depends on a single noisy time threshold.
+function isGeographicallyRegionalPlace(place) {
+  return place.regionId === "nearby-region" || String(place.regionId || "").startsWith("regional-ext-") || isRegionalExcursionPlace(place);
+}
+
 function ensureNearbyUrbanRegionalCoverage(profile, input, dayIndex, selected, candidates, scheduled) {
   if (!isUrbanDestinationProfile(profile) || input.numberOfDays < 4 || dayIndex < 2 || dayIndex >= input.numberOfDays - 1) return selected;
   const selectedIds = new Set(selected.map((item) => item.place.id));
   const selectedOrScheduled = [...candidates.filter((item) => scheduled.has(item.place.id)), ...selected];
-  const alreadyHasNearbyRegional = selectedOrScheduled.some((item) => {
-    const flag = item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input, item.intelligence?.routeFeasibility);
-    return flag.isDayTrip || flag.isRegionalDestination || isRegionalExcursionPlace(item.place);
-  });
+  const alreadyHasNearbyRegional = selectedOrScheduled.some((item) => isGeographicallyRegionalPlace(item.place));
   if (alreadyHasNearbyRegional) return selected;
   const nearby = candidates
     .filter((item) => !scheduled.has(item.place.id) && !selectedIds.has(item.place.id))
@@ -1275,7 +1288,7 @@ function ensureNearbyUrbanRegionalCoverage(profile, input, dayIndex, selected, c
       // once an unrelated scheduling shift changed which day this ran on.
       // Keep the more specific words that actually indicate a regional
       // excursion rather than just "is downtown."
-      return flag.isDayTrip || flag.isRegionalDestination || /\b(university|gardens|garden|college town|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
+      return isGeographicallyRegionalPlace(item.place) || /\b(university|gardens|garden|college town|historic district)\b/.test(text) && Number(item.place.priorityScore || 0) >= 72;
     })
     .sort((a, b) => a.routeRank - b.routeRank || Number(b.item.place.priorityScore || 0) - Number(a.item.place.priorityScore || 0) || b.item.score - a.item.score)[0]?.item;
   if (!nearby) return selected;

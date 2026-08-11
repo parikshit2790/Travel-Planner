@@ -439,9 +439,49 @@ async function researchDestination(destination, trip, config) {
   return addRegionalExtensions(profile, trip, config, approvedExtensions);
 }
 
+// regionalCandidateCities is AI-sourced only, and AI destination research
+// fails or times out often enough in practice (confirmed live: it kept
+// missing even a 90-second timeout) that relying on it alone silently
+// disables regional-extension suggestions entirely whenever it does --
+// confirmed live: Key West never got suggested for a Miami trip because AI
+// research kept failing. A small, curated fallback of well-established
+// "signature day trip or nearby extension" cities for a handful of major
+// destinations, used only when AI didn't supply anything, mirrors the same
+// kind of fallback list already used client-side for route-shape proposals
+// (see inferNearbyCandidates in route-architecture.js) -- real travel
+// knowledge, not a live lookup, and never overrides a working AI response.
+// Names here must be bare (no ", State, Country" suffix): they're passed
+// straight into resolveDestination, whose exact-match-first logic compares
+// the raw query string against each candidate's own parsed city name (see
+// resolveDestination) -- a comma-qualified name can never match that
+// (mirrors the same reasoning already documented on addVerifiedPlaceTag for
+// exactly this class of bug).
+const KNOWN_REGIONAL_CITY_FALLBACKS = {
+  miami: ["Key West"],
+  "los angeles": ["Santa Barbara", "San Diego"],
+  "san francisco": ["Napa", "Monterey"],
+  "new york": ["Philadelphia"],
+  washington: ["Annapolis"],
+  charlotte: ["Asheville"],
+  dallas: ["Fort Worth"],
+  orlando: ["Tampa"],
+  chicago: ["Milwaukee"],
+  boston: ["Providence"],
+  phoenix: ["Sedona"],
+  seattle: ["Victoria"],
+  "las vegas": ["Grand Canyon National Park"]
+};
+
+function knownRegionalCityFallback(canonicalName) {
+  const core = normalizeForMatch(String(canonicalName || "").split(",")[0]);
+  return KNOWN_REGIONAL_CITY_FALLBACKS[core] || [];
+}
+
 async function addRegionalExtensions(profile, trip, config, approvedExtensions = null) {
   const approvedCities = approvedExtensions?.approvedCities ?? approvedExtensionCities(trip);
-  const suggestedCities = profile.regionalDestinationProfile?.regionalCandidateCities || [];
+  const suggestedCities = profile.regionalDestinationProfile?.regionalCandidateCities?.length
+    ? profile.regionalDestinationProfile.regionalCandidateCities
+    : knownRegionalCityFallback(profile.canonicalName);
   // Approved cities are already being researched concurrently (started before
   // primary research began); only unresearched AI-suggested cities remain to
   // fetch sequentially here, and only if there's room left in maxCandidates.
