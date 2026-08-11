@@ -2010,7 +2010,20 @@ function tripTravelContext(profile, input) {
   const providedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureDateTime);
   const defaultFlyArrivalMinutes = 8 * 60;
   const defaultFlyDepartureMinutes = 20 * 60;
-  const flyArrivalMinutes = providedArrivalMinutes ?? defaultFlyArrivalMinutes;
+  // A very long-haul flight's total estimated travel+ground-buffer time
+  // (flyMinutes) can exceed the gap between midnight and the assumed 8:00 AM
+  // default arrival -- confirmed live: Charlotte -> Los Angeles (~2100mi,
+  // ~477min estimate) pushed the arrival travel block's start to 12:03 AM,
+  // which then failed the day-schedule-exceeds-calendar-day quality gate and
+  // rejected the whole plan. Only the ASSUMED default arrival time may slip
+  // later to absorb this (a traveler-provided arrival time is real
+  // information and stays authoritative); the block's start floors at 4:00
+  // AM and the rest of the day still agrees with whatever arrival time this
+  // produces, since arrivalMinutes below is derived from the same value.
+  const earliestPlausibleFlyDepartureMinutes = 4 * 60;
+  const flyArrivalMinutes = providedArrivalMinutes !== null
+    ? providedArrivalMinutes
+    : Math.max(defaultFlyArrivalMinutes, earliestPlausibleFlyDepartureMinutes + flyMinutes);
   const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : flyArrivalMinutes;
   const flyEstimateType = providedArrivalMinutes !== null ? "traveler-provided-time" : "assumed-default-time";
   const flyDepartureAnchorMinutes = providedDepartureMinutes ?? defaultFlyDepartureMinutes;
