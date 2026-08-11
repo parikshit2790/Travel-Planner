@@ -1049,6 +1049,20 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     selected = ensureUrbanHistoricalCivicCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = ensureNearbyUrbanRegionalCoverage(profile, input, index, selected, eligibleCandidates, scheduled);
     selected = ensureCoastalNatureCoverage(profile, input, intelligence, index, selected, eligibleCandidates, scheduled);
+    // A destination-scale ticketed park (Universal Studios Florida, Islands
+    // of Adventure/Hogsmeade, Magic Kingdom, ...) is a half-to-full-day
+    // commitment on its own -- confirmed live: Hogsmeade, Gatorland, and
+    // Universal Studios Florida were scheduled the same day, with the
+    // traveler shown leaving the Universal resort for an unrelated park and
+    // returning for a single hour. Once a day includes one of these, no
+    // other non-park activity should share it, and only the single
+    // highest-priority park pick survives -- a second ticketed park (even at
+    // the same resort) the same day needs explicit traveler intent, not
+    // automatic filler.
+    const destinationScaleParkItems = selected.filter((item) => (item.intelligence?.classification || classifyPlaceForPlanning(item.place, profile, input)).isDestinationScalePark);
+    if (destinationScaleParkItems.length) {
+      selected = [destinationScaleParkItems.slice().sort((a, b) => b.score - a.score)[0]];
+    }
     // An approved multi-city base (e.g. Grand Canyon, Sedona) must never sit
     // empty on the one day the traveler is actually there -- normal scoring
     // (score > -200 threshold, archetype-specific penalties) can zero out a
@@ -1074,7 +1088,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
           return { fromRegionId, toRegionId, fromLabel: regionName(profile, fromRegionId), toLabel: regionName(profile, toRegionId), travel: estimateTravel(profile, fromRegionId, toRegionId) };
         })()
       : null;
-    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage, regionalTransfer, approvedSchedule ? themeRegions[0] : null);
+    const scheduleItems = scheduleDay(profile, input, constraints, selected.map((item) => item.place), index, mealUsage, eveningUsage, regionalTransfer, approvedSchedule ? themeRegions[0] : null, scheduled);
     scheduleItems.forEach((item) => {
       if (item.placeId && item.type !== "breakfast" && item.type !== "lunch" && item.type !== "dinner") scheduled.add(item.placeId);
     });
@@ -1385,6 +1399,12 @@ function isActivityCandidateForSchedule(item, profile, input) {
   // to it too. This is the one gate every activity candidate must pass
   // through, so exclude it here instead of patching each caller.
   if (classification.isGamblingVenue) return false;
+  // A place whose own name self-labels it as a weather/back-up option
+  // (e.g. "Miami Seaquarium (weather/back-up option)") must not be
+  // schedulable as the actual primary plan -- it's still eligible for the
+  // real backups list via buildBackups, which has its own separate
+  // isBackupCompatible gate.
+  if (classification.isSelfDescribedBackup) return false;
   if (classification.isSensitiveOrExplicitContent && !preferencesRequestSensitiveContent(input)) return false;
   if (isGenericParkContainer(item.place, profile)) return false;
   return true;
@@ -1515,7 +1535,7 @@ function keepNearbyThemeRegions(profile, regionIds, limit) {
     .slice(0, limit);
 }
 
-function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null, homeRegionId = null) {
+function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = new Map(), eveningUsage = new Map(), regionalTransfer = null, homeRegionId = null, priorDaysScheduled = new Set()) {
   const items = [];
   const buffers = paceDefaults(input.pace).buffer;
   const mealDuration = input.pace === "Relaxed" ? 75 : 60;
@@ -1625,6 +1645,23 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       const travel = estimateTravel(profile, previousScheduledPlace, place);
       items.push(travelItem(previousScheduledPlace.name, place.name, cursor, travel));
       cursor += travel.durationMinutes + buffers;
+    } else {
+      // The day's very first activity transition (breakfast/hotel area ->
+      // first stop) never got a travel leg at all, on the assumption it's a
+      // short in-neighborhood hop -- true for most urban first stops, but
+      // wrong for a genuine regional excursion. Confirmed live:
+      // "Everglades National Park gateway" was scheduled as Day 2's first
+      // activity directly after breakfast with only a 15-minute gap,
+      // despite being sharing the same nominal regionId as downtown Miami
+      // and actually requiring a real 40+ minute drive each way. Only add
+      // this leg when the first stop is genuinely far from the day's home
+      // region, so ordinary nearby first stops (the common case) are
+      // unaffected.
+      const anchorTravel = estimateTravel(profile, firstRegion, place);
+      if (anchorTravel.durationMinutes > 20) {
+        items.push(travelItem(regionName(profile, firstRegion), place.name, cursor, anchorTravel));
+        cursor += anchorTravel.durationMinutes + buffers;
+      }
     }
     if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30) {
       const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage, place);
@@ -1683,9 +1720,18 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     // ran -- is what produces post-midnight sightseeing after a long drive.
     if (!longArrivalDrive) {
       const eveningStart = dinnerStart + (input.pace === "Relaxed" ? 105 : 90);
+      // A place already scheduled as a real daytime activity on an EARLIER
+      // day (e.g. Day 1's headline attraction) must not resurface as a later
+      // day's evening anchor -- confirmed live: Holocaust Memorial Miami
+      // Beach was Day 1's 4-5:45 PM activity, then got picked again as Day
+      // 2's 8-9:30 PM evening block. eveningUsage only soft-prefers unused
+      // places as a sort tiebreaker; it doesn't hard-exclude a place used
+      // earlier as a DAYTIME activity (only past evening picks). Union in
+      // buildDays' cross-day `scheduled` set so this is a hard exclusion.
       const usedActivityIds = new Set([
         ...dayPlaces.map((place) => place.id),
-        ...items.map((item) => item.placeId).filter(Boolean)
+        ...items.map((item) => item.placeId).filter(Boolean),
+        ...priorDaysScheduled
       ]);
       const evening = eveningItem(profile, input, constraints, dinnerRegion, eveningStart, dayIndex, usedActivityIds, eveningUsage, homeRegionId);
       if (evening?.placeId) eveningUsage.set(evening.placeId, (eveningUsage.get(evening.placeId) || 0) + 1);
@@ -1823,6 +1869,12 @@ function scheduledDurationForPlace(place, classification = classifyPlaceForPlann
   if (/short stop|viewpoint|landmark|capitol|market/.test(text)) adjusted = Math.min(adjusted, 75);
   if (classification.isMuseum) adjusted = Math.max(90, adjusted);
   if (classification.isPark || classification.isBeachOrWaterfront) adjusted = Math.max(70, adjusted);
+  // A destination-scale ticketed resort park (Universal Studios Florida,
+  // Islands of Adventure/Hogsmeade, Magic Kingdom, ...) needs parking,
+  // security, park entry, internal transport, and ride queues on top of the
+  // core visit -- treating it like an ordinary attraction produced a
+  // 60-minute "Universal Studios Florida" block. Floor it at a half-day.
+  if (classification.isDestinationScalePark) adjusted = Math.max(300, adjusted);
   adjusted += ((seed % 5) - 2) * 8;
   const clamped = Math.max(35, Math.min(Number(place.maximumDurationMinutes || adjusted + 60), Math.max(Number(place.minimumDurationMinutes || 35), Math.round(adjusted / 5) * 5)));
   return overhead ? Math.min(EXPERIENCE_OVERHEAD_CEILING_MINUTES, clamped + overhead) : clamped;
@@ -2254,7 +2306,7 @@ function eveningAnchorPlace(profile, input, constraints, regionId, usedActivityI
     // being the meal itself. Still allow a bar/restaurant combo through via
     // isBar, since that's a legitimate nightlife stop, not a meal masquerading
     // as an activity.
-    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue && !((classification.isRestaurant || classification.isFoodHall) && !classification.isBar))
+    .filter(({ classification }) => !classification.isChildrenFocused && !classification.isOrdinaryBusiness && !classification.isDinnerShow && !classification.isGamblingVenue && !classification.isSelfDescribedBackup && !((classification.isRestaurant || classification.isFoodHall) && !classification.isBar))
     .filter(({ place, classification }) => !(classification.isSportsVenue && !hasStatedInterest(input, "Sports") && !explicitlyRequestedPlace(input, place)))
     .filter(({ place, classification }) => Number(place.typicalDurationMinutes || 0) < 150 || classification.isBoardwalk || classification.isBeachOrWaterfront || classification.isBar || /evening|nightlife|dessert|rooftop|dinner|promenade|district|walk/i.test(`${place.name} ${(place.categories || []).join(" ")} ${(place.tags || []).join(" ")}`))
     .filter(({ place }) => !usedActivityIds.has(place.id) && !isTimeSensitiveClosed(place, start))
