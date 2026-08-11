@@ -28,6 +28,17 @@ export async function openAiDestinationResearch(destination, trip = {}, config =
           schema: destinationProfileSchema()
         }
       },
+      // This is a knowledge-retrieval-and-formatting task (recall real
+      // places, shape them into the schema), not one that benefits from
+      // multi-step reasoning -- but gpt-5-mini's reasoning effort defaults
+      // to something well above "minimal" when unset. Confirmed live, twice:
+      // leaving it unset burned 768-1280 invisible reasoning tokens and took
+      // 60-70 seconds, well past the request timeout, on every call. Setting
+      // it to "minimal" consistently completed in 38-45 seconds with zero
+      // reasoning tokens across repeated live runs -- this is almost
+      // certainly why AI destination research (and everything downstream of
+      // it, like regional-city auto-suggestions) was failing routinely.
+      reasoning: { effort: "minimal" },
       max_output_tokens: 9000
     });
   if (!response.ok) {
@@ -72,6 +83,7 @@ export async function openAiSmokeCheck(config = {}) {
           }
         }
       },
+      reasoning: { effort: "minimal" },
       max_output_tokens: 300
     });
   if (!response.ok) {

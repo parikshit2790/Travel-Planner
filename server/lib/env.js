@@ -32,7 +32,18 @@ export function providerConfig() {
     // real but bounded window, so a slow/failing attempt fails fast enough
     // to leave meaningful time for the Google-based fallback and any
     // parallel regional extension research to actually complete.
-    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 28000),
+    // Root cause of the slowness itself (not just this timeout): the
+    // destination-research request never set a reasoning-effort parameter,
+    // so gpt-5-mini defaulted to spending 768-1280 invisible reasoning
+    // tokens per call and consistently ran 60-70+ seconds even for a
+    // knowledge-retrieval-and-formatting task with no real reasoning need.
+    // Fixed at the call site (openai-destination-provider.js) by setting
+    // reasoning effort to "minimal", which completed in 38-45 seconds with
+    // zero reasoning tokens across repeated live runs. Raised this timeout
+    // to match that faster, now-realistic completion time with headroom,
+    // while still leaving room in the ~58s shared budget for the
+    // Google-based fallback if a call is still unusually slow.
+    openAiRequestTimeoutMs: positiveNumber(process.env.OPENAI_REQUEST_TIMEOUT_MS, 45000),
     plannerRequestTimeoutMs: positiveNumber(process.env.PLANNER_REQUEST_TIMEOUT_MS, 58000),
     frontendGenerationTimeoutMs: positiveNumber(process.env.FRONTEND_GENERATION_TIMEOUT_MS, 70000),
     cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 86400)
