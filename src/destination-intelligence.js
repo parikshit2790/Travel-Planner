@@ -412,6 +412,25 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
   // sports/event interest at all. See hasStatedInterest in planner.js for
   // how this gets enforced.
   const isSportsVenue = has(/\b(stadium|arena|ballpark|speedway|motor speedway|fieldhouse|coliseum)\b/) && !isEntertainmentCenter;
+  // A destination-scale ticketed resort park is a half-to-full-day
+  // commitment, not an ordinary 60-120 minute attraction -- confirmed live:
+  // "The Wizarding World of Harry Potter - Hogsmeade" (a themed land inside
+  // Universal's Islands of Adventure) and "Universal Studios Florida" (the
+  // sibling park at the same resort) got scheduled as two separate ~1-2 hour
+  // stops with an unrelated activity wedged between them. isEntertainmentCenter
+  // already covers small local venues (mini golf, arcade, go-kart); this flag
+  // is deliberately narrower, matching only major named resorts/parks and
+  // their sub-lands so scheduledDurationForPlace can floor their duration and
+  // buildDays can stop other activities from sharing that day.
+  const isDestinationScalePark = has(/\b(universal studios|islands of adventure|universal orlando|wizarding world|hogsmeade|diagon alley|magic kingdom|epcot|hollywood studios|animal kingdom|walt disney world|disneyland|disney california adventure|six flags|busch gardens|seaworld|legoland|cedar point|knott s berry farm|hersheypark|kings island|silver dollar city|dollywood)\b/);
+  // AI-sourced research sometimes bakes its own meta-commentary directly
+  // into a place's NAME rather than a separate structured field -- confirmed
+  // live: "Miami Seaquarium (weather/back-up option)" got scheduled as a
+  // normal primary activity, contradicting the AI's own "back-up" framing.
+  // Match only against the place's own name (not description/tags) so a
+  // legitimately-named place mentioning "alternative" in passing isn't
+  // caught.
+  const isSelfDescribedBackup = /\((?:[^)]*\b(?:weather|rainy day|back[- ]?up|indoor alternative|alternate option|weather option)\b[^)]*)\)/i.test(place.name || "");
   const isThinResearchAttraction = /\b(is a landmark|is a popular|is a well[- ]known|is a notable|is a local|visitor stop|tourist stop|point of interest)\b/.test(description) && description.length > 0 && description.length < 200;
   const isStaleOrClosedAttraction = staleOrClosedAttractionFor(place);
   const routeScope = routeScopeFrom(feasibility, text);
@@ -465,6 +484,8 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     isSensitiveOrExplicitContent,
     isGamblingVenue,
     isSportsVenue,
+    isDestinationScalePark,
+    isSelfDescribedBackup,
     isThinResearchAttraction,
     isMuseum,
     isPark,
