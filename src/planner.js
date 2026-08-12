@@ -1185,6 +1185,7 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
       title: dayTitleFor(profile, input, intelligence, region, scheduleItems, index),
       theme: dayThemeLabel(themeRegions, intelligence),
       region: region.name,
+      regionId: region.id,
       summary,
       weatherPlanningNote: weatherNote(scheduleItems, date),
       scheduleItems,
@@ -2825,8 +2826,36 @@ function buildRouteSummary(profile, days) {
     totalEstimatedDistanceMiles,
     routeLogicExplanation: `The planner groups each day by compatible ${profile.canonicalName} areas to reduce repeated cross-city travel.`,
     mapPlaceholderData: days.map((day) => ({ dayNumber: day.dayNumber, region: day.region, stops: day.scheduleItems.filter((item) => item.type === "activity").map((item) => item.title) })),
+    mapStops: buildRouteMapStops(profile, days),
     trafficDisclaimer: "Drive times are planning estimates only; they are not live traffic predictions."
   };
+}
+
+function buildRouteMapStops(profile, days) {
+  const groups = [];
+  for (const day of days) {
+    const region = profile.regions.find((item) => item.id === day.regionId);
+    if (!region?.centerCoordinates) continue;
+    const last = groups[groups.length - 1];
+    if (last && last.regionId === day.regionId) {
+      last.endDay = day.dayNumber;
+    } else {
+      groups.push({
+        regionId: day.regionId,
+        regionName: region.name,
+        startDay: day.dayNumber,
+        endDay: day.dayNumber,
+        lat: region.centerCoordinates.lat,
+        lng: region.centerCoordinates.lng
+      });
+    }
+  }
+  return groups.map((group) => ({
+    label: group.startDay === group.endDay ? `Day ${group.startDay}` : `Day ${group.startDay}-${group.endDay}`,
+    regionName: group.regionName,
+    lat: group.lat,
+    lng: group.lng
+  }));
 }
 
 function buildBudgetSummary(input, days) {

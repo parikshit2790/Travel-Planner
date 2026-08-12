@@ -796,11 +796,21 @@ function planRouteSection() {
   const route = state.plan.routeSummary;
   return `<section class="plan-section route-plan-section">
     <div class="plan-section-head"><div><h2>Route Overview</h2><p>${esc(route.routeLogicExplanation)}</p></div><span class="badge">${esc(formatMinutes(route.totalEstimatedDriveMinutes))} estimated drive</span></div>
+    ${route.mapStops && route.mapStops.length ? routeMapImageBlock(route.mapStops) : ""}
     <div class="route-schematic">${route.mapPlaceholderData.map((day) => `<article><span>Day ${day.dayNumber}</span><strong>${esc(day.region)}</strong><small>${esc(day.stops.slice(0, 3).join(" → "))}</small></article>`).join("")}</div>
     <article class="plan-payoff-card wide"><h3>Major Stop Sequence</h3><p>${esc(route.orderedStops.join(" → "))}</p><p>${esc(route.trafficDisclaimer)}</p><p>Estimated distance: ${route.totalEstimatedDistanceMiles} miles.</p></article>
     ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Trip Shape Options Considered</h3><div class="shape-options-list">${state.plan.tripGuide.tripShapeOptions.map((option) => tripShapeOptionCard(option)).join("")}</div></article>` : ""}
     ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Lodging Logic</h3><p><strong>${esc(state.plan.tripGuide.lodgingPlan.recommendedBase)}</strong> · ${esc(String(state.plan.tripGuide.lodgingPlan.nights))} nights</p><div class="lodging-night-grid">${state.plan.tripGuide.lodgingPlan.nightlyPlan.map((night) => `<span><strong>${esc(`Night ${night.night}`)}</strong><small>${esc(night.sleepArea)} · ${esc(night.whyThisBase)}</small></span>`).join("")}</div></article>` : ""}
   </section>`;
+}
+
+function routeMapImageBlock(mapStops) {
+  const stopsParam = encodeURIComponent(JSON.stringify(mapStops.map((stop) => ({ label: stop.label, lat: stop.lat, lng: stop.lng }))));
+  return `<article class="plan-payoff-card wide route-map-card">
+    <h3>Route Map</h3>
+    <img class="route-map-image" src="/api/route-map?stops=${stopsParam}" alt="Map of the route with day-labeled stops" loading="lazy" onerror="this.closest('.route-map-card')?.classList.add('route-map-error')">
+    <div class="route-map-legend">${mapStops.map((stop, index) => `<span><strong>${index + 1}</strong>${esc(stop.label)} · ${esc(stop.regionName)}</span>`).join("")}</div>
+  </article>`;
 }
 
 function planBudgetSection() {
