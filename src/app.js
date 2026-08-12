@@ -243,6 +243,24 @@ function input(path, value, label, type = "text", { min, max } = {}) {
   return `<input aria-label="${esc(label)}" placeholder="${esc(label)}" data-field="${esc(path)}" type="${type}"${bounds} value="${esc(value ?? "")}">`;
 }
 
+// Plain text instead of type="date": Safari renders an empty native date
+// input showing today's date at initial paint, before any event we could
+// intercept even fires, and treats it as a real committed value the moment
+// focus leaves the field -- confirmed live, twice, that no combination of
+// event-listener gating stops it. A text field with the same YYYY-MM-DD
+// storage format sidesteps the native widget's blank-state behavior
+// entirely, so it starts (and stays) genuinely empty in every browser.
+function dateTextInput(path, value, label) {
+  return `<input aria-label="${esc(label)}" placeholder="YYYY-MM-DD" data-field="${esc(path)}" data-date-text="true" inputmode="numeric" type="text" value="${esc(value ?? "")}">`;
+}
+
+function formatDateTextValue(raw) {
+  const digits = String(raw || "").replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+}
+
 function textarea(path, value, label) {
   return `<textarea aria-label="${esc(label)}" data-field="${esc(path)}">${esc(value ?? "")}</textarea>`;
 }
@@ -1208,8 +1226,8 @@ function basicsStep() {
         ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
         ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number", { min: 1, max: 60 }), "Inclusive trip length.")}
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
-        ${fieldShell("Start Date", input("trip.startDate", trip.startDate, "Start Date", "date"), "First travel day.")}
-        ${fieldShell("End Date", input("trip.endDate", trip.endDate, "End Date", "date"), "Calculated from start date and trip length.")}
+        ${fieldShell("Start Date", dateTextInput("trip.startDate", trip.startDate, "Start Date"), "First travel day.")}
+        ${fieldShell("End Date", dateTextInput("trip.endDate", trip.endDate, "End Date"), "Calculated from start date and trip length.")}
       </div>
       ${destinationRegionsField(trip)}
     </section>
@@ -2490,20 +2508,21 @@ function bind() {
     }
     persist("Opened");
   }));
+  document.querySelectorAll('[data-date-text="true"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      const formatted = formatDateTextValue(el.value);
+      if (formatted !== el.value) el.value = formatted;
+    });
+  });
   document.querySelectorAll("[data-field]").forEach((el) => {
-    // Safari renders an empty type="date"/"datetime-local" input showing
-    // today's date -- not grayed-out placeholder text like Chrome/Firefox,
-    // but the field's real displayed content -- and can report that date as
-    // the input's value the moment focus leaves it, with no deliberate pick
-    // by the traveler. Confirmed live: an untouched, freshly-loaded Start
-    // Date field already showed today's date before any interaction at all.
-    // Listening for which browser event carries the phantom value is a
-    // losing game (already tried "input" vs "change" -- didn't hold up), so
-    // instead require actual pointer/keyboard contact with THIS element
-    // before its value is ever trusted. Tab-focusing alone doesn't fire
-    // mousedown/keydown targeted at this element, so it's never marked
-    // interacted, and Safari's phantom commit gets ignored.
-    if (el.type === "date" || el.type === "datetime-local") {
+    // datetime-local (Arrival/Departure Date and Time) is still a native
+    // picker and shares Start/End Date's Safari phantom-value risk (see
+    // dateTextInput above), but isn't converted to text here -- it also
+    // carries a time component, which needs its own dedicated input, not
+    // attempted yet. This gate is a partial mitigation only, not a
+    // confirmed fix: require real pointer/keyboard contact with the
+    // element before trusting its committed value.
+    if (el.type === "datetime-local") {
       const markInteracted = () => { el.dataset.userInteracted = "true"; };
       el.addEventListener("mousedown", markInteracted);
       el.addEventListener("keydown", markInteracted);

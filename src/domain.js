@@ -572,8 +572,20 @@ export function reconcileTripDates(trip, changedField = "") {
   return trip;
 }
 
+function isValidCalendarDateValue(value) {
+  const parts = localDateParts(value);
+  if (!parts) return false;
+  const date = new Date(parts.year, parts.month - 1, parts.day);
+  return date.getFullYear() === parts.year && date.getMonth() === parts.month - 1 && date.getDate() === parts.day;
+}
+
 export function validateTripDateRange(trip) {
   const issues = [];
+  // Start/End Date are free-typed text (see dateTextInput in app.js), not a
+  // native date picker with its own built-in validity check, so a malformed
+  // or out-of-range typed value (e.g. month 13) needs to be caught here.
+  if (trip.startDate && !isValidCalendarDateValue(trip.startDate)) issues.push({ severity: "Critical", issue: "Start Date must be a valid date (YYYY-MM-DD).", action: "Fix Start Date", field: "trip.startDate", blocking: true });
+  if (trip.endDate && !isValidCalendarDateValue(trip.endDate)) issues.push({ severity: "Critical", issue: "End Date must be a valid date (YYYY-MM-DD).", action: "Fix End Date", field: "trip.endDate", blocking: true });
   if (trip.days === "" || trip.days === null || trip.days === undefined) return issues;
   const days = Number(trip.days);
   if (!Number.isInteger(days)) issues.push({ severity: "Critical", issue: "Number of Days must be a whole number.", action: "Fix Number of Days", field: "trip.days", blocking: true });
