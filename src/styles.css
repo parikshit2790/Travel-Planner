@@ -948,9 +948,9 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .route-schematic article::after { content: ""; position: absolute; right: 18px; top: 20px; width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #ff8b1a, #21b6c7); opacity: 0.24; }
 .route-schematic span { color: var(--blue); font-weight: 900; }
 .route-schematic strong, .route-schematic small { display: block; margin-top: 8px; }
-.route-map-card { display: grid; gap: 12px; }
-.route-map-image { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); background: #eaf8ff; }
-.route-map-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.route-map-card { display: grid; gap: 12px; justify-items: center; text-align: center; }
+.route-map-image { display: block; width: 100%; max-width: 460px; height: auto; margin: 0 auto; border-radius: 14px; border: 1px solid var(--line); background: #eaf8ff; }
+.route-map-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; text-align: left; }
 .route-map-legend span { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--navy); }
 .route-map-legend strong { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 0.8rem; }
 .route-map-card.route-map-error { display: none; }
@@ -1063,7 +1063,7 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .plan-summary-strip, .plan-overview-grid, .meal-day-grid { grid-template-columns: 1fr 1fr !important; }
   .plan-payoff-card.wide { grid-column: 1 / -1 !important; }
   .timeline-item, .itinerary-day, .meal-day, .advisory-card, .backup-options article, .route-map-card { break-inside: avoid; page-break-inside: avoid; }
-  .route-map-image { max-width: 100%; }
+  .route-map-image { max-width: 340px !important; }
   a::after { content: " (" attr(href) ")"; font-size: 0.8em; }
   .timeline-dot { color: #111 !important; background: #fff !important; box-shadow: none !important; border: 1px solid #111; }
 }
