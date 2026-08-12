@@ -2270,8 +2270,17 @@ function arrivalTravelNote(context) {
 function departureTravelNote(context) {
   if (context.estimateType === "provider-route-estimate") return "Provider route estimate with a conservative return buffer; verify live traffic before departure.";
   if (context.estimateType === "average-estimate") return `We couldn't verify live traffic data for this drive; assuming an average driving time of ${formatDuration(context.originDriveMinutes)}. Verify actual conditions before departure.`;
-  if (context.flyDepartureEstimateType === "traveler-provided-time") return "Using the departure time you entered; verify this against your actual booking.";
-  if (context.flyDepartureEstimateType === "assumed-default-time") return "We don't have your exact flight departure time, so we're assuming an 8:00 PM departure -- update this once you've booked your flight.";
+  // flyDepartureEstimateType is computed unconditionally in both
+  // tripTravelContext and departureFromRegionContext (providedDepartureMinutes
+  // is only ever meaningful when NOT driving, so it defaults to
+  // "assumed-default-time" regardless of transport mode) -- confirmed live:
+  // a driving departure from San Diego (real duration 14h28m from a
+  // coordinate-based drive estimate) still showed "We don't have your exact
+  // flight departure time, so we're assuming an 8:00 PM departure," because
+  // this check ran before the correct coordinate-arrival-estimate fallback
+  // below. Only trust it for an actual flying trip.
+  if (context.transportMode !== "drive" && context.flyDepartureEstimateType === "traveler-provided-time") return "Using the departure time you entered; verify this against your actual booking.";
+  if (context.transportMode !== "drive" && context.flyDepartureEstimateType === "assumed-default-time") return "We don't have your exact flight departure time, so we're assuming an 8:00 PM departure -- update this once you've booked your flight.";
   if (context.estimateType === "coordinate-arrival-estimate") return "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking.";
   return "No distance data available; verify actual flight or drive times before booking.";
 }
