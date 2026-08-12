@@ -629,7 +629,9 @@ function planMetric(label, value, icon) {
 
 function planOverviewSection() {
   const plan = state.plan;
+  const mapStops = plan.routeSummary?.mapStops;
   return `<section class="plan-section overview-section">
+    ${mapStops && mapStops.length ? routeMapImageBlock(mapStops) : ""}
     <div class="plan-overview-grid">
       <article class="plan-payoff-card wide">
         <h2>Trip Overview</h2>
@@ -800,7 +802,6 @@ function planRouteSection() {
   const route = state.plan.routeSummary;
   return `<section class="plan-section route-plan-section">
     <div class="plan-section-head"><div><h2>Route Overview</h2><p>${esc(route.routeLogicExplanation)}</p></div><span class="badge">${esc(formatMinutes(route.totalEstimatedDriveMinutes))} estimated drive</span></div>
-    ${route.mapStops && route.mapStops.length ? routeMapImageBlock(route.mapStops) : ""}
     <div class="route-schematic">${route.mapPlaceholderData.map((day) => `<article><span>Day ${day.dayNumber}</span><strong>${esc(day.region)}</strong><small>${esc(day.stops.slice(0, 3).join(" → "))}</small></article>`).join("")}</div>
     <article class="plan-payoff-card wide"><h3>Major Stop Sequence</h3><p>${esc(route.orderedStops.join(" → "))}</p><p>${esc(route.trafficDisclaimer)}</p><p>Estimated distance: ${route.totalEstimatedDistanceMiles} miles.</p></article>
     ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Trip Shape Options Considered</h3><div class="shape-options-list">${state.plan.tripGuide.tripShapeOptions.map((option) => tripShapeOptionCard(option)).join("")}</div></article>` : ""}
