@@ -8,7 +8,7 @@ import plannerHandler from "../api/planner.js";
 import providerHealthHandler from "../api/provider-health.js";
 
 const apiRouteFiles = fs.readdirSync("api").filter((entry) => /\.(js|ts)$/.test(entry)).sort();
-assert.deepEqual(apiRouteFiles, ["locations.js", "planner.js", "provider-health.js"]);
+assert.deepEqual(apiRouteFiles, ["locations.js", "planner.js", "provider-health.js", "route-map.js"]);
 
 const actionResponse = fs.readFileSync("server/lib/action-response.js", "utf8");
 assert.ok(actionResponse.includes("METHOD_NOT_ALLOWED"));
