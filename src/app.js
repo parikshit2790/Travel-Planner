@@ -68,6 +68,8 @@ let state = load();
 const locationProvider = createLocationSearchProvider();
 const locationTimers = {};
 let ui = {
+  openDatePicker: null,
+  datePickerViewMonth: null,
   openRestrictionTravelerId: null,
   restrictionSearch: "",
   focusRestrictionTriggerId: null,
@@ -251,7 +253,12 @@ function input(path, value, label, type = "text", { min, max } = {}) {
 // storage format sidesteps the native widget's blank-state behavior
 // entirely, so it starts (and stays) genuinely empty in every browser.
 function dateTextInput(path, value, label) {
-  return `<input aria-label="${esc(label)}" placeholder="YYYY-MM-DD" data-field="${esc(path)}" data-date-text="true" inputmode="numeric" type="text" value="${esc(value ?? "")}">`;
+  const open = ui.openDatePicker === path;
+  return `<div class="date-field-wrap">
+    <input aria-label="${esc(label)}" placeholder="YYYY-MM-DD" data-field="${esc(path)}" data-date-text="true" inputmode="numeric" type="text" value="${esc(value ?? "")}">
+    <button type="button" class="date-picker-toggle" aria-label="${open ? "Close" : "Open"} calendar for ${esc(label)}" aria-expanded="${open}" data-action="toggleDatePicker:${esc(path)}">${iconSvg("calendar")}</button>
+    ${open ? datePickerDropdown(path, value) : ""}
+  </div>`;
 }
 
 function formatDateTextValue(raw) {
@@ -259,6 +266,42 @@ function formatDateTextValue(raw) {
   if (digits.length <= 4) return digits;
   if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
   return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+}
+
+function todayDateParts() {
+  const now = new Date();
+  return { year: now.getFullYear(), month: now.getMonth() + 1 };
+}
+
+function parseDateTextValue(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function datePickerDropdown(path, currentValue) {
+  const parsed = parseDateTextValue(currentValue);
+  const view = ui.datePickerViewMonth || (parsed ? { year: parsed.year, month: parsed.month } : todayDateParts());
+  const { year, month } = view;
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const totalDays = new Date(year, month, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push(`<span class="date-picker-cell empty" aria-hidden="true"></span>`);
+  for (let day = 1; day <= totalDays; day += 1) {
+    const value = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const selected = currentValue === value;
+    cells.push(`<button type="button" class="date-picker-cell${selected ? " selected" : ""}" data-action="pickDate:${esc(path)}:${value}">${day}</button>`);
+  }
+  return `<div class="date-picker-dropdown" data-date-picker-panel="${esc(path)}">
+    <div class="date-picker-header">
+      <button type="button" class="date-picker-nav" aria-label="Previous month" data-action="datePickerNav:-1">&#8249;</button>
+      <strong>${esc(monthLabel)}</strong>
+      <button type="button" class="date-picker-nav" aria-label="Next month" data-action="datePickerNav:1">&#8250;</button>
+    </div>
+    <div class="date-picker-weekdays">${["S", "M", "T", "W", "T", "F", "S"].map((label) => `<span>${label}</span>`).join("")}</div>
+    <div class="date-picker-grid">${cells.join("")}</div>
+  </div>`;
 }
 
 function textarea(path, value, label) {
@@ -3576,6 +3619,33 @@ function action(name) {
     removePlaceTag(field, Number(index));
   }
   if (name === "closeLocationSuggestions") ui.activeLocationField = null;
+  if (name === "closeDatePicker") ui.openDatePicker = null;
+  if (name.startsWith("toggleDatePicker:")) {
+    const path = name.slice("toggleDatePicker:".length);
+    if (ui.openDatePicker === path) {
+      ui.openDatePicker = null;
+    } else {
+      ui.openDatePicker = path;
+      const current = path === "trip.startDate" ? state.trip.startDate : state.trip.endDate;
+      const parsed = parseDateTextValue(current);
+      ui.datePickerViewMonth = parsed ? { year: parsed.year, month: parsed.month } : todayDateParts();
+    }
+  }
+  if (name.startsWith("datePickerNav:")) {
+    const delta = Number(name.slice("datePickerNav:".length));
+    const view = ui.datePickerViewMonth || todayDateParts();
+    let { year, month } = view;
+    month += delta;
+    if (month < 1) { month = 12; year -= 1; }
+    if (month > 12) { month = 1; year += 1; }
+    ui.datePickerViewMonth = { year, month };
+  }
+  if (name.startsWith("pickDate:")) {
+    const [, path, value] = name.split(":");
+    updateField(path, value);
+    ui.openDatePicker = null;
+    ui.datePickerViewMonth = null;
+  }
   if (name.startsWith("retryLocationSearch:")) {
     const field = name.split(":")[1];
     ui.activeLocationField = field;
