@@ -2491,15 +2491,30 @@ function bind() {
     persist("Opened");
   }));
   document.querySelectorAll("[data-field]").forEach((el) => {
+    // Safari renders an empty type="date"/"datetime-local" input showing
+    // today's date -- not grayed-out placeholder text like Chrome/Firefox,
+    // but the field's real displayed content -- and can report that date as
+    // the input's value the moment focus leaves it, with no deliberate pick
+    // by the traveler. Confirmed live: an untouched, freshly-loaded Start
+    // Date field already showed today's date before any interaction at all.
+    // Listening for which browser event carries the phantom value is a
+    // losing game (already tried "input" vs "change" -- didn't hold up), so
+    // instead require actual pointer/keyboard contact with THIS element
+    // before its value is ever trusted. Tab-focusing alone doesn't fire
+    // mousedown/keydown targeted at this element, so it's never marked
+    // interacted, and Safari's phantom commit gets ignored.
+    if (el.type === "date" || el.type === "datetime-local") {
+      const markInteracted = () => { el.dataset.userInteracted = "true"; };
+      el.addEventListener("mousedown", markInteracted);
+      el.addEventListener("keydown", markInteracted);
+      el.addEventListener("change", () => {
+        if (el.dataset.userInteracted !== "true") { render(); return; }
+        updateField(el.dataset.field, el.value);
+      });
+      return;
+    }
     el.addEventListener("change", () => updateField(el.dataset.field, el.value));
-    // Native date/datetime-local pickers (Safari especially) can fire "input"
-    // events just from focusing or navigating an empty field's segments,
-    // reporting the picker's default hint date -- not a value the traveler
-    // actually chose. Confirmed live: focusing an empty Start Date in Safari
-    // wrote today's date into trip.startDate before any date was picked.
-    // "change" only fires on a real committed selection, so these two types
-    // skip the per-keystroke draft listener and rely on "change" alone.
-    if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch" && el.type !== "date" && el.type !== "datetime-local") {
+    if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch") {
       el.addEventListener("input", () => {
         updateFieldDraft(el.dataset.field, el.value);
         el.dataset.dirtyDraft = "true";
