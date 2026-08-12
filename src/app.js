@@ -2492,7 +2492,14 @@ function bind() {
   }));
   document.querySelectorAll("[data-field]").forEach((el) => {
     el.addEventListener("change", () => updateField(el.dataset.field, el.value));
-    if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch") {
+    // Native date/datetime-local pickers (Safari especially) can fire "input"
+    // events just from focusing or navigating an empty field's segments,
+    // reporting the picker's default hint date -- not a value the traveler
+    // actually chose. Confirmed live: focusing an empty Start Date in Safari
+    // wrote today's date into trip.startDate before any date was picked.
+    // "change" only fires on a real committed selection, so these two types
+    // skip the per-keystroke draft listener and rely on "change" alone.
+    if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch" && el.type !== "date" && el.type !== "datetime-local") {
       el.addEventListener("input", () => {
         updateFieldDraft(el.dataset.field, el.value);
         el.dataset.dirtyDraft = "true";
