@@ -1054,6 +1054,12 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .wizard-main, .trip-plan-main { padding: 0 !important; background: #fff !important; }
   .plan-hero, .plan-metric, .plan-payoff-card, .itinerary-day, .timeline-body, .backup-options, .meal-day, .advisory-card { box-shadow: none !important; background: #fff !important; border-color: #bbb !important; color: #111 !important; }
   .plan-hero::after { display: none !important; }
+  .plan-hero { padding: 12px 16px !important; }
+  .plan-hero h1 { font-size: 1.5rem !important; margin: 2px 0 4px !important; line-height: 1.1 !important; }
+  .plan-hero p { font-size: 0.85rem !important; margin: 0 !important; }
+  .plan-hero .eyebrow { font-size: 0.68rem !important; }
+  .plan-summary-strip { gap: 8px !important; }
+  .plan-metric { padding: 8px 10px !important; }
   .plan-summary-strip, .plan-overview-grid, .meal-day-grid { grid-template-columns: 1fr 1fr !important; }
   .plan-payoff-card.wide { grid-column: 1 / -1 !important; }
   .timeline-item, .itinerary-day, .meal-day, .advisory-card, .backup-options article, .route-map-card { break-inside: avoid; page-break-inside: avoid; }
