@@ -503,11 +503,12 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .location-result mark { background: color-mix(in srgb, var(--sand) 72%, transparent); color: inherit; border-radius: 4px; padding: 0 1px; }
 .place-tags-field .location-control input { padding-right: 16px; }
 .date-field-wrap { position: relative; }
-.date-field-wrap input { padding-right: 40px; }
+.date-field-wrap input { padding-right: 40px; cursor: pointer; background: #fff; }
 .date-picker-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--water); cursor: pointer; }
 .date-picker-toggle:hover, .date-picker-toggle[aria-expanded="true"] { background: color-mix(in srgb, var(--sky) 20%, #fff); }
-.date-picker-toggle svg { width: 18px; height: 18px; }
-.date-picker-dropdown { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 264px; padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-section); background: #fff; box-shadow: var(--shadow-dialog); }
+.date-picker-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.date-picker-layer { position: fixed; inset: 0; z-index: 1100; background: transparent; pointer-events: none; }
+.date-picker-dropdown { position: fixed; pointer-events: auto; z-index: 1101; width: 264px; padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-section); background: #fff; box-shadow: var(--shadow-dialog); }
 .date-picker-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: var(--navy); }
 .date-picker-nav { border: 0; background: transparent; color: var(--water); font-size: 1.15rem; line-height: 1; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
 .date-picker-nav:hover { background: color-mix(in srgb, var(--sky) 20%, #fff); }

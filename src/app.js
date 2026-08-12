@@ -252,20 +252,16 @@ function input(path, value, label, type = "text", { min, max } = {}) {
 // event-listener gating stops it. A text field with the same YYYY-MM-DD
 // storage format sidesteps the native widget's blank-state behavior
 // entirely, so it starts (and stays) genuinely empty in every browser.
+// readonly + calendar-only selection also sidesteps the MM/DD-vs-DD/MM
+// ambiguity of a typed date on a site with a worldwide audience -- the
+// displayed value is always the unambiguous "Aug 11, 2026" style, and the
+// only way to set it is picking a real day off the grid.
 function dateTextInput(path, value, label) {
   const open = ui.openDatePicker === path;
   return `<div class="date-field-wrap">
-    <input aria-label="${esc(label)}" placeholder="YYYY-MM-DD" data-field="${esc(path)}" data-date-text="true" inputmode="numeric" type="text" value="${esc(value ?? "")}">
+    <input aria-label="${esc(label)}" placeholder="Select a date" data-field="${esc(path)}" readonly data-action="toggleDatePicker:${esc(path)}" type="text" value="${esc(formatFriendlyDate(value))}">
     <button type="button" class="date-picker-toggle" aria-label="${open ? "Close" : "Open"} calendar for ${esc(label)}" aria-expanded="${open}" data-action="toggleDatePicker:${esc(path)}">${iconSvg("calendar")}</button>
-    ${open ? datePickerDropdown(path, value) : ""}
   </div>`;
-}
-
-function formatDateTextValue(raw) {
-  const digits = String(raw || "").replace(/\D/g, "").slice(0, 8);
-  if (digits.length <= 4) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 
 function todayDateParts() {
@@ -277,6 +273,29 @@ function parseDateTextValue(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
   if (!match) return null;
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function formatFriendlyDate(value) {
+  const parsed = parseDateTextValue(value);
+  if (!parsed) return "";
+  return new Date(parsed.year, parsed.month - 1, parsed.day).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Rendered as a top-level overlay (see datePickerOverlay/render call site),
+// not nested inside the field -- the Trip Basics card it lives in
+// (.step-1-zone) has overflow: hidden for its own decorative clipping, which
+// silently clips any absolutely-positioned descendant regardless of
+// z-index. Confirmed live: the dropdown rendered but was cut off at the
+// card's edge. Positioned with fixed coordinates from
+// positionDatePickerOverlay instead, the same escape hatch already used for
+// the location-suggestions panel.
+function datePickerOverlay() {
+  const path = ui.openDatePicker;
+  if (!path) return "";
+  const currentValue = path === "trip.startDate" ? state.trip.startDate : state.trip.endDate;
+  return `<div class="date-picker-layer" data-action="closeDatePicker">
+    ${datePickerDropdown(path, currentValue)}
+  </div>`;
 }
 
 function datePickerDropdown(path, currentValue) {
@@ -433,6 +452,7 @@ function renderView() {
     </div>
     ${restrictionOverlay()}
     ${locationAutocompleteOverlay()}
+    ${datePickerOverlay()}
     ${experienceOverlay()}
     ${foodSectionOverlay()}
     ${lodgingOverlay()}
@@ -2551,12 +2571,6 @@ function bind() {
     }
     persist("Opened");
   }));
-  document.querySelectorAll('[data-date-text="true"]').forEach((el) => {
-    el.addEventListener("input", () => {
-      const formatted = formatDateTextValue(el.value);
-      if (formatted !== el.value) el.value = formatted;
-    });
-  });
   document.querySelectorAll("[data-field]").forEach((el) => {
     // datetime-local (Arrival/Departure Date and Time) is still a native
     // picker and shares Start/End Date's Safari phantom-value risk (see
@@ -2575,6 +2589,10 @@ function bind() {
       });
       return;
     }
+    // Start/End Date: readonly and calendar-only (see dateTextInput/
+    // pickDate), so its DOM value is the friendly display text, not the
+    // stored ISO date -- never sync it through the generic value listener.
+    if (el.readOnly && (el.dataset.field === "trip.startDate" || el.dataset.field === "trip.endDate")) return;
     el.addEventListener("change", () => updateField(el.dataset.field, el.value));
     if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch") {
       el.addEventListener("input", () => {
@@ -2611,7 +2629,7 @@ function bind() {
     el.addEventListener("keydown", (event) => handleLocationKeydown(event, el.dataset.locationField));
   });
   document.querySelectorAll("[data-action]").forEach((el) => el.addEventListener("click", (event) => {
-    if ((el.matches(".restriction-layer") || el.matches(".location-layer")) && event.target !== el) return;
+    if ((el.matches(".restriction-layer") || el.matches(".location-layer") || el.matches(".date-picker-layer")) && event.target !== el) return;
     if (el.dataset.action === "buildTripPlan" || el.dataset.action === "regeneratePlan") {
       buildTripPlanAction(el.dataset.action);
       return;
@@ -2642,6 +2660,8 @@ function bind() {
     window.addEventListener("scroll", positionRestrictionOverlay, true);
     window.addEventListener("resize", positionLocationOverlay);
     window.addEventListener("scroll", positionLocationOverlay, true);
+    window.addEventListener("resize", positionDatePickerOverlay);
+    window.addEventListener("scroll", positionDatePickerOverlay, true);
     document.addEventListener("pointerdown", closeLocationOnOutsidePointer, true);
     document.addEventListener("pointerdown", closePlanningPrinciplesOnOutsidePointer, true);
     document.addEventListener("pointerdown", closeDatePickerOnOutsidePointer, true);
@@ -2657,6 +2677,7 @@ function bind() {
     requestAnimationFrame(() => document.querySelector(".planning-principles-trigger")?.focus({ preventScroll: true }));
   }
   positionLocationOverlay();
+  positionDatePickerOverlay();
 }
 
 function bindLocationPanelActions() {
@@ -2728,7 +2749,7 @@ function closeLocationOnOutsidePointer(event) {
 
 function closeDatePickerOnOutsidePointer(event) {
   if (!ui.openDatePicker) return;
-  if (event.target?.closest?.(".date-field-wrap")) return;
+  if (event.target?.closest?.(".date-field-wrap") || event.target?.closest?.(".date-picker-dropdown")) return;
   ui.openDatePicker = null;
   ui.datePickerViewMonth = null;
   render();
@@ -3032,6 +3053,24 @@ function positionLocationOverlay() {
   const below = window.innerHeight - rect.bottom - padding;
   const above = rect.top - padding;
   const placeAbove = below < 220 && above > below;
+  panel.style.width = `${width}px`;
+  panel.style.maxHeight = `${maxHeight}px`;
+  panel.style.left = `${Math.min(Math.max(rect.left, padding), window.innerWidth - width - padding)}px`;
+  panel.style.top = `${placeAbove ? Math.max(padding, rect.top - maxHeight - 8) : Math.min(rect.bottom + 8, window.innerHeight - maxHeight - padding)}px`;
+}
+
+function positionDatePickerOverlay() {
+  const panel = document.querySelector("[data-date-picker-panel]");
+  const path = ui.openDatePicker;
+  const input = path ? document.querySelector(`[data-field="${CSS.escape(path)}"]`) : null;
+  if (!panel || !input) return;
+  const rect = input.getBoundingClientRect();
+  const padding = 12;
+  const width = 264;
+  const maxHeight = Math.min(360, window.innerHeight - padding * 2);
+  const below = window.innerHeight - rect.bottom - padding;
+  const above = rect.top - padding;
+  const placeAbove = below < 300 && above > below;
   panel.style.width = `${width}px`;
   panel.style.maxHeight = `${maxHeight}px`;
   panel.style.left = `${Math.min(Math.max(rect.left, padding), window.innerWidth - width - padding)}px`;
