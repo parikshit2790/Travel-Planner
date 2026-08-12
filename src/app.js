@@ -3064,6 +3064,10 @@ function positionDatePickerOverlay() {
   const path = ui.openDatePicker;
   const input = path ? document.querySelector(`[data-field="${CSS.escape(path)}"]`) : null;
   if (!panel || !input) return;
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    panel.removeAttribute("style");
+    return;
+  }
   const rect = input.getBoundingClientRect();
   const padding = 12;
   const width = 264;
