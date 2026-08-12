@@ -796,6 +796,8 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .choice-panel { inset: auto 12px 12px 12px; transform: none; width: auto; max-height: 72vh; }
   .location-layer { background: rgb(16 42 67 / 0.18); display: flex; align-items: flex-end; padding: 12px; pointer-events: none; }
   .location-results-panel { position: relative; inset: auto; width: 100%; max-height: min(74vh, 620px); }
+  .date-picker-layer { background: rgb(16 42 67 / 0.18); display: flex; align-items: flex-end; padding: 12px; pointer-events: none; }
+  .date-picker-dropdown { position: relative; inset: auto; width: 100%; max-height: min(74vh, 620px); overflow: auto; }
   .advisory-panel { grid-template-columns: 28px minmax(0, 1fr); }
   .advisory-panel button { grid-column: 2; justify-self: start; }
   .trip-description-help-row { align-items: stretch; flex-direction: column; }
