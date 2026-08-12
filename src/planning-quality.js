@@ -567,7 +567,19 @@ function hasSignatureCoverageFailure(plan, graph = {}) {
 }
 
 function hasWeakFirstTimeCoverage(plan, graph = {}) {
-  const nodes = destinationDefiningNodes(graph);
+  // A short overnight regional extension (e.g. Key West on a Miami trip)
+  // contributes its own high-scoring "first-time visitor" landmarks to the
+  // shared candidate graph, but the trip only spends a night or two there --
+  // letting those compete for the GLOBAL top-10 ranking below crowds out
+  // the primary destination's own signature coverage and can fail a trip
+  // that's actually well-covered where the traveler spends most of their
+  // time. Confirmed live: Miami + Key West (1 hotel change, 1 night)
+  // failed this check even though Miami itself had strong coverage,
+  // because several Key West nodes ranked in the top 10 and could never
+  // realistically be scheduled beyond 1-2 items on a single-night stay.
+  // Mirrors the same exclusion hasSignatureCoverageFailure already applies
+  // to its own topLocal set, just above.
+  const nodes = destinationDefiningNodes(graph).filter((node) => !/overnight|long-day-trip|not-practical/.test(node.geographicScope || ""));
   if (nodes.length < 4) return false;
   const publicText = publicPlanText(plan);
   const included = nodes.slice(0, 10).filter((node) => publicText.includes(normalizeText(node.canonicalName)));
@@ -614,7 +626,11 @@ function hasWeakFirstTimeCoverage(plan, graph = {}) {
 
 function hasOrdinaryLocalFacilityPromotion(plan, graph = {}) {
   const publicText = publicPlanText(plan);
-  const definingNames = new Set(destinationDefiningNodes(graph).slice(0, 8).map((node) => normalizeText(node.canonicalName)));
+  // Same regional-extension dilution risk as hasWeakFirstTimeCoverage above
+  // -- a short overnight extension's own landmarks can crowd the top-8
+  // "defining" set and make includedDefining artificially hard to satisfy.
+  const definingNodes = destinationDefiningNodes(graph).filter((node) => !/overnight|long-day-trip|not-practical/.test(node.geographicScope || ""));
+  const definingNames = new Set(definingNodes.slice(0, 8).map((node) => normalizeText(node.canonicalName)));
   const includedDefining = [...definingNames].filter((name) => publicText.includes(name)).length;
   const requiredDefining = tripDaysFor(plan) <= 2 ? 1 : 3;
   const ordinaryNodes = (graph.nodes || []).filter((node) => Number(node.ordinaryLocalFacilityPenalty?.score || 0) >= 50 || (node.rejectionReasons || []).includes("ordinary-business"));
