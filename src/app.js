@@ -779,7 +779,7 @@ function timelineItem(item) {
 }
 
 function timelineIcon(type) {
-  return { breakfast: "☀", lunch: "☀", dinner: "☾", activity: "◆", travel: "→", freeTime: "⋯", rest: "◌", evening: "★", note: "i" }[type] || "•";
+  return { breakfast: "☀", lunch: "☀", "coffee-break": "☕", dinner: "☾", activity: "◆", travel: "→", freeTime: "⋯", rest: "◌", evening: "★", note: "i" }[type] || "•";
 }
 
 function planFoodSection() {

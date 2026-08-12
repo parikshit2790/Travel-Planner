@@ -52,7 +52,28 @@ const dayThemes = [
 const mealDefaults = {
   breakfast: "8:00 AM",
   lunch: "12:30 PM",
+  // 6:30 PM sits exactly at the dinner window's floor below -- kept at its
+  // original value since the window's earliest bound moved to match it.
   dinner: "6:30 PM"
+};
+
+// Traveler-facing meal time windows -- a real anchor time should land
+// inside these, with room to spare (a meal shouldn't consume the entire
+// window). Enforced two ways: mealDefaults above anchors each meal at or
+// inside its window for an ordinary day, and buildAdvisories flags any day
+// whose ACTUAL scheduled time falls outside one (see
+// dayMealWindowAdvisories) -- deliberately a warning, not an automatic
+// trim, so the traveler decides whether to cut an earlier stop or push the
+// meal later themselves.
+const MEAL_TIME_WINDOWS = {
+  breakfast: { earliest: 7 * 60 + 30, latest: 9 * 60, label: "7:30-9:00 AM" },
+  lunch: { earliest: 11 * 60 + 30, latest: 13 * 60, label: "11:30 AM-1:00 PM" },
+  // Key matches the "coffee-break" item type string used below (not
+  // camelCase) so titleCase(item.type) displays "Coffee Break" correctly --
+  // titleCase only inserts a space at existing hyphens/underscores, and
+  // camelCase has no word boundary for its regex to find.
+  "coffee-break": { earliest: 16 * 60, latest: 16 * 60 + 30, label: "4:00-4:30 PM" },
+  dinner: { earliest: 18 * 60 + 30, latest: 21 * 60 + 30, label: "6:30-9:30 PM" }
 };
 
 const RAW_PLACE_LABEL_PATTERN = /^(access\s*\d*|entrance\s*\d*|parking\s*\d*|trailhead\s*\d*|gate\s*\d*|pier access|beach access|map point|unnamed road)$/i;
@@ -1730,6 +1751,20 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
       : constraints.lunchMinutes;
     addMeal(items, "lunch", lunchStart, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, lunchRegion, input, constraints, parkRouteDay ? null : mealUsage);
   }
+  // A coffee/snack break only gets its own scheduled block when the day
+  // already has genuine room for it around 4:00-4:30 PM -- per explicit
+  // instruction, this must never trim, delay, or otherwise touch anything
+  // already scheduled. Skip entirely rather than force it in when there
+  // isn't room; a real coffee run is a 5-minute drive-through pickup that
+  // doesn't need its own planned slot.
+  if (!isDepartureDay && !isArrivalDay && !longArrivalDrive && input.pace !== "Packed") {
+    const coffeeWindow = MEAL_TIME_WINDOWS["coffee-break"];
+    const coffeeDuration = 15;
+    const overlapsCoffeeWindow = items.some((item) => item.startTimeMinutes < coffeeWindow.latest && item.endTimeMinutes + buffers > coffeeWindow.earliest);
+    if (!overlapsCoffeeWindow) {
+      items.push(simpleItem("coffee-break", coffeeWindow.earliest, coffeeDuration, "Coffee break", "A short coffee or snack stop -- grab something nearby or via drive-through; no need to plan around it."));
+    }
+  }
   const afterActivities = Math.max(cursor, constraints.dinnerMinutes - (input.pace === "Packed" ? 45 : 90));
   // A long-drive arrival day is already at or past a reasonable dinner hour
   // by the time check-in and the single evening-friendly activity finish;
@@ -2840,6 +2875,27 @@ function buildAdvisories(profile, input, constraints, days, budget) {
   days.forEach((day) => {
     if (day.dailyDriveMinutes > input.maxDrivingMinutes) advisories.push(advisory(`drive-${day.id}`, "caution", "route", `Day ${day.dayNumber} may exceed driving comfort`, `Estimated driving is ${formatDuration(day.dailyDriveMinutes)}.`, "Remove or replace one distant stop."));
     if (!day.backupOptions.length && day.scheduleItems.some((item) => item.weatherDependency === "high")) advisories.push(advisory(`backup-${day.id}`, "caution", "weather", `Day ${day.dayNumber} needs a backup`, "This outdoor-heavy day has limited same-region indoor backups.", "Keep the day flexible if weather is poor."));
+    // A meal's own scheduling logic never enforces an upper bound on how
+    // late a cascading day can push it (see the long-arrival-drive and
+    // transfer-day fixes this session) -- rather than trim content
+    // automatically, surface any meal that lands outside its normal window
+    // as a warning so the traveler can decide whether to cut an earlier
+    // stop or move the meal later themselves.
+    day.scheduleItems.filter((item) => MEAL_TIME_WINDOWS[item.type]).forEach((item) => {
+      const window = MEAL_TIME_WINDOWS[item.type];
+      if (item.startTimeMinutes >= window.earliest && item.startTimeMinutes <= window.latest) return;
+      const mealName = titleCase(item.type);
+      advisories.push(advisory(
+        `meal-window-${item.id}`,
+        "caution",
+        "schedule",
+        `Day ${day.dayNumber} ${mealName.toLowerCase()} is outside the usual window`,
+        `${mealName} is scheduled at ${formatTime(item.startTimeMinutes)}, outside the ${window.label} window.`,
+        "Consider trimming an earlier stop or moving this meal later.",
+        day.id,
+        item.id
+      ));
+    });
   });
   if (input.unknownPreferences.length) advisories.push(advisory("unknown-preferences", "info", "preferences", "Some preferences were retained but not fully interpreted", input.unknownPreferences.join(", "), "Review generated days and replace items as needed."));
   if (budget.totalHigh < budget.totalLow) advisories.push(advisory("budget", "blocking", "budget", "Budget estimate failed validation", "Budget high estimate is lower than low estimate.", "Regenerate or review budget settings."));
