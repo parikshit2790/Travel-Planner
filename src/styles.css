@@ -853,6 +853,8 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .plan-tabs { position: sticky; top: 0; z-index: 8; display: flex; gap: 8px; padding: 10px 0 14px; margin-bottom: 4px; background: linear-gradient(180deg, #f2fbff 0%, rgb(242 251 255 / 0.88) 70%, rgb(242 251 255 / 0) 100%); overflow-x: auto; }
 .plan-tabs button { flex: 0 0 auto; min-height: 44px; border-radius: 999px; padding: 0 18px; }
 .plan-tabs .active { color: white; border-color: var(--accent); background: linear-gradient(135deg, #ff8b1a, #ff5f00); box-shadow: 0 10px 22px rgb(255 98 0 / 0.22); }
+.plan-section-panel { display: none; }
+.plan-section-panel.active { display: block; }
 .plan-section { display: grid; gap: 18px; }
 .plan-section-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
 .plan-section-head h2 { margin: 0 0 4px; font-size: 1.65rem; }
@@ -1045,6 +1047,8 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 @media print {
   @page { margin: 0.55in; }
   body { background: #fff !important; color: #111 !important; }
+  .plan-section-panel { display: block !important; break-before: page; page-break-before: always; }
+  .plan-section-panel:first-child { break-before: auto; page-break-before: auto; }
   .side, .plan-tabs, .plan-hero-actions, .item-actions, .day-actions, .global-footer, .saved-trips-drawer, .restriction-layer, .planning-diagnostics, .toast { display: none !important; }
   .app-shell, .plan-shell { display: block !important; }
   .wizard-main, .trip-plan-main { padding: 0 !important; background: #fff !important; }

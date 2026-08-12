@@ -591,13 +591,17 @@ function planningDiagnosticsPanel() {
   </details>`;
 }
 
+const PLAN_SECTION_RENDERERS = {
+  overview: planOverviewSection,
+  itinerary: planItinerarySection,
+  food: planFoodSection,
+  budget: planBudgetSection,
+  advisories: planAdvisoriesSection,
+  route: planRouteSection
+};
+
 function tripPlanSection() {
-  if (ui.planSection === "itinerary") return planItinerarySection();
-  if (ui.planSection === "food") return planFoodSection();
-  if (ui.planSection === "route") return planRouteSection();
-  if (ui.planSection === "budget") return planBudgetSection();
-  if (ui.planSection === "advisories") return planAdvisoriesSection();
-  return planOverviewSection();
+  return Object.keys(PLAN_SECTION_RENDERERS).map((section) => `<div class="plan-section-panel${ui.planSection === section ? " active" : ""}" data-plan-section="${section}">${PLAN_SECTION_RENDERERS[section]()}</div>`).join("");
 }
 
 function normalizePlanSection(label) {
@@ -808,7 +812,7 @@ function routeMapImageBlock(mapStops) {
   const stopsParam = encodeURIComponent(JSON.stringify(mapStops.map((stop) => ({ label: stop.label, lat: stop.lat, lng: stop.lng }))));
   return `<article class="plan-payoff-card wide route-map-card">
     <h3>Route Map</h3>
-    <img class="route-map-image" src="/api/route-map?stops=${stopsParam}" alt="Map of the route with day-labeled stops" loading="lazy" onerror="this.closest('.route-map-card')?.classList.add('route-map-error')">
+    <img class="route-map-image" src="/api/route-map?stops=${stopsParam}" alt="Map of the route with day-labeled stops" loading="eager" onerror="this.closest('.route-map-card')?.classList.add('route-map-error')">
     <div class="route-map-legend">${mapStops.map((stop, index) => `<span><strong>${index + 1}</strong>${esc(stop.label)} · ${esc(stop.regionName)}</span>`).join("")}</div>
   </article>`;
 }

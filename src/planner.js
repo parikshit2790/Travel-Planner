@@ -6,7 +6,7 @@ import {
   travelerTotal,
   uid
 } from "./domain.js";
-import { createGenericDestinationProfile, getDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
+import { createGenericDestinationProfile, getDestinationProfile, registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
 import { buildDestinationIntelligence, classifyPlaceForPlanning } from "./destination-intelligence.js";
 import {
   buildDestinationOpportunityGraph,
@@ -2648,9 +2648,11 @@ export function regenerateMeals(plan) {
 }
 
 export function regeneratePlanPreservingLocks(plan) {
+  const profile = resolvePlanProfile(plan);
+  registerGeneratedDestinationProfile(profile);
   const input = { ...plan.preferencesSnapshot, variationSeed: (plan.generationMetadata.variationSeed || 0) + 7 };
   const tripLike = denormalizedTrip(input);
-  const next = generateTripPlan(tripLike, { variationSeed: input.variationSeed });
+  const next = generateTripPlan(tripLike, { variationSeed: input.variationSeed, destinationProfileId: profile.id });
   if (next.status !== "ready") return plan;
   const draft = next.plan;
   const lockedDaySnapshots = new Map();

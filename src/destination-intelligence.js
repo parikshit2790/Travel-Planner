@@ -390,7 +390,7 @@ export function classifyPlaceForPlanning(place, profile = {}, input = {}, feasib
     || categories.has("food")
     || isFoodHall;
   const isRestaurant = specificRestaurantSignal
-    && !areaOrDistrictOnly
+    && (categories.has("restaurant") || !areaOrDistrictOnly)
     && !eveningOnlyFoodArea
     && !isEntertainmentCenter
     && !isPier
