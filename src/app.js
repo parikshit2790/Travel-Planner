@@ -2644,6 +2644,7 @@ function bind() {
     window.addEventListener("scroll", positionLocationOverlay, true);
     document.addEventListener("pointerdown", closeLocationOnOutsidePointer, true);
     document.addEventListener("pointerdown", closePlanningPrinciplesOnOutsidePointer, true);
+    document.addEventListener("pointerdown", closeDatePickerOnOutsidePointer, true);
     globalListenersBound = true;
   }
   if (ui.focusRestrictionTriggerId) {
@@ -2723,6 +2724,14 @@ function closeLocationOnOutsidePointer(event) {
   if (target?.closest?.(".location-results-panel") || target?.closest?.(".location-field")) return;
   ui.activeLocationField = null;
   refreshLocationPanel();
+}
+
+function closeDatePickerOnOutsidePointer(event) {
+  if (!ui.openDatePicker) return;
+  if (event.target?.closest?.(".date-field-wrap")) return;
+  ui.openDatePicker = null;
+  ui.datePickerViewMonth = null;
+  render();
 }
 
 function openLocationSuggestions(field) {
