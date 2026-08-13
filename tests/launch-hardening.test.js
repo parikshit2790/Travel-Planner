@@ -25,7 +25,7 @@ assert.ok(robots.includes("Sitemap: https://www.routemosaic.com/sitemap.xml"));
 assert.ok(sitemap.includes("https://www.routemosaic.com/privacy"));
 assert.ok(vercel.includes("\"destination\": \"/index.html\""));
 assert.ok(vercel.includes("api/.*"));
-assert.ok(sw.includes("routemosaic-public-v53"));
+assert.ok(sw.includes("routemosaic-public-v54"));
 assert.ok(sw.includes("/src/planner.js"));
 assert.ok(sw.includes("event.request.mode === \"navigate\""));
 assert.ok(sw.includes("url.pathname.startsWith(\"/src/\")"));
