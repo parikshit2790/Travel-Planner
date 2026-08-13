@@ -7,7 +7,7 @@ import {
   uid
 } from "./domain.js";
 import { createGenericDestinationProfile, getDestinationProfile, registerGeneratedDestinationProfile, resolveDestinationProfile } from "./destination-data.js";
-import { buildDestinationIntelligence, classifyPlaceForPlanning } from "./destination-intelligence.js?v=54";
+import { buildDestinationIntelligence, classifyPlaceForPlanning } from "./destination-intelligence.js";
 import {
   buildDestinationOpportunityGraph,
   buildDynamicResearchPlan,
@@ -18,7 +18,7 @@ import {
   evaluateDestinationOpportunityCoverage,
   isDisclosedStarterFallbackPlan,
   summarizeOpportunityGraph
-} from "./planning-quality.js?v=54";
+} from "./planning-quality.js";
 
 export const PLAN_VERSION = "routemosaic-local-planner-v1";
 

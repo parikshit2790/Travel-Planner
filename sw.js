@@ -1,5 +1,5 @@
 const CACHE = "routemosaic-public-v54";
-const ASSETS = ["/", "/index.html", "/src/app.js?v=54", "/src/domain.js", "/src/seed.js?v=54", "/src/api-client.js?v=54", "/src/location-provider.js?v=54", "/src/destination-data.js", "/src/destination-intelligence.js?v=54", "/src/planning-quality.js?v=54", "/src/planner.js?v=54", "/src/route-architecture.js?v=54", "/src/styles.css?v=54", "/manifest.webmanifest", "/robots.txt", "/sitemap.xml", "/public/favicon.svg", "/public/favicon.ico", "/public/favicon-16x16.png", "/public/favicon-32x32.png", "/public/apple-touch-icon.png", "/public/icon-192.png", "/public/icon-512.png"];
+const ASSETS = ["/", "/index.html", "/src/app.js?v=54", "/src/domain.js", "/src/seed.js?v=54", "/src/api-client.js?v=54", "/src/location-provider.js?v=54", "/src/destination-data.js", "/src/destination-intelligence.js", "/src/planning-quality.js", "/src/planner.js?v=54", "/src/route-architecture.js?v=54", "/src/styles.css?v=54", "/manifest.webmanifest", "/robots.txt", "/sitemap.xml", "/public/favicon.svg", "/public/favicon.ico", "/public/favicon-16x16.png", "/public/favicon-32x32.png", "/public/apple-touch-icon.png", "/public/icon-192.png", "/public/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));

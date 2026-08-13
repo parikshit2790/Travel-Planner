@@ -1,4 +1,4 @@
-import { classifyPlaceForPlanning, firstTimeVisitorValueFor } from "./destination-intelligence.js?v=54";
+import { classifyPlaceForPlanning, firstTimeVisitorValueFor } from "./destination-intelligence.js";
 
 export const PLANNING_STAGE_NAMES = [
   "destination-understanding",
