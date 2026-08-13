@@ -1,5 +1,5 @@
-import { createSampleLosAngelesTrip, initialState } from "./seed.js";
-import { routeMosaicApi } from "./api-client.js";
+import { createSampleLosAngelesTrip, initialState } from "./seed.js?v=54";
+import { routeMosaicApi } from "./api-client.js?v=54";
 import {
   SAVED_TRIPS_KEY,
   STORAGE_KEY,
@@ -35,7 +35,7 @@ import {
   uid,
   validateBasics
 } from "./domain.js";
-import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js";
+import { createLocationSearchProvider, LOCATION_MIN_QUERY_LENGTH, LOCATION_SEARCH_DEBOUNCE_MS } from "./location-provider.js?v=54";
 import {
   addCustomStop,
   compatibleAlternatives,
@@ -48,7 +48,7 @@ import {
   toggleDayLock,
   toggleItemLock,
   toggleItemMustDo
-} from "./planner.js";
+} from "./planner.js?v=54";
 import { registerGeneratedDestinationProfile } from "./destination-data.js";
 import {
   approvedRouteStillValid,
@@ -58,7 +58,7 @@ import {
   resetRouteApproval,
   routeRecommendationRequired,
   tripStructureOptions
-} from "./route-architecture.js";
+} from "./route-architecture.js?v=54";
 
 const TRIP_DESCRIPTION_PLACEHOLDER = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
 const TRIP_DESCRIPTION_SAMPLE = "We are visiting Southern California for five days. We want famous LA highlights, scenic coastal views, vegetarian-friendly food, and relaxed evenings. We are open to adding San Diego, Santa Barbara, or another nearby destination if it improves the trip without excessive driving or hotel changes. We will fly in, rent a car, and prefer no more than three hours of driving per day.";
