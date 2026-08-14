@@ -1627,8 +1627,21 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     // titled "Pre-departure breakfast" and described as coming "before the
     // arrival travel block." Once the traveler has already landed, this is
     // just their first breakfast in town, not a pre-departure meal.
-    const breakfastAfterArrival = travelContext.transportMode === "fly" && breakfastStart >= travelContext.arrivalMinutes;
-    addMeal(items, "breakfast", breakfastStart, 45, breakfastAfterArrival ? "Arrival-morning breakfast" : "Pre-departure breakfast", {
+    // Comparing only against the arrival CLOCK TIME (the original fix above)
+    // missed a more common case: a long flyMinutes estimate can push the
+    // travel block's DEPARTURE well before dawn (e.g. 4:00 AM) while
+    // breakfast stays pinned to its normal ~8 AM slot -- squarely inside the
+    // block, not after it. Confirmed live: that left a "Pre-departure
+    // breakfast" scheduled (by the later overlap-avoidance pass) to display
+    // after the travel block had already ended, because the traveler's
+    // normal breakfast time fell after they'd already left for the airport.
+    // Compare against the block's DEPARTURE time instead, and anchor the
+    // meal's actual slot to just after arrival when it can't fit before
+    // departure, instead of leaving it to land wherever the generic
+    // overlap-avoidance cursor happens to push it.
+    const breakfastAfterArrival = travelContext.transportMode === "fly" && breakfastStart + 45 > travelContext.departureMinutes;
+    const breakfastActualStart = breakfastAfterArrival ? Math.max(breakfastStart, travelContext.arrivalMinutes + 30) : breakfastStart;
+    addMeal(items, "breakfast", breakfastActualStart, 45, breakfastAfterArrival ? "Arrival-morning breakfast" : "Pre-departure breakfast", {
       primary: breakfastAfterArrival ? "Breakfast after arrival, near the hotel or first stop" : "Breakfast before leaving or on the first route stop",
       secondary: "Simple cafe or hotel breakfast",
       text: breakfastAfterArrival
@@ -2298,7 +2311,14 @@ function arrivalTravelNote(context) {
   if (context.estimateType === "provider-route-estimate") return "Provider route estimate with a conservative arrival buffer; verify live traffic before departure.";
   if (context.estimateType === "average-estimate") return `We couldn't verify live traffic data for this drive; assuming an average driving time of ${formatDuration(context.originDriveMinutes)}. Verify actual conditions before departure.`;
   if (context.estimateType === "traveler-provided-time") return "Using the arrival time you entered; verify this against your actual booking.";
-  if (context.estimateType === "assumed-default-time") return "We don't have your exact flight arrival time, so we're assuming an 8:00 AM arrival -- update this once you've booked your flight.";
+  // The anchor itself (context.arrivalMinutes) can slip later than the
+  // literal 8:00 AM default for a long-haul flight -- see the "very
+  // long-haul flight" comment in tripTravelContext. Format the actual
+  // anchor here instead of hardcoding "8:00 AM": confirmed live, a
+  // long-distance trip showed a travel block ending well past 8:00 AM
+  // while this note still claimed an 8:00 AM assumption, contradicting the
+  // schedule the traveler could see right next to it.
+  if (context.estimateType === "assumed-default-time") return `We don't have your exact flight arrival time, so we're assuming an arrival around ${formatTime(context.arrivalMinutes)} -- update this once you've booked your flight.`;
   if (context.estimateType === "coordinate-arrival-estimate") return "Estimated from straight-line distance between origin and destination; verify actual flight or drive times before booking.";
   return "No distance data available; verify actual flight or drive times before booking.";
 }
