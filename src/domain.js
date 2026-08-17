@@ -200,10 +200,8 @@ export function createTripDraft() {
       maxHotelChanges: "1",
       maxTransferDriveTime: "3 hours",
       maxDayTripDriveTime: "2 hours",
-      arrivalDateTime: "",
-      departureDateTime: "",
-      arrivalPoint: "",
-      departurePoint: "",
+      arrivalTime: "08:00",
+      departureTime: "20:00",
       rentalCar: "Unknown",
       knownHotelOrNeighborhood: "",
       existingReservations: "",
@@ -362,10 +360,21 @@ export function migrateTripState(trip) {
   trip.routePreferences.maxHotelChanges ||= "1";
   trip.routePreferences.maxTransferDriveTime ||= "3 hours";
   trip.routePreferences.maxDayTripDriveTime ||= "2 hours";
-  trip.routePreferences.arrivalDateTime ||= "";
-  trip.routePreferences.departureDateTime ||= "";
-  trip.routePreferences.arrivalPoint ||= "";
-  trip.routePreferences.departurePoint ||= "";
+  // Arrival/Departure Date and Time (separate datetime-local fields) were
+  // replaced by a time paired directly with Start/End Date. Carry forward
+  // just the time-of-day portion of any real value a traveler already
+  // entered, rather than silently discarding it.
+  if (trip.routePreferences.arrivalDateTime || trip.routePreferences.departureDateTime) {
+    const timeOfDay = (value) => /T(\d{2}:\d{2})/.exec(String(value || ""))?.[1];
+    trip.routePreferences.arrivalTime ||= timeOfDay(trip.routePreferences.arrivalDateTime) || "08:00";
+    trip.routePreferences.departureTime ||= timeOfDay(trip.routePreferences.departureDateTime) || "20:00";
+    delete trip.routePreferences.arrivalDateTime;
+    delete trip.routePreferences.departureDateTime;
+  }
+  trip.routePreferences.arrivalTime ||= "08:00";
+  trip.routePreferences.departureTime ||= "20:00";
+  delete trip.routePreferences.arrivalPoint;
+  delete trip.routePreferences.departurePoint;
   trip.routePreferences.rentalCar ||= "Unknown";
   trip.routePreferences.knownHotelOrNeighborhood ||= "";
   trip.routePreferences.existingReservations ||= "";
