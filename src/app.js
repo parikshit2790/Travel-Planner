@@ -1077,7 +1077,11 @@ function PlanningPrinciplesFooter() {
 }
 
 function metric(label, value, sub) {
-  const action = label === "Issues" ? ` data-action="toggleWarnings" role="button" tabindex="0"` : label === "Preferences" ? ` data-action="togglePreferences" role="button" tabindex="0"` : "";
+  const action = label === "Issues" ? ` data-action="toggleWarnings" role="button" tabindex="0"`
+    : label === "Preferences" ? ` data-action="togglePreferences" role="button" tabindex="0"`
+    : label === "Travelers" ? ` data-step="2" role="button" tabindex="0"`
+    : label === "Dates" ? ` data-step="1" role="button" tabindex="0"`
+    : "";
   return `<article class="metric metric-${label.toLowerCase()} ${action ? "clickable" : ""}"${action}><span class="metric-icon" aria-hidden="true">${summaryIcon(label)}</span><div><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(sub)}</span></div></article>`;
 }
 
@@ -1287,10 +1291,9 @@ function basicsStep() {
       <div class="form-grid basics-grid">
         ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
         ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
-        ${fieldShell("Number of Days", input("trip.days", trip.days, "Number of Days", "number", { min: 1, max: 60 }), "Inclusive trip length.")}
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
         ${fieldShell("Start Date", dateTextInput("trip.startDate", trip.startDate, "Start Date"), "First travel day.")}
-        ${fieldShell("End Date", dateTextInput("trip.endDate", trip.endDate, "End Date"), "Calculated from start date and trip length.")}
+        ${fieldShell("End Date", dateTextInput("trip.endDate", trip.endDate, "End Date"), "Last travel day; trip length is calculated from these two dates.")}
       </div>
       ${destinationRegionsField(trip)}
     </section>
