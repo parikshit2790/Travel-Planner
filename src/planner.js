@@ -116,6 +116,7 @@ export function normalizePlanningInput(trip, variationSeed = 0) {
     routeQualityRequired: Boolean(trip.routeQualityRequired),
     preferences: structuredClone(trip.preferences || []),
     travelersDetail: structuredClone(trip.travelers || []),
+    specialNeeds: structuredClone(trip.specialNeeds || []),
     mustHavePlaces: splitList(trip.mustHavePlaces),
     avoidPlaces: splitList(trip.avoidPlaces),
     routePreferences: structuredClone(trip.routePreferences || {}),
@@ -463,7 +464,11 @@ function summarizeDestinationIntelligence(intelligence) {
 }
 
 export function buildTravelerConstraintProfile(input) {
-  const restrictionText = input.travelersDetail.flatMap((traveler) => traveler.restrictions || []).join(" ").toLowerCase();
+  // Special Needs (a group-level field) replaced the per-traveler
+  // restrictions table as the primary source; travelersDetail's restrictions
+  // are folded in too as defense-in-depth for any pre-migration trip data
+  // that still carries them.
+  const restrictionText = [...input.travelersDetail.flatMap((traveler) => traveler.restrictions || []), ...(input.specialNeeds || [])].join(" ").toLowerCase();
   const foodText = [...(input.food.diet || []), ...(input.food.restrictions || []), restrictionText].join(" ").toLowerCase();
   const noAlcohol = input.alcohol.primary === "No Alcohol" || (input.alcohol.preferences || []).some((item) => /no alcohol|hide alcohol/i.test(item));
   const minimalWalking = /minimal|wheelchair|stroller|mobility/.test(`${input.walkingLimit} ${restrictionText}`.toLowerCase());
@@ -4383,8 +4388,14 @@ function accessibilityNote(place, constraints) {
 
 function buildDietarySummary(input, foodText) {
   const selected = [...(input.food.diet || []), ...(input.food.restrictions || [])].filter(Boolean);
-  const travelerRestrictions = input.travelersDetail.flatMap((traveler, index) => (traveler.restrictions || []).filter((restriction) => /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood|allergy/i.test(restriction)).map((restriction) => `${traveler.name || `Traveler ${index + 1}`}: ${restriction}`));
-  const summary = [...selected, ...travelerRestrictions];
+  const dietaryPattern = /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood|allergy/i;
+  // Special Needs (group-level) is the primary source going forward;
+  // travelersDetail is folded in too for any pre-migration trip data. Dedupe
+  // since migration copies travelersDetail restrictions into specialNeeds,
+  // so a migrated trip would otherwise list the same restriction twice.
+  const specialNeedsDietary = (input.specialNeeds || []).filter((need) => dietaryPattern.test(need));
+  const travelerRestrictions = input.travelersDetail.flatMap((traveler) => (traveler.restrictions || []).filter((restriction) => dietaryPattern.test(restriction)));
+  const summary = [...new Set([...selected, ...specialNeedsDietary, ...travelerRestrictions])];
   if (!summary.length) return "No mandatory dietary restriction was entered; recommendations stay flexible.";
   return `${summary.join(", ")} applied. Confirm ingredients, preparation, and cross-contact directly with restaurants.`;
 }

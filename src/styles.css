@@ -568,6 +568,9 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .travelers-panel { padding-bottom: 0; }
 .travelers-composition-grid { grid-template-columns: 1.35fr repeat(4, minmax(120px, 0.75fr)); align-items: end; margin-bottom: 18px; }
 .travelers-composition-grid label { color: #31496b; font-weight: 750; }
+.special-needs-cell { grid-column: 1 / -1; display: grid; gap: 6px; }
+.compact-chip-grid { gap: 6px; }
+.compact-chip { padding: 5px 9px; font-weight: 600; font-size: 0.85rem; }
 .special-considerations { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 12px; }
 .consideration-pill { min-height: 38px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-soft); border-radius: 8px; background: #fff; padding: 8px 12px; color: #183a6a; font-weight: 760; box-shadow: 0 6px 16px rgb(16 42 67 / 0.045); }
 .consideration-pill span { width: 20px; height: 20px; display: grid; place-items: center; color: #0b72e7; }

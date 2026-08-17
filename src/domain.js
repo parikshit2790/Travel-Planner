@@ -229,6 +229,8 @@ export function createTripDraft() {
     travelers: [
       { id: uid("traveler"), name: "", ageGroup: "Adult", notes: "", restrictions: [], otherRestrictionText: "" }
     ],
+    specialNeeds: [],
+    specialNeedsOtherText: "",
     preferences: [],
     originalText: "",
     interpretedSuggestions: [],
@@ -423,13 +425,25 @@ export function migrateTripState(trip) {
   trip.food.mealStyle ||= [];
   trip.alcohol.preferences ||= [];
   trip.travelers ||= [];
+  trip.specialNeeds ||= [];
+  trip.specialNeedsOtherText ||= "";
 
+  // Special Needs replaced the per-traveler restrictions table with one
+  // group-level field. Fold forward any restrictions a traveler already
+  // entered per-person so they stay visible/editable instead of silently
+  // becoming invisible once the per-traveler UI is gone.
   for (const traveler of trip.travelers) {
     traveler.restrictions ||= [];
     traveler.notes ||= "";
     traveler.otherRestrictionText ||= "";
     if (/^Traveler \d+$/i.test(String(traveler.name || ""))) traveler.name = "";
     delete traveler.gender;
+    for (const restriction of traveler.restrictions) {
+      if (!trip.specialNeeds.includes(restriction)) trip.specialNeeds.push(restriction);
+    }
+    if (traveler.otherRestrictionText && !trip.specialNeedsOtherText) {
+      trip.specialNeedsOtherText = traveler.otherRestrictionText;
+    }
   }
 
   const foodCategories = new Set(["diet", "restrictions", "alcohol"]);
@@ -705,12 +719,14 @@ export function travelerWarnings(trip) {
 export function foodAndRestrictionWarnings(trip) {
   const warnings = [];
   const groupRestrictions = new Set([...(trip.food?.diet || []), ...(trip.food?.restrictions || [])]);
-  for (const traveler of trip.travelers || []) {
-    for (const restriction of traveler.restrictions || []) {
-      if (["Food allergy", "Gluten intolerance", "Lactose intolerance", "Mandatory vegetarian restriction", "Mandatory vegan restriction", "Halal requirement", "Kosher requirement", "Jain food requirement", "Avoid beef", "Avoid pork"].includes(restriction)) {
-        const compatible = restriction.includes("vegetarian") ? groupRestrictions.has("Vegetarian") : restriction.includes("vegan") ? groupRestrictions.has("Vegan") : restriction.includes("Halal") ? groupRestrictions.has("Halal") : restriction.includes("Kosher") ? groupRestrictions.has("Kosher") : restriction.includes("Jain") ? groupRestrictions.has("Jain") : restriction.includes("beef") ? groupRestrictions.has("Avoid beef") : restriction.includes("pork") ? groupRestrictions.has("Avoid pork") : false;
-        if (!compatible) warnings.push(`${traveler.name || "Traveler"} has ${restriction}; restaurant planning must satisfy this even if it is not a group-wide food preference.`);
-      }
+  // Special Needs (group-level) is the primary source; per-traveler
+  // restrictions are folded in too for pre-migration data. Deduped since
+  // migration copies traveler restrictions into specialNeeds already.
+  const restrictions = new Set([...(trip.specialNeeds || []), ...(trip.travelers || []).flatMap((traveler) => traveler.restrictions || [])]);
+  for (const restriction of restrictions) {
+    if (["Food allergy", "Gluten intolerance", "Lactose intolerance", "Mandatory vegetarian restriction", "Mandatory vegan restriction", "Halal requirement", "Kosher requirement", "Jain food requirement", "Avoid beef", "Avoid pork"].includes(restriction)) {
+      const compatible = restriction.includes("vegetarian") ? groupRestrictions.has("Vegetarian") : restriction.includes("vegan") ? groupRestrictions.has("Vegan") : restriction.includes("Halal") ? groupRestrictions.has("Halal") : restriction.includes("Kosher") ? groupRestrictions.has("Kosher") : restriction.includes("Jain") ? groupRestrictions.has("Jain") : restriction.includes("beef") ? groupRestrictions.has("Avoid beef") : restriction.includes("pork") ? groupRestrictions.has("Avoid pork") : false;
+      if (!compatible) warnings.push(`${restriction} was noted as a special need; restaurant planning must satisfy this even if it is not a group-wide food preference.`);
     }
   }
   if ((trip.alcohol?.preferences || []).includes("No alcohol") && (trip.alcohol?.preferences || []).some((value) => ["Bars", "Breweries", "Wineries", "Distilleries", "Party-focused nightlife"].includes(value))) {
