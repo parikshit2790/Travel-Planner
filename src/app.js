@@ -70,9 +70,6 @@ const locationTimers = {};
 let ui = {
   openDatePicker: null,
   datePickerViewMonth: null,
-  openRestrictionTravelerId: null,
-  restrictionSearch: "",
-  focusRestrictionTriggerId: null,
   showWarnings: false,
   showPreferences: false,
   interpretationError: "",
@@ -112,7 +109,8 @@ let ui = {
   // including fields inside the panel itself) rebuilds the <details> element
   // from scratch without an open attribute and it snaps shut.
   routeDetailsOpen: null,
-  comfortDetailsOpen: null
+  comfortDetailsOpen: null,
+  budgetDetailsOpen: null
 };
 
 let globalListenersBound = false;
@@ -128,28 +126,22 @@ function showFriendlyRuntimeError() {
 
 const steps = [
   "Trip Basics",
-  "Travelers",
   "Trip Style",
   "Food and Evenings",
-  "Comfort and Budget",
   "Review"
 ];
 
 const stepSubtitles = [
   "Where, when, and who",
-  "Who's coming",
   "Your travel vibe",
   "Taste and unwind",
-  "Travel your way",
   "Finalize and go"
 ];
 
 const stepHeadings = [
   ["Where should your next trip take you?", "Add the essential details. RouteMosaic will use them to shape a realistic itinerary."],
-  ["Who is going on this trip?", "Add the group composition and traveler-specific needs."],
-    ["What kind of experience do you want?", "Choose style scales and only the experiences that matter."],
+  ["What kind of experience do you want?", "Choose style scales and only the experiences that matter."],
   ["How do you want to eat and spend your evenings?", "Set group-wide dining, dietary, alcohol, and evening preferences."],
-  ["Set your comfort level and budget.", "Help us fine-tune your trip to match your style, comfort, and budget."],
   ["Review your plan before we build the trip.", "Check your selections and confirm that everything looks good."]
 ];
 
@@ -434,7 +426,7 @@ function renderView() {
     return;
   }
   const trip = state.trip;
-  document.title = state.activeStep === 6 ? "Review Your Trip | RouteMosaic" : "Plan a Trip | RouteMosaic";
+  document.title = state.activeStep === 4 ? "Review Your Trip | RouteMosaic" : "Plan a Trip | RouteMosaic";
   const travelerCount = travelerTotal(trip);
   const issueCount = visibleReviewIssues().length;
   const [heading, supportingText] = stepHeadings[state.activeStep - 1];
@@ -463,7 +455,6 @@ function renderView() {
         ${stepView()}
       </main>
     </div>
-    ${restrictionOverlay()}
     ${locationAutocompleteOverlay()}
     ${datePickerOverlay()}
     ${experienceOverlay()}
@@ -472,7 +463,6 @@ function renderView() {
     ${savedTripsDrawer()}
     ${globalFooter()}`;
   bind();
-  positionRestrictionOverlay();
 }
 
 async function refreshProviderStatus({ rerender = true } = {}) {
@@ -1033,10 +1023,8 @@ function moneyRangeDisplay(low, high) {
 function PageHeaderIllustration(stepNumber) {
   return [
     TripBasicsHeaderGraphic,
-    TravelersHeaderGraphic,
     TripStyleHeaderGraphic,
     FoodEveningsHeaderGraphic,
-    ComfortBudgetHeaderGraphic,
     ReviewHeaderGraphic
   ][stepNumber - 1]?.() || "";
 }
@@ -1118,7 +1106,7 @@ function PlanningPrinciplesFooter() {
 function metric(label, value, sub) {
   const action = label === "Issues" ? ` data-action="toggleWarnings" role="button" tabindex="0"`
     : label === "Preferences" ? ` data-action="togglePreferences" role="button" tabindex="0"`
-    : label === "Travelers" ? ` data-step="2" role="button" tabindex="0"`
+    : label === "Travelers" ? ` data-step="1" role="button" tabindex="0"`
     : label === "Dates" ? ` data-step="1" role="button" tabindex="0"`
     : "";
   return `<article class="metric metric-${label.toLowerCase()} ${action ? "clickable" : ""}"${action}><span class="metric-icon" aria-hidden="true">${summaryIcon(label)}</span><div><small>${esc(label)}</small><strong>${esc(value)}</strong><span>${esc(sub)}</span></div></article>`;
@@ -1307,11 +1295,9 @@ function heroDescription(trip) {
 
 function stepView() {
   if (state.activeStep === 1) return basicsStep();
-  if (state.activeStep === 2) return travelersStep();
-  if (state.activeStep === 3) return styleStep();
-  if (state.activeStep === 4) return foodStep();
-  if (state.activeStep === 5) return comfortStep();
-  if (state.activeStep === 6 && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) return routeRecommendationStep();
+  if (state.activeStep === 2) return styleStep();
+  if (state.activeStep === 3) return foodStep();
+  if (state.activeStep === 4 && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) return routeRecommendationStep();
   return reviewStep();
 }
 
@@ -1336,6 +1322,7 @@ function basicsStep() {
       </div>
       ${destinationRegionsField(trip)}
     </section>
+    ${whosTravelingSection(trip)}
     ${tripStructureSection(trip)}
     ${routeSummary(trip)}
     ${Number(trip.days) ? `<p class="derived-summary basics-derived-summary">☀ ${esc(tripDateSummary(trip))} · ${calculateTripNights(Number(trip.days))} night${calculateTripNights(Number(trip.days)) === 1 ? "" : "s"}</p>` : ""}
@@ -1346,9 +1333,27 @@ function basicsStep() {
       ${ui.interpretationError ? `<div class="callout bad-callout">${esc(ui.interpretationError)}</div>` : ""}
     </section>
     ${tripAdvisoryPanel(issues)}
-    <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Travelers"}">Continue</button></div>
+    <div class="wizard-footer">${button("Save and Exit", "saveExit")}<button class="primary" data-action="continueBasics" title="${blocking ? "Resolve blocking Trip Basics issues before continuing." : "Continue to Trip Style"}">Continue</button></div>
   </div>
   ${quickInterpretTable()}`;
+}
+
+function whosTravelingSection(trip) {
+  const total = travelerTotal(trip);
+  const warnings = travelerWarnings(trip);
+  const childAges = childAgeValues(trip);
+  return `<section class="trip-essentials-section step-1-zone" aria-label="Who's Traveling">
+    <div class="zone-head"><span aria-hidden="true">${iconSvg("person")}</span><div><p class="eyebrow">Who's Traveling</p><h2>Group and special needs.</h2></div>${badge(`${total} traveler${total === 1 ? "" : "s"}`)}</div>
+    ${warnings.length ? `<div class="warning-list"><strong>${warnings.length} traveler issue${warnings.length === 1 ? "" : "s"} require review</strong>${warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
+    <div class="form-grid travelers-composition-grid">
+      <label>Group Type ${select("trip.groupType", trip.groupType, groupTypes, "Group Type")}</label>
+      <label>Adults (18+) ${input("trip.adults", trip.adults, "Adults", "number")}</label>
+      <label>Children (0-17) ${input("trip.children", trip.children, "Children", "number")}</label>
+      ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`)}</label>`).join("") : ""}
+      <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number")}</label>
+      <label class="special-needs-cell">Special Needs${specialNeedsField(trip)}</label>
+    </div>
+  </section>`;
 }
 
 function tripStructureSection(trip) {
@@ -1395,7 +1400,25 @@ function tripStructureSection(trip) {
         ${fieldShell("Offline-map Preference", select("trip.routePreferences.offlineMaps", prefs.offlineMaps, ["Yes", "No", "Only remote areas"], "Offline-map Preference"), "Adds prep reminders for route days.")}
       </div>
     </details>
+    ${budgetAccommodationDetails(trip)}
   </section>`;
+}
+
+function budgetAccommodationDetails(trip) {
+  const budgetDetailsOpen = ui.budgetDetailsOpen ?? false;
+  const budgetIssues = reviewIssues().filter((issue) => issue.owningStep === 1 && issue.field?.startsWith("trip.budget"));
+  return `<details class="progressive-fields budget-accommodation-fields" data-details="budgetDetailsOpen" ${budgetDetailsOpen ? "open" : ""}>
+    <summary><span><i aria-hidden="true">${iconSvg("bed")}</i>Budget and accommodation</span>${preferenceChips([`${trip.budget.style || "Moderate"} budget`, `${trip.lodging.changeHotels || "Minimize hotel changes"}`])}</summary>
+    <div class="form-grid route-detail-grid">
+      ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
+      ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.strictness === "Strict" || trip.budget.style === "Custom amount" ? "Required for strict or custom budgets." : "Optional; an exact total improves itinerary accuracy.")}
+      ${fieldShell("Budget Strictness", select("trip.budget.strictness", trip.budget.strictness, ["Strict", "Flexible"], "Budget Strictness"), "Strict enforces the total; flexible allows some variance.")}
+      ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
+      ${fieldShell("Lodging Flexibility", select("trip.lodging.changeHotels", trip.lodging.changeHotels, ["Stay in one place", "Minimize hotel changes", "Open to moving"], "Lodging Flexibility"), "Shapes packing and checkout tips. The hotel-change limit used to build route options is set above, in Route-shaping details.")}
+      ${fieldShell("Accommodation Preferences", `${esc(chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel", "Free parking", "Free breakfast"]))} <button class="small" data-action="openLodging">Edit</button>`, "Room type, amenities, and other lodging preferences.")}
+    </div>
+    ${budgetIssues.length ? stepIssueTable(budgetIssues) : ""}
+  </details>`;
 }
 
 function tripStructureIcon(value) {
@@ -1611,88 +1634,6 @@ function routeVerificationSummary(trip) {
   return "Locations need verification";
 }
 
-function travelersStep() {
-  const trip = state.trip;
-  const isSolo = trip.groupType === "Solo trip";
-  const total = travelerTotal(trip);
-  const warnings = travelerWarnings(trip);
-  const childAges = childAgeValues(trip);
-  return `<section class="panel travelers-panel">
-    <div class="panel-head compact-head"><div><p class="eyebrow">Step 2</p><h2>Travelers</h2></div>${badge(`${total} traveler${total === 1 ? "" : "s"}`)}</div>
-    ${warnings.length ? `<div class="warning-list"><strong>${warnings.length} traveler issue${warnings.length === 1 ? "" : "s"} require review</strong>${warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
-    <div class="form-grid travelers-composition-grid">
-      <label>Group Type ${select("trip.groupType", trip.groupType, groupTypes, "Group Type")}</label>
-      <label>Adults (18+) ${input("trip.adults", trip.adults, "Adults", "number")}</label>
-      <label>Children (0-17) ${input("trip.children", trip.children, "Children", "number")}</label>
-      ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`)}</label>`).join("") : ""}
-      <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number")}</label>
-      <label>Shared Preferences ${select("trip.samePreferences", trip.samePreferences ? "Yes" : "No", ["Yes", "No"], "Shared Preferences")}</label>
-      <label class="special-needs-cell">Special Needs${specialNeedsField(trip)}</label>
-    </div>
-    <div class="special-considerations" aria-label="Traveler planning considerations">
-      ${considerationPill("No mobility restrictions", !travelerHasRestriction(trip, /mobility|walking|wheelchair|stroller/i), "accessibility")}
-      ${considerationPill("Dietary restrictions", travelerHasRestriction(trip, /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood/i), "leaf")}
-      ${considerationPill("Medical needs", travelerHasRestriction(trip, /medical/i), "heart")}
-      ${considerationPill("Accessibility needs", travelerHasRestriction(trip, /accessibility|wheelchair|stroller/i), "person")}
-    </div>
-    <p class="helper-text">Add details only when a traveler has an individual restriction, accessibility need, or preference that differs from the rest of the group.</p>
-    ${travelerTable(trip, isSolo)}
-    ${wizardFooter("Back", "Save and Exit", "Continue")}
-  </section>`;
-}
-
-function travelerTable(trip, isSolo) {
-  return `<div class="table-wrap traveler-table-wrap"><table class="traveler-table"><thead><tr><th>Traveler</th><th>Age Group</th><th>Individual Restrictions or Accessibility Needs</th><th>Actions</th></tr></thead><tbody>${trip.travelers.map((traveler, index) => `<tr><td><div class="traveler-identity"><span class="traveler-avatar avatar-${(index % 4) + 1}" aria-hidden="true">${travelerInitial(traveler, index)}</span><div><label class="sr-only" for="traveler-name-${traveler.id}">Traveler ${index + 1} name</label><input id="traveler-name-${traveler.id}" aria-label="Traveler ${index + 1} name" placeholder="Optional name" data-field="traveler.${traveler.id}.name" value="${esc(traveler.name || "")}"><small>${esc(index === 0 ? "Lead traveler" : "Companion")}</small></div></div></td><td>${select(`traveler.${traveler.id}.ageGroup`, traveler.ageGroup, ["Adult", "Child", "Senior"], "Age group")}</td><td>${restrictionCell(traveler, index)}${travelerNotesField(traveler)}</td><td>${removeTravelerButton(trip, traveler, index, isSolo)}</td></tr>`).join("")}</tbody></table></div>`;
-}
-
-function travelerInitial(traveler, index) {
-  return esc((traveler.name || `T${index + 1}`).trim().slice(0, 1).toUpperCase());
-}
-
-function travelerHasRestriction(trip, pattern) {
-  return (trip.travelers || []).some((traveler) => (traveler.restrictions || []).some((restriction) => pattern.test(restriction)));
-}
-
-function considerationPill(label, active, icon) {
-  return `<span class="consideration-pill ${active ? "active" : ""}"><span aria-hidden="true">${iconSvg(icon)}</span>${esc(label)}</span>`;
-}
-
-function travelerNotesField(traveler) {
-  return `<input class="traveler-notes-input" aria-label="Individual notes" placeholder="Individual notes" data-field="traveler.${traveler.id}.notes" value="${esc(traveler.notes || "")}">`;
-}
-
-function removeTravelerButton(trip, traveler, index, isSolo) {
-  const onlyTraveler = travelerTotal(trip) <= 1 || isSolo;
-  return `<button class="small danger" aria-label="Remove Traveler ${index + 1}" title="${onlyTraveler ? "A trip must have at least one traveler." : `Remove Traveler ${index + 1}`}" data-action="removeTraveler:${traveler.id}" ${onlyTraveler ? "disabled" : ""}>Remove</button>`;
-}
-
-function restrictionCell(traveler) {
-  const selected = traveler.restrictions || [];
-  const summary = restrictionSummary(selected);
-  const isOpen = ui.openRestrictionTravelerId === traveler.id;
-  const title = selected.join(", ") || "No restrictions selected";
-  return `<div class="restriction-cell">
-    <button class="restriction-trigger" aria-haspopup="dialog" aria-expanded="${isOpen}" aria-controls="restriction-panel-${traveler.id}" aria-label="Restrictions or needs for ${esc(traveler.name || "traveler")}" title="${esc(title)}" data-restriction-trigger="${esc(traveler.id)}" data-action="toggleRestrictions:${traveler.id}">
-      <span>${esc(summary)}</span><small aria-live="polite">${selected.length} selected</small><b aria-hidden="true">⌄</b>
-    </button>
-  </div>`;
-}
-
-function restrictionSummary(selected) {
-  if (!selected.length) return "Select restrictions";
-  if (selected.length <= 2) return selected.join(", ");
-  return `${selected.slice(0, 2).join(", ")} +${selected.length - 2}`;
-}
-
-function restrictionOverlay() {
-  if (!ui.openRestrictionTravelerId || state.activeStep !== 2) return "";
-  const traveler = state.trip.travelers.find((item) => item.id === ui.openRestrictionTravelerId);
-  if (!traveler) return "";
-  return `<div class="restriction-layer" data-action="closeRestrictions:${traveler.id}">
-    ${restrictionPopover(traveler)}
-  </div>`;
-}
-
 function locationAutocompleteOverlay() {
   const field = ui.activeLocationField;
   if (!field || state.activeStep !== 1) return "";
@@ -1770,55 +1711,12 @@ function experienceOverlay() {
   </div>`;
 }
 
-function restrictionPopover(traveler) {
-  const q = ui.restrictionSearch.toLowerCase();
-  const groups = [
-    ["Food and Dietary", ["Food allergy", "Gluten intolerance", "Lactose intolerance", "Mandatory vegetarian", "Mandatory vegan", "Halal requirement", "Kosher requirement", "Jain food requirement", "Avoid beef", "Avoid pork", "Avoid seafood"]],
-    ["Mobility and Accessibility", ["Mobility limitation", "Wheelchair accessibility", "Stroller requirement", "Minimal walking"]],
-    ["Other", ["Medical travel consideration", "Other"]]
-  ];
-  return `<div class="restriction-popover" id="restriction-panel-${traveler.id}" role="dialog" aria-modal="false" aria-label="Restrictions or Needs" data-restriction-panel>
-    <div class="restriction-title">Restrictions or Needs</div>
-    <input class="restriction-search" aria-label="Search restrictions" placeholder="Search restrictions" data-field="ui.restrictionSearch" value="${esc(ui.restrictionSearch)}">
-    <div class="restriction-options">
-      ${groups.map(([title, options]) => {
-        const filtered = options.filter((option) => option.toLowerCase().includes(q));
-        if (!filtered.length) return "";
-        return `<div class="restriction-group"><h4>${esc(title)}</h4>${filtered.map((option) => `<label class="restriction-option">${checkbox(`travelerRestriction.${traveler.id}.${option}`, traveler.restrictions?.includes(option), option)}<span class="restriction-check" aria-hidden="true">${traveler.restrictions?.includes(option) ? "✓" : ""}</span><span>${esc(option)}</span></label>`).join("")}</div>`;
-      }).join("")}
-      ${traveler.restrictions?.includes("Other") ? `<label class="other-restriction">Describe the restriction or need <input aria-label="Describe the restriction or need" placeholder="Describe the restriction or need" data-field="traveler.${traveler.id}.otherRestrictionText" value="${esc(traveler.otherRestrictionText || "")}"></label>` : ""}
-    </div>
-    <div class="restriction-actions"><button data-action="clearRestrictions:${traveler.id}">Clear all</button><button class="primary" data-action="closeRestrictions:${traveler.id}">Done</button></div>
-  </div>`;
-}
-
-function positionRestrictionOverlay() {
-  const panel = document.querySelector("[data-restriction-panel]");
-  const trigger = ui.openRestrictionTravelerId ? document.querySelector(`[data-restriction-trigger="${CSS.escape(ui.openRestrictionTravelerId)}"]`) : null;
-  if (!panel || !trigger) return;
-  if (window.matchMedia("(max-width: 760px)").matches) {
-    panel.removeAttribute("style");
-    return;
-  }
-  const gap = 8;
-  const padding = 12;
-  const rect = trigger.getBoundingClientRect();
-  const panelWidth = Math.min(Math.max(rect.width, 440), 520, window.innerWidth - padding * 2);
-  const maxHeight = Math.min(360, window.innerHeight - padding * 2);
-  const below = window.innerHeight - rect.bottom - gap - padding;
-  const above = rect.top - gap - padding;
-  const placeAbove = below < Math.min(300, maxHeight) && above > below;
-  const left = Math.min(Math.max(rect.left, padding), window.innerWidth - panelWidth - padding);
-  const top = placeAbove ? Math.max(padding, rect.top - gap - maxHeight) : Math.min(rect.bottom + gap, window.innerHeight - maxHeight - padding);
-  panel.style.width = `${panelWidth}px`;
-  panel.style.maxHeight = `${maxHeight}px`;
-  panel.style.left = `${left}px`;
-  panel.style.top = `${top}px`;
-}
-
 function styleStep() {
+  const trip = state.trip;
   const selected = selectedExperiences();
   const selectedCount = countSelectedExperiences(state.trip);
+  const hikingInterest = selectedExperiences().some((pref) => /hiking|outdoor/i.test(pref.label) && !/avoid/i.test(pref.importance));
+  const scheduleIssues = reviewIssues().filter((issue) => issue.owningStep === 2 || issue.field?.startsWith("trip.schedule") || issue.issue.includes("Dinner Time"));
   return `<div class="step-sections trip-style-screen">
     <section class="compact-section premium-section core-style-section">
       <div class="section-head"><div><h2>Core Style</h2><p>Set the overall feel without adding duplicate experience preferences.</p></div></div>
@@ -1827,6 +1725,27 @@ function styleStep() {
         ${styleSelectControl("trip.style.atmosphere", state.trip.style.atmosphere, ["Very Quiet", "Relaxed", "Balanced", "Social", "Lively"], "Atmosphere", "Unwind, go at your own pace.", "cloud")}
         ${styleSelectControl("trip.style.locationFeel", state.trip.style.locationFeel, ["Secluded", "Quiet Area", "Balanced", "Central", "Busy District"], "Location Feel", "Off the beaten path, with stunning views.", "mountain")}
       </div>
+    </section>
+    <section class="compact-section premium-section daily-schedule-comfort-section">
+      <div class="section-head"><div><h2>Daily Rhythm and Comfort</h2><p>How your days should run and how active you want to be.</p></div></div>
+      <div class="comfort-card-grid">
+        ${comfortCard(1, "Daily Schedule", "Define your ideal daily rhythm.", "calendar", "blue", table(["Setting", "Preference"], [
+          `<tr><td>Pace</td><td>${select("trip.schedule.pace", trip.schedule.pace, ["Very relaxed", "Relaxed", "Balanced", "Active", "Packed"], "Pace")}</td></tr>`,
+          `<tr><td>Wake-Up Time</td><td>${input("trip.schedule.wakeUp", trip.schedule.wakeUp || "8:00 AM", "Wake-Up Time")}</td></tr>`,
+          `<tr><td>Earliest Activity</td><td>${input("trip.schedule.earliestActivity", trip.schedule.earliestActivity || "9:00 AM", "Earliest Activity")}</td></tr>`,
+          `<tr><td>Latest Return</td><td>${input("trip.schedule.latestReturn", trip.schedule.latestReturn || "10:00 PM", "Latest Return")}</td></tr>`,
+          `<tr><td>Major Activities per Day</td><td>${input("trip.schedule.majorActivities", trip.schedule.majorActivities || 2, "Major Activities per Day", "number")}</td></tr>`,
+          `<tr><td>Desired Free Time per Day</td><td>${input("trip.schedule.freeTime", trip.schedule.freeTime || "2 hours", "Desired Free Time per Day")}</td></tr>`
+        ]))}
+        ${comfortCard(2, "Physical Comfort", "Tell us about your activity comfort.", "hiking", "green", `${!hikingInterest ? `<p class="sr-only">Hiking is not currently selected as an interest. <button class="small" data-action="addHikingInterest">Add Hiking Interest</button></p>` : ""}
+          ${table(["Setting", "Preference"], [
+            `<tr><td>Walking Ability</td><td>${select("trip.activity.walking", trip.activity.walking === "Not Specified" ? "Easy walking" : trip.activity.walking, ["Minimal walking", "Easy walking", "Moderate walking", "High walking tolerance"], "Walking Ability")}</td></tr>`,
+            `<tr><td>Hiking Interest</td><td>${select("trip.activity.hiking", trip.activity.hiking === "No hiking" ? "Easy hikes" : trip.activity.hiking, ["No hiking", "Easy hikes", "Moderate hikes", "Difficult hikes"], "Hiking Interest")}</td></tr>`,
+            `<tr><td>Maximum Hiking Duration</td><td>${input("trip.activity.maxHikeDuration", trip.activity.maxHikeDuration || "2 hours", "Maximum Hiking Duration")}</td></tr>`,
+            `<tr><td>Maximum Hiking Distance</td><td>${input("trip.activity.maxHikeDistance", trip.activity.maxHikeDistance || "4 miles", "Maximum Hiking Distance")}</td></tr>`
+          ])}`)}
+      </div>
+      ${scheduleIssues.length ? stepIssueTable(scheduleIssues) : ""}
     </section>
     <section class="compact-section premium-section">
       <div class="section-head"><div><h2>Experience Categories</h2><p>Choose only the environments, activities, and moments that should shape the itinerary.</p></div></div>
@@ -2047,14 +1966,14 @@ function foodStep() {
     ["Dinner", trip.food.dinner || "Relaxed & indulgent", trip.food.dinnerTime || "6:30 - 7:30 PM", "Enjoy local specialties", "Preferred Dinner Time"]
   ];
   return `<section class="panel food-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 4</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group. Special Needs are managed on the Travelers step.">Group Preferences</span></div>
+    <div class="panel-head"><div><p class="eyebrow">Step 3</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group. Special Needs are managed on the Trip Basics step.">Group Preferences</span></div>
     <div class="food-layout food-summary-layout">
       <div class="food-column">
         <section class="food-summary-card diet-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("leaf")}</span><h3>Diet and Restrictions</h3></div>
           ${foodSummaryLine("Group Diet", trip.food.diet, "No group diet selected", "diet")}
           ${foodSummaryLine("Food Avoidances", trip.food.restrictions, "No group-wide avoidances", "avoid")}
-          ${specialNeedsFoodCount ? `<div class="traveler-food-notice"><span aria-hidden="true">${iconSvg("travelers")}</span><p>${specialNeedsFoodCount} special-need dietary restriction${specialNeedsFoodCount === 1 ? "" : "s"} will also be applied.</p><button class="link-button" data-step="2">Review Special Needs</button></div>` : ""}
+          ${specialNeedsFoodCount ? `<div class="traveler-food-notice"><span aria-hidden="true">${iconSvg("travelers")}</span><p>${specialNeedsFoodCount} special-need dietary restriction${specialNeedsFoodCount === 1 ? "" : "s"} will also be applied.</p><button class="link-button" data-step="1">Review Special Needs</button></div>` : ""}
         </section>
         <section class="food-summary-card cuisine-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("chef")}</span><h3>Cuisine Interests</h3></div>
@@ -2303,56 +2222,6 @@ function specialNeedsField(trip) {
   </div>`;
 }
 
-function comfortStep() {
-  const trip = state.trip;
-  const issues = reviewIssues().filter((issue) => issue.owningStep === 5 || issue.field?.startsWith("trip.schedule") || issue.field?.startsWith("trip.budget") || issue.issue.includes("Dinner Time"));
-  const hikingInterest = selectedExperiences().some((pref) => /hiking|outdoor/i.test(pref.label) && !/avoid/i.test(pref.importance));
-  const carRelevant = /drive|car|rent/i.test(trip.transportation);
-  const evRelevant = trip.transport.electricVehicle || /electric|ev|charging/i.test(`${trip.transport.rentalCar} ${trip.transport.charging}`);
-  return `<section class="panel comfort-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 5</p><h2>Comfort and Budget</h2></div>${badge(`${trip.schedule.pace} pace`)}</div>
-    <div class="comfort-card-grid">
-      ${comfortCard(1, "Daily Schedule", "Define your ideal daily rhythm.", "calendar", "blue", table(["Setting", "Preference"], [
-        `<tr><td>Pace</td><td>${select("trip.schedule.pace", trip.schedule.pace, ["Very relaxed", "Relaxed", "Balanced", "Active", "Packed"], "Pace")}</td></tr>`,
-        `<tr><td>Wake-Up Time</td><td>${input("trip.schedule.wakeUp", trip.schedule.wakeUp || "8:00 AM", "Wake-Up Time")}</td></tr>`,
-        `<tr><td>Earliest Activity</td><td>${input("trip.schedule.earliestActivity", trip.schedule.earliestActivity || "9:00 AM", "Earliest Activity")}</td></tr>`,
-        `<tr><td>Latest Return</td><td>${input("trip.schedule.latestReturn", trip.schedule.latestReturn || "10:00 PM", "Latest Return")}</td></tr>`,
-        `<tr><td>Major Activities per Day</td><td>${input("trip.schedule.majorActivities", trip.schedule.majorActivities || 2, "Major Activities per Day", "number")}</td></tr>`,
-        `<tr><td>Desired Free Time per Day</td><td>${input("trip.schedule.freeTime", trip.schedule.freeTime || "2 hours", "Desired Free Time per Day")}</td></tr>`
-      ]))}
-      ${comfortCard(2, "Physical Comfort", "Tell us about your activity comfort.", "hiking", "green", `${!hikingInterest ? `<p class="sr-only">Hiking is not currently selected as an interest. <button class="small" data-action="addHikingInterest">Add Hiking Interest</button></p>` : ""}
-        ${table(["Setting", "Preference"], [
-          `<tr><td>Walking Ability</td><td>${select("trip.activity.walking", trip.activity.walking === "Not Specified" ? "Easy walking" : trip.activity.walking, ["Minimal walking", "Easy walking", "Moderate walking", "High walking tolerance"], "Walking Ability")}</td></tr>`,
-          `<tr><td>Hiking Interest</td><td>${select("trip.activity.hiking", trip.activity.hiking === "No hiking" ? "Easy hikes" : trip.activity.hiking, ["No hiking", "Easy hikes", "Moderate hikes", "Difficult hikes"], "Hiking Interest")}</td></tr>`,
-          `<tr><td>Maximum Hiking Difficulty</td><td>${select("trip.activity.hiking", trip.activity.hiking, ["No hiking", "Easy hikes", "Moderate hikes", "Difficult hikes"], "Maximum Hiking Difficulty")}</td></tr>`,
-          `<tr><td>Maximum Hiking Duration</td><td>${input("trip.activity.maxHikeDuration", trip.activity.maxHikeDuration || "2 hours", "Maximum Hiking Duration")}</td></tr>`,
-          `<tr><td>Maximum Hiking Distance</td><td>${input("trip.activity.maxHikeDistance", trip.activity.maxHikeDistance || "4 miles", "Maximum Hiking Distance")}</td></tr>`
-        ])}`)}
-      ${comfortCard(3, "Transportation Limits", "Set your preferences for getting around.", "car", "purple", `${!carRelevant ? `<p class="sr-only">Driving limits are hidden because the selected transportation method is ${esc(trip.transportation)}.</p>` : ""}
-        ${table(["Setting", "Preference"], [
-          `<tr><td>Maximum Driving per Day</td><td>${input("trip.transport.maxDrivingDay", trip.transport.maxDrivingDay || "4 hours", "Maximum Driving per Day")}</td></tr>`,
-          `<tr><td>Maximum Continuous Driving</td><td>${input("trip.transport.maxContinuous", trip.transport.maxContinuous || "2 hours", "Maximum Continuous Driving")}</td></tr>`,
-          `<tr><td>Scenic Route Preference</td><td>${select("trip.transport.routePreference", trip.transport.routePreference || (trip.transport.scenicRoutes ? "Prefer Scenic Routes" : "Balanced"), ["Prefer Fastest Route", "Balanced", "Prefer Scenic Routes"], "Scenic Route Preference")}</td></tr>`,
-          `<tr><td>Toll Preference</td><td>${select("trip.transport.tolls", trip.transport.tolls, ["Avoid Tolls", "Use Tolls When Helpful", "No Preference"], "Toll Preference")}</td></tr>`,
-          `<tr><td>Ferry Preference</td><td>${select("trip.transport.ferries", trip.transport.ferries, ["Avoid Ferries", "Ferries Are Acceptable", "Interested in Ferries", "No Preference"], "Ferry Preference")}</td></tr>`,
-          `<tr><td>Rental Car Requirements</td><td>${input("trip.transport.rentalCar", trip.transport.rentalCar, "Rental Car Requirements")}</td></tr>`,
-          evRelevant ? `<tr><td>Electric Vehicle Charging Needs</td><td>${input("trip.transport.charging", trip.transport.charging, "Electric Vehicle Charging Needs")}</td></tr>` : ""
-        ].filter(Boolean))}`)}
-      ${comfortCard(4, "Budget and Accommodation", "Let us know your budget and lodging style.", "bed", "orange", table(["Setting", "Preference"], [
-          `<tr><td>Budget Style</td><td>${select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style")}</td></tr>`,
-          `<tr><td>Total Budget</td><td>${input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget")}${budgetHint(trip)}</td></tr>`,
-          `<tr><td>Budget Strictness</td><td>${select("trip.budget.strictness", trip.budget.strictness, ["Strict", "Flexible"], "Budget Strictness")}</td></tr>`,
-          `<tr><td>Maximum Nightly Lodging Budget</td><td>${input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget")}</td></tr>`,
-          `<tr><td>Lodging Flexibility</td><td>${select("trip.lodging.changeHotels", trip.lodging.changeHotels, ["Stay in one place", "Minimize hotel changes", "Open to moving"], "Lodging Flexibility")}<small class="field-helper">Shapes packing and checkout tips. The hotel-change limit used to build route options is set in Trip Basics → Route-shaping details.</small></td></tr>`,
-          `<tr><td>Accommodation Preferences</td><td>${esc(chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel", "Free parking", "Free breakfast"]))} <button class="small" data-action="openLodging">Edit</button></td></tr>`
-        ]))}
-    </div>
-    <div class="comfort-tip"><span aria-hidden="true">${iconSvg("leaf")}</span><strong>Tip:</strong> Your comfort and budget settings help us balance experiences, travel time, and costs for the best overall trip.</div>
-    ${issues.length ? stepIssueTable(issues) : ""}
-    ${wizardFooter("Back", "Save and Exit", "Continue")}
-  </section>`;
-}
-
 function comfortCard(number, title, subtitle, icon, tone, body) {
   return `<section class="comfort-card comfort-${esc(tone)}">
     <div class="comfort-card-header">
@@ -2369,14 +2238,29 @@ function reviewStep() {
   const issues = reviewIssues();
   const status = blocking.length ? "Needs Attention" : issues.length ? "Ready with Warnings" : "Ready to Build";
   return `<section class="panel review-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 6 of 6</p><h2>Review Your Trip</h2></div><div class="review-head-actions">${badge(status)}<button class="small">Expand All</button></div></div>
+    <div class="panel-head"><div><p class="eyebrow">Step 4 of 4</p><h2>Review Your Trip</h2></div><div class="review-head-actions">${badge(status)}<button class="small">Expand All</button></div></div>
     <section class="review-overview"><strong>${esc(heroDestination(trip))}</strong><span>${esc(tripDateSummary(trip))}</span><span>${travelerTotal(trip)} travelers</span><span>${esc(trip.schedule.pace)} pace</span></section>
     <div class="review-grid">
-      ${reviewCard("Trip Basics", 1, "basics", [["Origin", trip.fromDisplay || trip.from], ["Destination", heroDestination(trip)], ["Dates", formatDateRange(trip.startDate, trip.endDate)], ["Trip Length", `${trip.days} days / ${calculateTripNights(Number(trip.days || 0))} nights`], ["Transportation", trip.transportation], ["Approved Route", approvedRouteSummary(trip)]])}
-      ${reviewCard("Travelers", 2, "travelers", [["Trip Type", trip.groupType], ["Adults", trip.adults], ["Children", trip.children], ["Seniors (65+)", trip.seniors]])}
-      ${reviewCard("Trip Style", 3, "style", [["Nature Focus", trip.style.balance], ["Atmosphere", trip.style.atmosphere], ["Location Feel", trip.style.locationFeel], ["Top Experiences", topExperienceSummary()]])}
-      ${reviewCard("Food and Evenings", 4, "food", [["Diet", chipSummary(trip.food.diet)], ["Avoid", chipSummary(trip.food.restrictions)], ["Limits", chipSummary(trip.food.restrictions)], ["Evenings", chipSummary(trip.alcohol.preferences)]])}
-      ${reviewCard("Comfort and Budget", 5, "comfort", [["Pace", `${trip.schedule.pace} pace`], ["Major Activities / Day", trip.schedule.majorActivities || 2], ["Max Driving / Day", trip.transport.maxDrivingDay || "4 hours"], ["Budget Range", trip.budget.total || "$1,500-$3,500"], ["Accommodation", chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel with free parking and breakfast"])]])}
+      ${reviewCard("Trip Basics", 1, "basics", [
+        ["Origin", trip.fromDisplay || trip.from],
+        ["Destination", heroDestination(trip)],
+        ["Dates", formatDateRange(trip.startDate, trip.endDate)],
+        ["Trip Length", `${trip.days} days / ${calculateTripNights(Number(trip.days || 0))} nights`],
+        ["Transportation", trip.transportation],
+        ["Approved Route", approvedRouteSummary(trip)],
+        ["Travelers", `${trip.groupType} · ${trip.adults} adult${Number(trip.adults) === 1 ? "" : "s"}${Number(trip.children) ? `, ${trip.children} child${Number(trip.children) === 1 ? "" : "ren"}` : ""}${Number(trip.seniors) ? `, ${trip.seniors} senior${Number(trip.seniors) === 1 ? "" : "s"}` : ""}`],
+        ["Budget Range", trip.budget.total || "$1,500-$3,500"],
+        ["Accommodation", chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel with free parking and breakfast"])]
+      ])}
+      ${reviewCard("Trip Style", 2, "style", [
+        ["Nature Focus", trip.style.balance],
+        ["Atmosphere", trip.style.atmosphere],
+        ["Location Feel", trip.style.locationFeel],
+        ["Top Experiences", topExperienceSummary()],
+        ["Pace", `${trip.schedule.pace} pace`],
+        ["Major Activities / Day", trip.schedule.majorActivities || 2]
+      ])}
+      ${reviewCard("Food and Evenings", 3, "food", [["Diet", chipSummary(trip.food.diet)], ["Avoid", chipSummary(trip.food.restrictions)], ["Limits", chipSummary(trip.food.restrictions)], ["Evenings", chipSummary(trip.alcohol.preferences)]])}
       ${reviewIssuesCard(issues)}
     </div>
     ${generationProgressPanel()}
@@ -2483,22 +2367,22 @@ function reviewIssues() {
       severity: "Critical",
       blocking: true,
       field: "trip.routePreferences.tripStructure",
-      owningStep: 2,
+      owningStep: 4,
       issue: "Approve a trip route before building the detailed itinerary.",
       action: "Review route options and approve one route shape."
     });
   }
-  if (state.activeStep === 6 && (!state.providerStatus || state.providerStatus.canGenerate === false)) {
+  if (state.activeStep === 4 && (!state.providerStatus || state.providerStatus.canGenerate === false)) {
     issues.unshift({
       severity: "Critical",
       blocking: true,
       field: "provider.configuration",
-      owningStep: 6,
+      owningStep: 4,
       issue: "Trip generation is temporarily unavailable because destination and route services are not configured.",
       action: "Trip generation is temporarily unavailable. Please try again later. Your trip inputs are saved in the current session."
     });
   }
-  if (state.activeStep === 6) {
+  if (state.activeStep === 4) {
     issues.unshift(...locationVerificationIssues(state.trip));
     if (state.providerStatus?.mode === "mock" && !mockDestinationDataAvailable(state.trip.destinationDisplay || state.trip.destination)) {
       issues.unshift({
@@ -2613,10 +2497,8 @@ function previewSection() {
 
 function bind() {
   document.querySelectorAll("[data-step]").forEach((el) => el.addEventListener("click", () => {
-    ui.openRestrictionTravelerId = null;
-    ui.restrictionSearch = "";
     state.activeStep = Number(el.dataset.step);
-    if (state.activeStep === 6) {
+    if (state.activeStep === 4) {
       refreshProviderStatus();
       return;
     }
@@ -2645,7 +2527,7 @@ function bind() {
     // stored ISO date -- never sync it through the generic value listener.
     if (el.readOnly && (el.dataset.field === "trip.startDate" || el.dataset.field === "trip.endDate")) return;
     el.addEventListener("change", () => updateField(el.dataset.field, el.value));
-    if ((el.matches("input") || el.matches("textarea")) && el.dataset.field !== "ui.restrictionSearch") {
+    if (el.matches("input") || el.matches("textarea")) {
       el.addEventListener("input", () => {
         updateFieldDraft(el.dataset.field, el.value);
         el.dataset.dirtyDraft = "true";
@@ -2707,8 +2589,6 @@ function bind() {
   });
   if (!globalListenersBound) {
     document.addEventListener("keydown", closeDialogsOnEscape);
-    window.addEventListener("resize", positionRestrictionOverlay);
-    window.addEventListener("scroll", positionRestrictionOverlay, true);
     window.addEventListener("resize", positionLocationOverlay);
     window.addEventListener("scroll", positionLocationOverlay, true);
     window.addEventListener("resize", positionDatePickerOverlay);
@@ -2717,11 +2597,6 @@ function bind() {
     document.addEventListener("pointerdown", closePlanningPrinciplesOnOutsidePointer, true);
     document.addEventListener("pointerdown", closeDatePickerOnOutsidePointer, true);
     globalListenersBound = true;
-  }
-  if (ui.focusRestrictionTriggerId) {
-    const id = ui.focusRestrictionTriggerId;
-    ui.focusRestrictionTriggerId = null;
-    requestAnimationFrame(() => document.querySelector(`[data-restriction-trigger="${CSS.escape(id)}"]`)?.focus({ preventScroll: true }));
   }
   if (ui.focusPlanningPrinciples) {
     ui.focusPlanningPrinciples = false;
@@ -2764,8 +2639,7 @@ function refreshLocationPanel() {
 
 function closeDialogsOnEscape(event) {
   if (event.key !== "Escape") return;
-  if (ui.openRestrictionTravelerId) closeRestrictions(ui.openRestrictionTravelerId);
-  else if (ui.activeLocationField) ui.activeLocationField = null;
+  if (ui.activeLocationField) ui.activeLocationField = null;
   else if (ui.openExperienceCategory) {
     ui.openExperienceCategory = null;
     ui.experienceSearch = "";
@@ -3132,12 +3006,6 @@ function positionDatePickerOverlay() {
   panel.style.top = `${placeAbove ? Math.max(padding, rect.top - maxHeight - 8) : Math.min(rect.bottom + 8, window.innerHeight - maxHeight - padding)}px`;
 }
 
-function closeRestrictions(id, restoreFocus = true) {
-  ui.openRestrictionTravelerId = null;
-  ui.restrictionSearch = "";
-  if (restoreFocus) ui.focusRestrictionTriggerId = id;
-}
-
 function updateField(path, value) {
   if (path.startsWith("trip.")) ui.touchedBasicsFields.add(path);
   if (path.startsWith("trip.") && state.plan) state.planStale = true;
@@ -3168,8 +3036,6 @@ function updateField(path, value) {
       suggestion[key] = value;
       if (key === "importance") suggestion.weight = importanceWeights[value];
     }
-  } else if (path === "ui.restrictionSearch") {
-    ui.restrictionSearch = value;
   } else if (path === "ui.experienceSearch") {
     ui.experienceSearch = value;
   } else if (path === "ui.foodSearch") {
@@ -3344,7 +3210,7 @@ function setPath(root, path, value) {
 async function buildTripPlanAction(name) {
   if (ui.generatingPlan) return;
   if (name !== "regeneratePlan" && routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)) {
-    state.activeStep = 6;
+    state.activeStep = 4;
     state.trip.routeOptions = generateRouteArchitectureOptions(state.trip);
     state.trip.pendingRouteOptionId = state.trip.routeOptions.find((option) => option.recommended)?.id || state.trip.routeOptions[0]?.id || "";
     ui.toast = "Approve a route shape before building the detailed itinerary.";
@@ -3409,8 +3275,6 @@ async function ensureDestinationIntelligence() {
 
 function action(name) {
   if (name === "goHome") {
-    ui.openRestrictionTravelerId = null;
-    ui.restrictionSearch = "";
     state.activeStep = 1;
     state.plan = null;
     state.planStatus = "";
@@ -3456,7 +3320,7 @@ function action(name) {
       state.preview = structuredClone(record.preview || null);
       state.plan = structuredClone(record.plan || null);
       state.planStatus = state.plan ? "ready" : "";
-      state.activeStep = record.activeStep || 1;
+      state.activeStep = Math.min(4, record.activeStep || 1);
       state.savedTripsOpen = false;
       ui.toast = "Saved trip opened.";
     }
@@ -3507,7 +3371,7 @@ function action(name) {
   if (name.startsWith("planSection:")) ui.planSection = name.split(":")[1];
   if (name === "editPreferences") {
     state.planStatus = "";
-    state.activeStep = 6;
+    state.activeStep = 4;
     ui.toast = state.planStale ? "Existing plan is based on older preferences. Regenerate when ready." : "Preferences are ready to edit.";
   }
   if (name === "editUnsupportedDestination") {
@@ -3519,7 +3383,7 @@ function action(name) {
   if (name === "returnToReview") {
     state.planStatus = "";
     state.planError = null;
-    state.activeStep = 6;
+    state.activeStep = 4;
   }
   if (name.startsWith("jumpToDay:")) {
     ui.planSection = "itinerary";
@@ -3588,10 +3452,8 @@ function action(name) {
     ui.planAnnouncement = "Meals regenerated while activities stayed in place.";
   }
   if (name === "next") {
-    state.activeStep = Math.min(6, state.activeStep + 1);
-    if (state.activeStep === 6) {
-      ui.openRestrictionTravelerId = null;
-      ui.restrictionSearch = "";
+    state.activeStep = Math.min(4, state.activeStep + 1);
+    if (state.activeStep === 4) {
       ui.openExperienceCategory = null;
       ui.experienceSearch = "";
       refreshProviderStatus();
@@ -3600,8 +3462,6 @@ function action(name) {
   }
   if (name === "prev") state.activeStep = Math.max(1, state.activeStep - 1);
   if (name === "next" || name === "prev") {
-    ui.openRestrictionTravelerId = null;
-    ui.restrictionSearch = "";
     ui.openExperienceCategory = null;
     ui.experienceSearch = "";
   }
@@ -3623,7 +3483,7 @@ function action(name) {
   if (name.startsWith("approveRoute:")) {
     const id = name.split(":")[1] || state.trip.pendingRouteOptionId;
     approveRouteOption(state.trip, id);
-    state.activeStep = 6;
+    state.activeStep = 4;
     ui.toast = "Route approved. Detailed itinerary generation will use only this trip shape.";
   }
   if (name === "regenerateRouteOptions") {
@@ -3801,26 +3661,6 @@ function action(name) {
   if (name === "saveFoodSection" && ui.foodDraft) saveFoodDraft();
   if (name === "openLodging") ui.openLodgingPicker = true;
   if (name === "closeLodging") ui.openLodgingPicker = false;
-  if (name.startsWith("toggleRestrictions:")) {
-    const id = name.split(":")[1];
-    if (ui.openRestrictionTravelerId === id) closeRestrictions(id);
-    else ui.openRestrictionTravelerId = id;
-    ui.restrictionSearch = "";
-  }
-  if (name.startsWith("closeRestrictions:")) {
-    closeRestrictions(name.split(":")[1]);
-  }
-  if (name.startsWith("clearRestrictions:")) {
-    const id = name.split(":")[1];
-    const traveler = state.trip.travelers.find((item) => item.id === id);
-    if (traveler) {
-      const hasOtherText = traveler.restrictions?.includes("Other") && traveler.otherRestrictionText?.trim();
-      if (hasOtherText && !confirm("Clear the Other restriction description for this traveler?")) return;
-      traveler.restrictions = [];
-      if (hasOtherText) traveler.otherRestrictionText = "";
-    }
-  }
-  if (name.startsWith("removeTraveler:")) removeTraveler(name.split(":")[1]);
   if (name === "toggleWarnings") ui.showWarnings = !ui.showWarnings;
   if (name === "togglePreferences") ui.showPreferences = !ui.showPreferences;
   if (name === "togglePlanningPrinciples") {
@@ -3843,7 +3683,7 @@ function action(name) {
       ui.toast = "Resolve blocking issues before building your trip.";
     } else {
       state.preview = generatePlanPreview(state.trip);
-      state.activeStep = 6;
+      state.activeStep = 4;
     }
   }
   persist("Updated");
@@ -3868,18 +3708,6 @@ function setChildAge(index, value) {
   const values = childAgeValues(state.trip);
   values[index] = value;
   state.trip.childrenAges = values.join(", ");
-}
-
-function removeTraveler(id) {
-  const total = travelerTotal(state.trip);
-  if (total <= 1) return;
-  const traveler = state.trip.travelers.find((item) => item.id === id);
-  const populated = traveler && (traveler.name || traveler.notes || traveler.otherRestrictionText || traveler.restrictions?.length);
-  if (populated && !confirm("Remove this populated traveler row?")) return;
-  if (traveler?.ageGroup === "Child" && Number(state.trip.children) > 0) state.trip.children -= 1;
-  else if (traveler?.ageGroup === "Senior" && Number(state.trip.seniors) > 0) state.trip.seniors -= 1;
-  else if (Number(state.trip.adults) > 0) state.trip.adults -= 1;
-  syncTravelersToCounts(state.trip);
 }
 
 if ("serviceWorker" in navigator) {
