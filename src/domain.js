@@ -94,25 +94,24 @@ export const preferenceOwners = {
   "trip.description": 1,
   "trip.mustHavePlaces": 1,
   "trip.avoidPlaces": 1,
-  "travelers.composition": 2,
-  "travelers.restrictions": 2,
-  "style.balance": 3,
-  "style.atmosphere": 3,
-  "style.locationFeel": 3,
-  "style.experiences": 3,
-  "food.diet": 4,
-  "food.restrictions": 4,
-  "food.cuisine": 4,
-  "food.meals": 4,
-  "alcohol.preference": 4,
-  "evening.preferences": 4,
-  "schedule.pace": 5,
-  "schedule.majorActivities": 5,
-  "schedule.latestReturn": 5,
-  "comfort.walking": 5,
-  "transport.drivingLimits": 5,
-  "budget.total": 5,
-  "lodging.requirements": 5
+  "travelers.composition": 1,
+  "trip.specialNeeds": 1,
+  "budget.total": 1,
+  "lodging.requirements": 1,
+  "style.balance": 2,
+  "style.atmosphere": 2,
+  "style.locationFeel": 2,
+  "style.experiences": 2,
+  "schedule.pace": 2,
+  "schedule.majorActivities": 2,
+  "schedule.latestReturn": 2,
+  "comfort.walking": 2,
+  "food.diet": 3,
+  "food.restrictions": 3,
+  "food.cuisine": 3,
+  "food.meals": 3,
+  "alcohol.preference": 3,
+  "evening.preferences": 3
 };
 
 export const experienceCategories = {
@@ -834,9 +833,9 @@ export function getPreferencesByOwningStep(trip, step) {
 }
 
 export function inferOwningStep(pref) {
-  if (["diet", "restrictions", "food", "cuisine", "meal", "alcohol", "evening"].includes(pref.category)) return 4;
-  if (["environment", "experiences", "atmosphere", "style"].includes(pref.category)) return 3;
-  return pref.owningStep || 3;
+  if (["diet", "restrictions", "food", "cuisine", "meal", "alcohol", "evening"].includes(pref.category)) return 3;
+  if (["environment", "experiences", "atmosphere", "style"].includes(pref.category)) return 2;
+  return pref.owningStep || 2;
 }
 
 export function removePreference(trip, id) {
@@ -862,21 +861,21 @@ export function parseTimeOfDay(value) {
 export function getTripIssues(trip) {
   const issues = [
     ...tripBasicsIssues(trip),
-    ...travelerWarnings(trip).map((issue) => ({ severity: "Critical", issue, action: "Edit Travelers", field: "travelers", owningStep: 2, blocking: true })),
-    ...analyzeTrip(trip).warnings.map((issue) => ({ severity: "Warning", issue, action: "Review plan assumptions", owningStep: 6, blocking: false })),
-    ...foodAndRestrictionWarnings(trip).map((issue) => ({ severity: "Warning", issue, action: "Review food settings", owningStep: 4, blocking: false }))
+    ...travelerWarnings(trip).map((issue) => ({ severity: "Critical", issue, action: "Edit Trip Basics", field: "travelers", owningStep: 1, blocking: true })),
+    ...analyzeTrip(trip).warnings.map((issue) => ({ severity: "Warning", issue, action: "Review plan assumptions", owningStep: 4, blocking: false })),
+    ...foodAndRestrictionWarnings(trip).map((issue) => ({ severity: "Warning", issue, action: "Review food settings", owningStep: 3, blocking: false }))
   ];
   const alcohol = trip.alcohol?.preferences || [];
   if (trip.alcohol?.primary === "No Alcohol" && alcohol.some((item) => ["Cocktails", "Bars", "Breweries", "Wineries", "Distilleries"].includes(item))) {
-    issues.push({ severity: "Critical", issue: "No Alcohol conflicts with alcohol-focused interests.", action: "Edit Alcohol", field: "trip.alcohol.primary", owningStep: 4, blocking: true });
+    issues.push({ severity: "Critical", issue: "No Alcohol conflicts with alcohol-focused interests.", action: "Edit Alcohol", field: "trip.alcohol.primary", owningStep: 3, blocking: true });
   }
   const dinner = parseTimeOfDay(trip.food?.dinnerTime);
   const latestReturn = parseTimeOfDay(trip.schedule?.latestReturn);
   if (dinner !== null && latestReturn !== null && dinner > latestReturn) {
-    issues.push({ severity: "Warning", issue: "Preferred Dinner Time is later than Latest Return.", action: "Edit Food or Comfort", field: "trip.food.dinnerTime", owningStep: 5, blocking: false });
+    issues.push({ severity: "Warning", issue: "Preferred Dinner Time is later than Latest Return.", action: "Edit Food or Trip Style", field: "trip.schedule.latestReturn", owningStep: 2, blocking: false });
   }
   if ((trip.budget?.strictness === "Strict" || trip.budget?.style === "Custom amount") && !String(trip.budget?.total || "").trim()) {
-    issues.push({ severity: "Critical", issue: "Strict or custom budget requires a Total Budget.", action: "Add Total Budget", field: "trip.budget.total", owningStep: 5, blocking: true });
+    issues.push({ severity: "Critical", issue: "Strict or custom budget requires a Total Budget.", action: "Add Total Budget", field: "trip.budget.total", owningStep: 1, blocking: true });
   }
   return issues;
 }
