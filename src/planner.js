@@ -2136,18 +2136,25 @@ function tripTravelContext(profile, input) {
   // is integrated), so a distance-based flight-duration guess was never
   // actually verifiable as an arrival TIME -- it just looked like a real
   // number. Use the traveler's own stated arrival/departure time when they
-  // gave one (routePreferences.arrivalDateTime/departureDateTime --
-  // previously collected by the UI but never read by the planner), and
-  // otherwise fall back to a clearly-disclosed default (8:00 AM arrival,
-  // 8:00 PM departure) instead of pretending distance/speed math produces a
-  // real ETA. flyMinutes is still used as the travel block's estimated
-  // DURATION (a reasonable distance-based guess is fine for "how long is
-  // this block on the schedule"); it just no longer decides the CLOCK TIME
-  // everything else gets anchored to.
-  const providedArrivalMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.arrivalDateTime);
-  const providedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureDateTime);
+  // gave one (routePreferences.arrivalTime/departureTime, paired directly
+  // with Start/End Date in the UI and prefilled with the same 8:00 AM/8:00 PM
+  // default used below), and otherwise fall back to that clearly-disclosed
+  // default instead of pretending distance/speed math produces a real ETA.
+  // flyMinutes is still used as the travel block's estimated DURATION (a
+  // reasonable distance-based guess is fine for "how long is this block on
+  // the schedule"); it just no longer decides the CLOCK TIME everything else
+  // gets anchored to.
   const defaultFlyArrivalMinutes = 8 * 60;
   const defaultFlyDepartureMinutes = 20 * 60;
+  // The field is always prefilled (never blank) with the same default, so a
+  // traveler who never touched it is indistinguishable from one who entered
+  // exactly 8:00 AM/8:00 PM -- treat "still equals the default" as not
+  // provided. This only affects which disclosure note is shown, not the
+  // computed clock time, which is identical either way.
+  const parsedArrivalMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.arrivalTime);
+  const parsedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureTime);
+  const providedArrivalMinutes = parsedArrivalMinutes !== null && parsedArrivalMinutes !== defaultFlyArrivalMinutes ? parsedArrivalMinutes : null;
+  const providedDepartureMinutes = parsedDepartureMinutes !== null && parsedDepartureMinutes !== defaultFlyDepartureMinutes ? parsedDepartureMinutes : null;
   // A very long-haul flight's total estimated travel+ground-buffer time
   // (flyMinutes) can exceed the gap between midnight and the assumed 8:00 AM
   // default arrival -- confirmed live: Charlotte -> Los Angeles (~2100mi,
@@ -2194,11 +2201,10 @@ function tripTravelContext(profile, input) {
   };
 }
 
-// Parses the time-of-day portion of a <input type="datetime-local"> value
-// (e.g. "2026-09-05T14:30") into minutes since midnight, ignoring the date
-// component -- only the time matters for anchoring the day's schedule.
+// Parses a bare <input type="time"> value (e.g. "14:30") into minutes since
+// midnight.
 function parseTimeOfDayMinutes(value) {
-  const match = /T(\d{2}):(\d{2})/.exec(String(value || ""));
+  const match = /^(\d{2}):(\d{2})/.exec(String(value || ""));
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
@@ -2234,7 +2240,8 @@ function departureFromRegionContext(profile, input, departureRegionId) {
   const estimatedFlightMinutes = distance ? Math.max(55, Math.round(distance / 7.5)) : 140;
   const flightGroundBufferMinutes = distance > 3000 ? 240 : distance > 1200 ? 195 : 150;
   const flyMinutes = Math.min(660, estimatedFlightMinutes + flightGroundBufferMinutes);
-  const providedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureDateTime);
+  const parsedDepartureMinutes = driving ? null : parseTimeOfDayMinutes(input.routePreferences?.departureTime);
+  const providedDepartureMinutes = parsedDepartureMinutes !== null && parsedDepartureMinutes !== 20 * 60 ? parsedDepartureMinutes : null;
   const flyDepartureAnchorMinutes = providedDepartureMinutes ?? 20 * 60;
   const flyDepartureEstimateType = providedDepartureMinutes !== null ? "traveler-provided-time" : "assumed-default-time";
   const arrivalMinutes = driving ? Math.min(21 * 60, 8 * 60 + driveMinutes) : flyDepartureAnchorMinutes;

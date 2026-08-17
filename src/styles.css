@@ -504,6 +504,9 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .location-result:hover, .location-result.active { background: color-mix(in srgb, var(--sky) 12%, #fff); }
 .location-result mark { background: color-mix(in srgb, var(--sand) 72%, transparent); color: inherit; border-radius: 4px; padding: 0 1px; }
 .place-tags-field .location-control input { padding-right: 16px; }
+.date-time-pair { display: flex; gap: 8px; align-items: stretch; }
+.date-time-pair .date-field-wrap { flex: 1.6; min-width: 0; }
+.date-time-pair > input[type="time"] { flex: 1; min-width: 0; }
 .date-field-wrap { position: relative; }
 .date-field-wrap input { padding-right: 40px; cursor: pointer; background: #fff; }
 .date-picker-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--water); cursor: pointer; }

@@ -265,6 +265,18 @@ function dateTextInput(path, value, label) {
   </div>`;
 }
 
+// Pairs a date picker with a plain type="time" input for the same day.
+// Unlike dateTextInput's type="date" workaround above, type="time" needs no
+// custom picker -- the Safari blank-state bug it sidesteps is specific to
+// type="date", and this field is always prefilled with a real default value
+// (never blank), so there's no equivalent edge case here.
+function dateTimeField(datePath, dateValue, dateLabel, timePath, timeValue, timeLabel) {
+  return `<div class="date-time-pair">
+    ${dateTextInput(datePath, dateValue, dateLabel)}
+    <input aria-label="${esc(timeLabel)}" data-field="${esc(timePath)}" type="time" value="${esc(timeValue ?? "")}">
+  </div>`;
+}
+
 function todayDateParts() {
   const now = new Date();
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
@@ -1319,8 +1331,8 @@ function basicsStep() {
         ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
         ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
-        ${fieldShell("Start Date", dateTextInput("trip.startDate", trip.startDate, "Start Date"), "First travel day.")}
-        ${fieldShell("End Date", dateTextInput("trip.endDate", trip.endDate, "End Date"), "Last travel day; trip length is calculated from these two dates.")}
+        ${fieldShell("Start Date", dateTimeField("trip.startDate", trip.startDate, "Start Date", "trip.routePreferences.arrivalTime", trip.routePreferences?.arrivalTime || "08:00", "Arrival Time"), "First travel day and arrival time (defaults to 8:00 AM).")}
+        ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.")}
       </div>
       ${destinationRegionsField(trip)}
     </section>
@@ -1344,8 +1356,7 @@ function tripStructureSection(trip) {
   const prefs = trip.routePreferences;
   const showDayTripLimits = ["one-base-day-trips", "recommend"].includes(prefs.tripStructure);
   const showMultiCityLimits = ["multi-city", "recommend"].includes(prefs.tripStructure);
-  const showArrivalLogistics = /fly|train|bus/i.test(trip.transportation || "");
-  const routeDetailsOpen = ui.routeDetailsOpen ?? Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || prefs.arrivalPoint || prefs.departurePoint || ui.basicsSubmitAttempted);
+  const routeDetailsOpen = ui.routeDetailsOpen ?? Boolean(prefs.placesInMind || prefs.mustDoPlaces || prefs.placesToAvoid || ui.basicsSubmitAttempted);
   const comfortDetailsOpen = ui.comfortDetailsOpen ?? false;
   return `<section class="trip-structure-section full">
     <div class="section-kicker"><span>Choose your trip shape</span><strong>Decide how many bases and how much movement feels right.</strong></div>
@@ -1366,10 +1377,6 @@ function tripStructureSection(trip) {
         ${showMultiCityLimits ? fieldShell("Maximum Hotel Changes", select("trip.routePreferences.maxHotelChanges", prefs.maxHotelChanges, ["0", "1", "2", "3", "4", "5", "6"], "Maximum Hotel Changes"), "Multi-city options cannot exceed this.") : ""}
         ${showMultiCityLimits ? fieldShell("Maximum Transfer Driving Time", select("trip.routePreferences.maxTransferDriveTime", prefs.maxTransferDriveTime, ["1 hour", "2 hours", "3 hours", "4 hours", "5 hours", "6 hours", "7 hours", "8 hours", "9 hours", "10 hours"], "Maximum Transfer Driving Time"), "Applies to base-to-base transfer days.") : ""}
         ${showDayTripLimits ? fieldShell("Maximum Day-trip Driving Time", select("trip.routePreferences.maxDayTripDriveTime", prefs.maxDayTripDriveTime, ["1 hour", "2 hours", "3 hours", "4 hours", "5 hours", "6 hours", "7 hours", "8 hours"], "Maximum Day-trip Driving Time"), "Applies to round-trip side trips from one base.") : ""}
-        ${showArrivalLogistics ? fieldShell("Arrival Airport or Station", input("trip.routePreferences.arrivalPoint", prefs.arrivalPoint, "Arrival Airport or Station"), "Used for first-day feasibility and hotel check-in timing.") : ""}
-        ${showArrivalLogistics ? fieldShell("Departure Airport or Station", input("trip.routePreferences.departurePoint", prefs.departurePoint, "Departure Airport or Station"), "Used to protect the final-day buffer.") : ""}
-        ${showArrivalLogistics ? fieldShell("Arrival Date and Time", input("trip.routePreferences.arrivalDateTime", prefs.arrivalDateTime, "Arrival Date and Time", "datetime-local"), "Late arrivals create lighter first days.") : ""}
-        ${showArrivalLogistics ? fieldShell("Departure Date and Time", input("trip.routePreferences.departureDateTime", prefs.departureDateTime, "Departure Date and Time", "datetime-local"), "Early departures protect airport or station buffers.") : ""}
         ${/rent|drive/i.test(trip.transportation || "") ? fieldShell("Rental Car", select("trip.routePreferences.rentalCar", prefs.rentalCar, ["Yes", "No", "Unknown"], "Rental Car"), "Used for route and parking assumptions.") : ""}
         ${fieldShell("Known Hotel or Preferred Neighborhood", input("trip.routePreferences.knownHotelOrNeighborhood", prefs.knownHotelOrNeighborhood, "Known Hotel or Preferred Neighborhood"), "Optional, but it helps route clustering.")}
         ${fieldShell("Existing Reservations", textarea("trip.routePreferences.existingReservations", prefs.existingReservations, "Existing Reservations"), "Booked meals, tours, hotels, shows, ferries, or tickets.")}

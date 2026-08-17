@@ -48,10 +48,8 @@ export const defaultRoutePreferences = {
   maxHotelChanges: "1",
   maxTransferDriveTime: "3 hours",
   maxDayTripDriveTime: "2 hours",
-  arrivalDateTime: "",
-  departureDateTime: "",
-  arrivalPoint: "",
-  departurePoint: "",
+  arrivalTime: "08:00",
+  departureTime: "20:00",
   rentalCar: "Unknown",
   knownHotelOrNeighborhood: "",
   existingReservations: "",
@@ -189,9 +187,7 @@ export function routeInputSignature(trip) {
     openToNearbyCities: prefs.openToNearbyCities || "",
     maxHotelChanges: prefs.maxHotelChanges || "",
     maxTransferDriveTime: prefs.maxTransferDriveTime || "",
-    maxDayTripDriveTime: prefs.maxDayTripDriveTime || "",
-    arrivalPoint: prefs.arrivalPoint || "",
-    departurePoint: prefs.departurePoint || ""
+    maxDayTripDriveTime: prefs.maxDayTripDriveTime || ""
   });
 }
 
