@@ -1627,6 +1627,7 @@ function travelersStep() {
       ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`)}</label>`).join("") : ""}
       <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number")}</label>
       <label>Shared Preferences ${select("trip.samePreferences", trip.samePreferences ? "Yes" : "No", ["Yes", "No"], "Shared Preferences")}</label>
+      <label class="special-needs-cell">Special Needs${specialNeedsField(trip)}</label>
     </div>
     <div class="special-considerations" aria-label="Traveler planning considerations">
       ${considerationPill("No mobility restrictions", !travelerHasRestriction(trip, /mobility|walking|wheelchair|stroller/i), "accessibility")}
@@ -2037,7 +2038,7 @@ function experienceDescription(option) {
 function foodStep() {
   const trip = state.trip;
   const foodWarnings = foodAndRestrictionWarnings(trip);
-  const travelerFoodCount = trip.travelers.filter((traveler) => (traveler.restrictions || []).some((restriction) => /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood/i.test(restriction))).length;
+  const specialNeedsFoodCount = (trip.specialNeeds || []).filter((need) => /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood/i.test(need)).length;
   const eveningActivities = selectedEveningActivities(trip);
   const nightlife = selectedNightlifeAndDrinks(trip);
   const mealRows = [
@@ -2046,14 +2047,14 @@ function foodStep() {
     ["Dinner", trip.food.dinner || "Relaxed & indulgent", trip.food.dinnerTime || "6:30 - 7:30 PM", "Enjoy local specialties", "Preferred Dinner Time"]
   ];
   return `<section class="panel food-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 4</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group. Individual traveler restrictions are managed in Travelers.">Group Preferences</span></div>
+    <div class="panel-head"><div><p class="eyebrow">Step 4</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group. Special Needs are managed on the Travelers step.">Group Preferences</span></div>
     <div class="food-layout food-summary-layout">
       <div class="food-column">
         <section class="food-summary-card diet-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("leaf")}</span><h3>Diet and Restrictions</h3></div>
           ${foodSummaryLine("Group Diet", trip.food.diet, "No group diet selected", "diet")}
           ${foodSummaryLine("Food Avoidances", trip.food.restrictions, "No group-wide avoidances", "avoid")}
-          ${travelerFoodCount ? `<div class="traveler-food-notice"><span aria-hidden="true">${iconSvg("travelers")}</span><p>${travelerFoodCount} traveler-specific restriction${travelerFoodCount === 1 ? "" : "s"} will also be applied.</p><button class="link-button" data-step="2">Review Traveler Restrictions</button></div>` : ""}
+          ${specialNeedsFoodCount ? `<div class="traveler-food-notice"><span aria-hidden="true">${iconSvg("travelers")}</span><p>${specialNeedsFoodCount} special-need dietary restriction${specialNeedsFoodCount === 1 ? "" : "s"} will also be applied.</p><button class="link-button" data-step="2">Review Special Needs</button></div>` : ""}
         </section>
         <section class="food-summary-card cuisine-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("chef")}</span><h3>Cuisine Interests</h3></div>
@@ -2287,6 +2288,19 @@ function lodgingOverlay() {
 
 function multiSelect(path, title, options, values) {
   return `<div class="picker"><h3>${title}</h3><div class="small-chip-grid">${options.map((option) => `<label class="small-chip ${values.includes(option) ? "selected" : ""}">${checkbox(`${path}.${option}`, values.includes(option), option)}${esc(option)}</label>`).join("")}</div></div>`;
+}
+
+// Group-level replacement for the old per-traveler restrictions table -- one
+// compact multi-select instead of a per-person popover, since there's no
+// traveler identity to attach the answer to anymore. Skips multiSelect()'s
+// own <h3> since this renders as one column inside a labeled grid row, not a
+// full-width section.
+function specialNeedsField(trip) {
+  const values = trip.specialNeeds || [];
+  return `<div class="special-needs-field">
+    <div class="small-chip-grid compact-chip-grid">${travelerRestrictionOptions.map((option) => `<label class="small-chip compact-chip ${values.includes(option) ? "selected" : ""}">${checkbox(`specialNeeds.${option}`, values.includes(option), option)}${esc(option)}</label>`).join("")}</div>
+    ${values.includes("Other") ? `<label class="other-restriction">Describe the Other special need <input aria-label="Describe the Other special need" placeholder="Describe the Other special need" data-field="trip.specialNeedsOtherText" value="${esc(trip.specialNeedsOtherText || "")}"></label>` : ""}
+  </div>`;
 }
 
 function comfortStep() {
@@ -3266,14 +3280,19 @@ function updateCheck(path, checked) {
       const pref = state.trip.preferences.find((item) => item.category === category && item.label === label);
       if (pref) removePreference(state.trip, pref.id);
     }
-  } else if (path.startsWith("food.") || path.startsWith("alcohol.") || path.startsWith("lodging.")) {
+  } else if (path.startsWith("food.") || path.startsWith("alcohol.") || path.startsWith("lodging.") || path.startsWith("specialNeeds.")) {
     if (state.plan && !ui.foodDraft) state.planStale = true;
     const parts = path.split(".");
     const option = parts.pop();
     const root = ui.foodDraft && ui.openFoodSection && (path.startsWith("food.") || path.startsWith("alcohol.")) ? ui.foodDraft : state.trip;
     const target = parts.reduce((obj, part) => obj[part], root);
+    if (!checked && option === "Other" && root.specialNeedsOtherText?.trim() && !confirm("Discard the Other special-need description?")) {
+      render();
+      return;
+    }
     if (checked && !target.includes(option)) target.push(option);
     if (!checked && target.includes(option)) target.splice(target.indexOf(option), 1);
+    if (!checked && path === "specialNeeds.Other") root.specialNeedsOtherText = "";
     if (path === "food.cuisine.No preference" && checked) root.food.cuisine = ["No preference"];
     if (path.startsWith("food.cuisine.") && checked && option !== "No preference") root.food.cuisine = root.food.cuisine.filter((item) => item !== "No preference");
     if (path.startsWith("alcohol.preferences.") && checked && option === "No alcohol") {
