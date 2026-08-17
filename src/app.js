@@ -86,6 +86,7 @@ let ui = {
   planSection: "overview",
   planDialog: null,
   planDialogItemId: "",
+  printSections: new Set(["overview", "itinerary", "food", "route", "budget", "advisories"]),
   customStopDraft: null,
   generatingPlan: false,
   planAnnouncement: "",
@@ -617,7 +618,7 @@ function renderTripPlan() {
             <button class="primary" data-action="regeneratePlan">Regenerate Plan</button>
             <button data-action="editPreferences">Edit Preferences</button>
             <button data-action="saveExit">Save Trip</button>
-            <button data-action="printPlan">Print / Save as PDF</button>
+            <button data-action="openPrintOptions">Print / Save as PDF</button>
             <button disabled title="Coming Later">Export · Coming Later</button>
             <button disabled title="Coming Later">Share · Coming Later</button>
           </div>
@@ -682,7 +683,15 @@ const PLAN_SECTION_RENDERERS = {
 };
 
 function tripPlanSection() {
-  return Object.keys(PLAN_SECTION_RENDERERS).map((section) => `<div class="plan-section-panel${ui.planSection === section ? " active" : ""}" data-plan-section="${section}">${PLAN_SECTION_RENDERERS[section]()}</div>`).join("");
+  const sections = Object.keys(PLAN_SECTION_RENDERERS);
+  const firstIncluded = sections.find((section) => ui.printSections.has(section));
+  return sections.map((section) => {
+    const classes = ["plan-section-panel"];
+    if (ui.planSection === section) classes.push("active");
+    if (!ui.printSections.has(section)) classes.push("print-excluded");
+    else if (section === firstIncluded) classes.push("print-first");
+    return `<div class="${classes.join(" ")}" data-plan-section="${section}">${PLAN_SECTION_RENDERERS[section]()}</div>`;
+  }).join("");
 }
 
 function normalizePlanSection(label) {
@@ -931,7 +940,25 @@ function planDialog() {
   if (ui.planDialog === "replace") return replaceDialog();
   if (ui.planDialog === "move") return moveDialog();
   if (ui.planDialog === "custom") return customStopDialog();
+  if (ui.planDialog === "print") return printOptionsDialog();
   return "";
+}
+
+const PRINT_SECTION_LABELS = {
+  overview: "Overview",
+  itinerary: "Itinerary",
+  food: "Food",
+  route: "Route",
+  budget: "Budget",
+  advisories: "Advisories"
+};
+
+function printOptionsDialog() {
+  return `<div class="restriction-layer" data-action="closePlanDialog"><div class="choice-panel plan-dialog" role="dialog" aria-label="Print options">
+    <div class="dialog-head"><div><h2>Print / Save as PDF</h2><span>Choose which sections to include -- fewer sections make a shorter PDF.</span></div><button class="icon-button" data-action="closePlanDialog" aria-label="Close">×</button></div>
+    <div class="print-options-grid">${Object.entries(PRINT_SECTION_LABELS).map(([key, label]) => `<label class="print-option-item"><input type="checkbox" data-action="togglePrintSection:${key}" ${ui.printSections.has(key) ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div>
+    <div class="restriction-actions"><button data-action="closePlanDialog">Cancel</button><button class="primary" data-action="confirmPrint" ${ui.printSections.size ? "" : "disabled"}>Print</button></div>
+  </div></div>`;
 }
 
 function replaceDialog() {
@@ -3441,7 +3468,16 @@ function action(name) {
       }
     }
   }
-  if (name === "printPlan") window.print();
+  if (name === "openPrintOptions") ui.planDialog = "print";
+  if (name.startsWith("togglePrintSection:")) {
+    const key = name.split(":")[1];
+    if (ui.printSections.has(key)) ui.printSections.delete(key);
+    else ui.printSections.add(key);
+  }
+  if (name === "confirmPrint" && ui.printSections.size) {
+    ui.planDialog = null;
+    requestAnimationFrame(() => window.print());
+  }
   if (name.startsWith("planSection:")) ui.planSection = name.split(":")[1];
   if (name === "editPreferences") {
     state.planStatus = "";
