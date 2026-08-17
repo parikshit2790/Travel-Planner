@@ -995,6 +995,9 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .unsupported-plan h1 { font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1; }
 .unsupported-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 22px 0; }
 .plan-dialog { max-width: 760px; }
+.print-options-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 4px; }
+.print-option-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+.print-option-item input { width: 18px; height: 18px; }
 .alternative-list, .move-grid { display: grid; gap: 10px; }
 .alternative-list button { display: grid; gap: 4px; text-align: left; min-height: 86px; }
 .alternative-list span, .alternative-list small { color: var(--muted); }
@@ -1067,8 +1070,9 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 @media print {
   @page { margin: 0.55in; }
   body { background: #fff !important; color: #111 !important; }
-  .plan-section-panel { display: block !important; break-before: page; page-break-before: always; }
-  .plan-section-panel:first-child { break-before: auto; page-break-before: auto; }
+  .plan-section-panel.print-excluded { display: none !important; }
+  .plan-section-panel:not(.print-excluded) { display: block !important; break-before: page; page-break-before: always; }
+  .plan-section-panel.print-first { break-before: auto; page-break-before: auto; }
   .side, .plan-tabs, .plan-hero-actions, .item-actions, .day-actions, .global-footer, .saved-trips-drawer, .restriction-layer, .planning-diagnostics, .toast { display: none !important; }
   .app-shell, .plan-shell { display: block !important; }
   .wizard-main, .trip-plan-main { padding: 0 !important; background: #fff !important; }
