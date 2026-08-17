@@ -2854,30 +2854,53 @@ function buildRouteSummary(profile, days) {
 }
 
 function buildRouteMapStops(profile, days) {
+  // A day's region can be a broad container (e.g. a regional day-trip
+  // extension bundling several distant attractions under one region id) --
+  // confirmed live: a Colorado trip's "Boulder" day actually scheduled Rocky
+  // Mountain National Park and Roxborough State Park, 60+ miles apart and
+  // nowhere near Boulder itself, yet the map pinned that day at the region's
+  // static center coordinate regardless. Pin each day at the centroid of its
+  // OWN scheduled activities instead -- that's where the traveler is
+  // actually going -- and only fall back to the region center for a day
+  // with no coordinated activities (e.g. a rest or travel-only day).
   const groups = [];
   for (const day of days) {
     const region = profile.regions.find((item) => item.id === day.regionId);
-    if (!region?.centerCoordinates) continue;
+    const dayCoordinates = day.scheduleItems
+      .filter((item) => item.type === "activity" && item.coordinates && Number.isFinite(item.coordinates.lat) && Number.isFinite(item.coordinates.lng))
+      .map((item) => item.coordinates);
+    if (!dayCoordinates.length && !region?.centerCoordinates) continue;
     const last = groups[groups.length - 1];
     if (last && last.regionId === day.regionId) {
       last.endDay = day.dayNumber;
+      last.coordinates.push(...dayCoordinates);
     } else {
       groups.push({
         regionId: day.regionId,
-        regionName: region.name,
+        regionName: region?.name || day.region,
         startDay: day.dayNumber,
         endDay: day.dayNumber,
-        lat: region.centerCoordinates.lat,
-        lng: region.centerCoordinates.lng
+        coordinates: dayCoordinates,
+        fallbackCoordinates: region?.centerCoordinates || null
       });
     }
   }
-  return groups.map((group) => ({
-    label: group.startDay === group.endDay ? `Day ${group.startDay}` : `Day ${group.startDay}-${group.endDay}`,
-    regionName: group.regionName,
-    lat: group.lat,
-    lng: group.lng
-  }));
+  return groups.map((group) => {
+    const center = group.coordinates.length ? centroid(group.coordinates) : group.fallbackCoordinates;
+    return {
+      label: group.startDay === group.endDay ? `Day ${group.startDay}` : `Day ${group.startDay}-${group.endDay}`,
+      regionName: group.regionName,
+      lat: center.lat,
+      lng: center.lng
+    };
+  });
+}
+
+function centroid(points) {
+  return {
+    lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length,
+    lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length
+  };
 }
 
 function buildBudgetSummary(input, days) {
