@@ -290,7 +290,6 @@ export function createTripDraft() {
       hideAlcohol: false
     },
     lodging: {
-      styles: [],
       maxNightlyBudget: "",
       rooms: 1,
       beds: "",
