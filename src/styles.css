@@ -270,20 +270,20 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .trip-style-screen .selected-priorities select { min-height: 32px; padding: 5px 7px; }
 .trip-style-screen .selected-priorities .table-wrap { max-height: 150px; overflow-y: auto; border-radius: var(--radius); }
 .trip-style-screen .selected-priorities thead { position: sticky; top: 0; z-index: 1; }
-.priority-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: stretch; }
+.priority-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; align-items: stretch; }
 .priority-card, .priority-add-card { min-width: 0; min-height: 82px; border: 1px solid var(--line-soft); border-radius: 9px; background: linear-gradient(180deg, #fff, #fbfdff); box-shadow: 0 7px 18px rgb(16 42 67 / 0.045); }
-.priority-card { position: relative; display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 11px; align-items: center; padding: 8px 32px 8px 8px; }
-.priority-thumb { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: linear-gradient(135deg, #66c7e9, #1f765f); overflow: hidden; }
-.priority-thumb svg { width: 34px; height: 34px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18)); }
+.priority-card { position: relative; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 20px 8px 8px; }
+.priority-thumb { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: linear-gradient(135deg, #66c7e9, #1f765f); overflow: hidden; }
+.priority-thumb svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.18)); }
 .priority-thumb-nature { background: linear-gradient(135deg, #93d9f5, #2c806d 64%, #183a6a); }
 .priority-thumb-water, .priority-thumb-waterfall { background: linear-gradient(135deg, #89d6ff, #128bd4 54%, #0f4d7a); }
 .priority-thumb-drive { background: linear-gradient(135deg, #ffc36d, #3b90d1 56%, #1f765f); }
 .priority-thumb-photo { background: linear-gradient(135deg, #f8f2e6, #39445c 58%, #111827); }
 .priority-card strong { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #0b2341; }
-.priority-select-label { display: inline-flex; grid-template-columns: none; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); }
-.priority-check { width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 999px; background: #2bae54; color: #fff; }
+.priority-select-label { display: flex; width: 100%; min-width: 0; grid-template-columns: none; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); }
+.priority-check { flex: none; width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 999px; background: #2bae54; color: #fff; }
 .priority-check svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.priority-select { min-height: 24px; width: auto; max-width: 118px; border: 0; padding: 0 18px 0 0; background: transparent; box-shadow: none; color: #227c45; font-size: 0.84rem; font-weight: 800; }
+.priority-select { min-height: 24px; width: 100%; min-width: 0; max-width: 100%; border: 0; padding: 0 18px 0 0; background: transparent; box-shadow: none; color: #227c45; font-size: 0.84rem; font-weight: 800; text-overflow: ellipsis; }
 .priority-medium { color: #c78100; }
 .priority-avoid { color: var(--bad); }
 .priority-remove { position: absolute; right: 6px; top: 6px; width: 24px; min-height: 24px; font-size: 0.82rem; opacity: 0; transition: opacity 0.15s ease; }
