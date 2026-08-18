@@ -544,8 +544,20 @@ export function scoreCandidates(profile, input, constraints, intelligence = buil
       reasons.push(`First-time visitor value: ${classification.firstTimeVisitorValue.band}.`);
     }
     if (classification.ordinaryLocalFacilityPenalty?.score) {
-      score -= classification.ordinaryLocalFacilityPenalty.score * 2;
-      reasons.push(classification.ordinaryLocalFacilityPenalty.reasons?.[0] || "Reduced because it looks like an ordinary local facility.");
+      // A score >= 50 is exactly what the post-generation quality gate
+      // (hasOrdinaryLocalFacilityPromotion) treats as unacceptable -- a soft
+      // penalty alone still let these through as filler when nearby
+      // alternatives were scarce, and the plan would fail the gate with no
+      // way for a same-candidate-pool retry to avoid it. Excluding it here,
+      // at the same threshold the gate uses, keeps a bad candidate from
+      // being selected in the first place.
+      if (classification.ordinaryLocalFacilityPenalty.score >= 50) {
+        score += planningWeights.hardExclusion;
+        reasons.push(classification.ordinaryLocalFacilityPenalty.reasons?.[0] || "Rejected because it looks like an ordinary local facility.");
+      } else {
+        score -= classification.ordinaryLocalFacilityPenalty.score * 2;
+        reasons.push(classification.ordinaryLocalFacilityPenalty.reasons?.[0] || "Reduced because it looks like an ordinary local facility.");
+      }
     }
     if (childFreeAdultTrip(input) && classification.isChildrenFocused) {
       score += planningWeights.hardExclusion;
