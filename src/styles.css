@@ -1070,4 +1070,30 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .route-map-image { max-width: 340px !important; }
   a::after { content: " (" attr(href) ")"; font-size: 0.8em; }
   .timeline-dot { color: #111 !important; background: #fff !important; box-shadow: none !important; border: 1px solid #111; }
+
+  /* Each day already lists its schedule in .timeline and its priority tiers in
+     .priority-guide-grid. The sections below just restate that same data in a
+     different shape (top-five recap, meal-note disclaimers repeated per item,
+     spending/tips/prep boilerplate, a second copy of the Bonus Stops backups) --
+     dropping them here cuts the printed itinerary by roughly two-thirds without
+     removing anything from the on-screen, editable view. */
+  .top-five, .execution-guide, .backup-options { display: none !important; }
+  .timeline-note { display: none !important; }
+  .timeline-item p {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.78rem !important;
+    margin: 2px 0 !important;
+  }
+  /* Comes after the line-clamp rule above so it wins the tie in source order --
+     meal descriptions are fully redundant with the Food table below each day. */
+  .item-breakfast p, .item-lunch p, .item-dinner p, .item-coffee-break p { display: none !important; }
+  .timeline-item { padding: 6px 0 !important; }
+  .timeline-meta { font-size: 0.75rem !important; gap: 6px !important; }
+  .priority-column article { padding: 4px 0 !important; }
+  .priority-column small { font-size: 0.7rem !important; }
+  .daily-guide-panel { margin: 6px 0 !important; }
+  .weather-note { font-size: 0.78rem !important; padding: 4px 8px !important; }
 }
