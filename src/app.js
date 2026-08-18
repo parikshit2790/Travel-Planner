@@ -109,8 +109,7 @@ let ui = {
   // including fields inside the panel itself) rebuilds the <details> element
   // from scratch without an open attribute and it snaps shut.
   routeDetailsOpen: null,
-  comfortDetailsOpen: null,
-  budgetDetailsOpen: null
+  comfortDetailsOpen: null
 };
 
 let globalListenersBound = false;
@@ -1311,8 +1310,12 @@ function basicsStep() {
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
         ${fieldShell("Start Date", dateTimeField("trip.startDate", trip.startDate, "Start Date", "trip.routePreferences.arrivalTime", trip.routePreferences?.arrivalTime || "08:00", "Arrival Time"), "First travel day and arrival time (defaults to 8:00 AM).")}
         ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.")}
+        ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
+        ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; an exact total improves itinerary accuracy.")}
+        ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
       </div>
       ${destinationRegionsField(trip)}
+      ${budgetIssueTable()}
     </section>
     ${whosTravelingSection(trip)}
     ${tripStructureSection(trip)}
@@ -1390,22 +1393,12 @@ function tripStructureSection(trip) {
       </div>
       ${["Secluded", "Quiet Area"].includes(trip.style?.locationFeel) ? `<p class="field-note remote-advisory">Your Location Feel leans toward secluded or remote areas -- downloading offline maps before you go is recommended.</p>` : ""}
     </details>
-    ${budgetAccommodationDetails(trip)}
   </section>`;
 }
 
-function budgetAccommodationDetails(trip) {
-  const budgetDetailsOpen = ui.budgetDetailsOpen ?? false;
+function budgetIssueTable() {
   const budgetIssues = reviewIssues().filter((issue) => issue.owningStep === 1 && issue.field?.startsWith("trip.budget"));
-  return `<details class="progressive-fields budget-accommodation-fields" data-details="budgetDetailsOpen" ${budgetDetailsOpen ? "open" : ""}>
-    <summary><span><i aria-hidden="true">${iconSvg("bed")}</i>Budget and accommodation</span>${preferenceChips([`${trip.budget.style || "Moderate"} budget`, `${trip.lodging.changeHotels || "Minimize hotel changes"}`])}</summary>
-    <div class="form-grid route-detail-grid">
-      ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
-      ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; an exact total improves itinerary accuracy.")}
-      ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
-    </div>
-    ${budgetIssues.length ? stepIssueTable(budgetIssues) : ""}
-  </details>`;
+  return budgetIssues.length ? stepIssueTable(budgetIssues) : "";
 }
 
 function tripStructureIcon(value) {
@@ -2224,7 +2217,7 @@ function specialNeedsTick(trip) {
   const hasValues = values.length > 0;
   return `<div class="special-needs-tick">
     <div class="special-needs-tick-summary">${hasValues ? foodValuePills(values, 6) : `<span class="special-needs-tick-empty">None selected</span>`}</div>
-    <button type="button" class="small" data-step="3">${hasValues ? "Edit in Food and Evenings" : "Add in Food and Evenings"}</button>
+    <button type="button" class="small" data-action="openSpecialNeeds">${hasValues ? "Edit" : "Add"}</button>
   </div>`;
 }
 
