@@ -273,6 +273,11 @@ function todayDateParts() {
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
+function todayDateValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function parseDateTextValue(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
   if (!match) return null;
@@ -306,6 +311,8 @@ function datePickerDropdown(path, currentValue) {
   const parsed = parseDateTextValue(currentValue);
   const view = ui.datePickerViewMonth || (parsed ? { year: parsed.year, month: parsed.month } : todayDateParts());
   const { year, month } = view;
+  const today = todayDateParts();
+  const todayValue = todayDateValue();
   const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const firstWeekday = new Date(year, month - 1, 1).getDay();
   const totalDays = new Date(year, month, 0).getDate();
@@ -314,11 +321,16 @@ function datePickerDropdown(path, currentValue) {
   for (let day = 1; day <= totalDays; day += 1) {
     const value = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const selected = currentValue === value;
-    cells.push(`<button type="button" class="date-picker-cell${selected ? " selected" : ""}" data-action="pickDate:${esc(path)}:${value}">${day}</button>`);
+    if (value < todayValue) {
+      cells.push(`<span class="date-picker-cell disabled" aria-hidden="true">${day}</span>`);
+    } else {
+      cells.push(`<button type="button" class="date-picker-cell${selected ? " selected" : ""}" data-action="pickDate:${esc(path)}:${value}">${day}</button>`);
+    }
   }
+  const atOrBeforeCurrentMonth = year < today.year || (year === today.year && month <= today.month);
   return `<div class="date-picker-dropdown" data-date-picker-panel="${esc(path)}">
     <div class="date-picker-header">
-      <button type="button" class="date-picker-nav" aria-label="Previous month" data-action="datePickerNav:-1">&#8249;</button>
+      <button type="button" class="date-picker-nav" aria-label="Previous month" data-action="datePickerNav:-1" ${atOrBeforeCurrentMonth ? "disabled" : ""}>&#8249;</button>
       <strong>${esc(monthLabel)}</strong>
       <button type="button" class="date-picker-nav" aria-label="Next month" data-action="datePickerNav:1">&#8250;</button>
     </div>
@@ -990,10 +1002,10 @@ function customStopDialog() {
       <label>Title ${input("customStop.title", draft.title, "Title")}</label>
       <label>Day ${select("customStop.dayNumber", String(draft.dayNumber), state.plan.days.map((day) => String(day.dayNumber)), "Day")}</label>
       <label>Start Time ${input("customStop.startTime", draft.startTime, "Start Time")}</label>
-      <label>Duration Minutes ${input("customStop.durationMinutes", draft.durationMinutes, "Duration Minutes", "number")}</label>
+      <label>Duration Minutes ${input("customStop.durationMinutes", draft.durationMinutes, "Duration Minutes", "number", { min: 0, max: 720 })}</label>
       <label>Type ${select("customStop.type", draft.type, ["activity", "breakfast", "lunch", "dinner", "evening", "freeTime", "note"], "Type")}</label>
       <label>Location ${input("customStop.locationLabel", draft.locationLabel, "Location")}</label>
-      <label>Cost per Person ${input("customStop.cost", draft.cost, "Cost per Person", "number")}</label>
+      <label>Cost per Person ${input("customStop.cost", draft.cost, "Cost per Person", "number", { min: 0, max: 5000 })}</label>
       <label>Indoor / Outdoor ${select("customStop.indoorOutdoor", draft.indoorOutdoor, ["indoor", "outdoor", "mixed"], "Indoor or outdoor")}</label>
       <label>Notes ${textarea("customStop.notes", draft.notes, "Notes")}</label>
       <label class="small-chip">${checkbox("customStop.mustDo", draft.mustDo, "Must Do")} Must Do</label>
@@ -1299,6 +1311,12 @@ const totalBudgetOptions = [
   "$7,000+"
 ];
 
+const nightlyLodgingBudgetOptions = [
+  "$50-$100", "$100-$150", "$150-$200", "$200-$250", "$250-$300",
+  "$300-$350", "$350-$400", "$400-$450", "$450-$500", "$500-$550",
+  "$550-$600", "$600-$650", "$650-$700", "$700-$750", "$750+"
+];
+
 function basicsStep() {
   const trip = state.trip;
   const issues = visibleTripBasicsIssues();
@@ -1319,7 +1337,7 @@ function basicsStep() {
         ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.")}
         ${fieldShell("Trip Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Trip Style"), "Sets the overall spending tier.")}
         ${fieldShell("Total Budget", select("trip.budget.total", trip.budget.total, totalBudgetOptions, "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; picking a range improves itinerary accuracy.")}
-        ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
+        ${fieldShell("Maximum Nightly Lodging Budget", select("trip.budget.lodging", trip.budget.lodging, nightlyLodgingBudgetOptions, "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
       </div>
       ${destinationRegionsField(trip)}
       ${budgetIssueTable()}
@@ -1349,10 +1367,10 @@ function whosTravelingSection(trip) {
     ${warnings.length ? `<div class="warning-list"><strong>${warnings.length} traveler issue${warnings.length === 1 ? "" : "s"} require review</strong>${warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
     <div class="form-grid travelers-composition-grid">
       <label>Group Type ${select("trip.groupType", trip.groupType, groupTypes, "Group Type")}</label>
-      <label>Adults (18+) ${input("trip.adults", trip.adults, "Adults", "number")}</label>
-      <label>Children (0-17) ${input("trip.children", trip.children, "Children", "number")}</label>
-      ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`)}</label>`).join("") : ""}
-      <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number")}</label>
+      <label>Adults (18+) ${input("trip.adults", trip.adults, "Adults", "number", { min: 1, max: 20 })}</label>
+      <label>Children (0-17) ${input("trip.children", trip.children, "Children", "number", { min: 0, max: 15 })}</label>
+      ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`, "number", { min: 0, max: 17 })}</label>`).join("") : ""}
+      <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number", { min: 0, max: 20 })}</label>
       <label class="special-needs-cell">Special Needs${specialNeedsTick(trip)}</label>
     </div>
   </section>`;
@@ -1721,7 +1739,7 @@ function styleStep() {
           `<tr><td>Wake-Up Time</td><td>${input("trip.schedule.wakeUp", trip.schedule.wakeUp || "8:00 AM", "Wake-Up Time")}</td></tr>`,
           `<tr><td>Earliest Activity</td><td>${input("trip.schedule.earliestActivity", trip.schedule.earliestActivity || "9:00 AM", "Earliest Activity")}</td></tr>`,
           `<tr><td>Latest Return</td><td>${input("trip.schedule.latestReturn", trip.schedule.latestReturn || "10:00 PM", "Latest Return")}</td></tr>`,
-          `<tr><td>Major Activities per Day</td><td>${input("trip.schedule.majorActivities", trip.schedule.majorActivities || 2, "Major Activities per Day", "number")}</td></tr>`,
+          `<tr><td>Major Activities per Day</td><td>${input("trip.schedule.majorActivities", trip.schedule.majorActivities || 2, "Major Activities per Day", "number", { min: 1, max: 8 })}</td></tr>`,
           `<tr><td>Desired Free Time per Day</td><td>${input("trip.schedule.freeTime", trip.schedule.freeTime || "2 hours", "Desired Free Time per Day")}</td></tr>`
         ]))}
         ${comfortCard(2, "Physical Comfort", "Tell us about your activity comfort.", "hiking", "green", `${!hikingInterest ? `<p class="sr-only">Hiking is not currently selected as an interest. <button class="small" data-action="addHikingInterest">Add Hiking Interest</button></p>` : ""}
@@ -3014,6 +3032,17 @@ function positionDatePickerOverlay() {
   panel.style.top = `${placeAbove ? Math.max(padding, rect.top - maxHeight - 8) : Math.min(rect.bottom + 8, window.innerHeight - maxHeight - padding)}px`;
 }
 
+// Number inputs' HTML min/max stop the native spinner and scroll-wheel-while-
+// focused from going out of range in most browsers, but that's a UX nicety,
+// not a guarantee -- confirmed live that scrolling over a number field could
+// still drive it out of bounds (including negative). Clamp the committed
+// value so these fields can never hold an invalid number regardless of how
+// the browser's stepper behaves.
+function clampInteger(value, min, max) {
+  if (value === "" || !Number.isFinite(Number(value))) return value;
+  return String(Math.min(max, Math.max(min, Math.round(Number(value)))));
+}
+
 function updateField(path, value) {
   if (path.startsWith("trip.")) ui.touchedBasicsFields.add(path);
   if (path.startsWith("trip.") && state.plan) state.planStale = true;
@@ -3052,23 +3081,21 @@ function updateField(path, value) {
     setPath(ui, path, value);
     if (path === "foodDraft.alcoholPrimary" && value === "No Alcohol") clearAlcoholFocusedSelections(ui.foodDraft.alcohol);
   } else if (path.startsWith("customStop.") && ui.customStopDraft) {
+    if (path === "customStop.durationMinutes") value = clampInteger(value, 0, 720);
+    if (path === "customStop.cost") value = clampInteger(value, 0, 5000);
     setPath(ui, path, value);
   } else if (path.startsWith("childAge.")) {
-    setChildAge(Number(path.split(".")[1]), value);
+    setChildAge(Number(path.split(".")[1]), clampInteger(value, 0, 17));
   } else {
+    if (path === "trip.adults") value = clampInteger(value, 1, 20);
+    if (path === "trip.children") value = clampInteger(value, 0, 15);
+    if (path === "trip.seniors") value = clampInteger(value, 0, 20);
     if (["trip.groupType", "trip.adults", "trip.children", "trip.seniors"].includes(path) && !canChangeTravelerCount(path, value)) {
       render();
       return;
     }
-    // The number input's HTML min/max stops the native spinner and
-    // scroll-wheel-while-focused from going out of range in most browsers,
-    // but that's a UX nicety, not a guarantee -- confirmed live that
-    // scrolling over the "Number of Days" field could still drive it
-    // negative. Clamp the committed value here so trip.days can never hold
-    // an invalid number regardless of how the browser's stepper behaves.
-    if (path === "trip.days" && value !== "" && Number.isFinite(Number(value))) {
-      value = String(Math.min(60, Math.max(1, Math.round(Number(value)))));
-    }
+    if (path === "trip.days") value = clampInteger(value, 1, 60);
+    if (path === "trip.schedule.majorActivities") value = clampInteger(value, 1, 8);
     setPath(state, path, value);
     if (path === "trip.from") {
       state.trip.fromDisplay = normalizePlaceName(value);
