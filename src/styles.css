@@ -1064,7 +1064,7 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .plan-hero .eyebrow { font-size: 0.68rem !important; }
   .plan-summary-strip { gap: 8px !important; }
   .plan-metric { padding: 8px 10px !important; }
-  .plan-summary-strip, .plan-overview-grid, .meal-day-grid { grid-template-columns: 1fr 1fr !important; }
+  .plan-summary-strip, .plan-overview-grid { grid-template-columns: 1fr 1fr !important; }
   .plan-payoff-card.wide { grid-column: 1 / -1 !important; }
   .timeline-item, .itinerary-day, .meal-day, .advisory-card, .backup-options article, .route-map-card { break-inside: avoid; page-break-inside: avoid; }
   .route-map-image { max-width: 340px !important; }
@@ -1096,4 +1096,17 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
   .priority-column small { font-size: 0.7rem !important; }
   .daily-guide-panel { margin: 6px 0 !important; }
   .weather-note { font-size: 0.78rem !important; padding: 4px 8px !important; }
+
+  /* "Don't Miss" and "Worth Doing" are the same day.scheduleItems activities the
+     .timeline already lists with time/duration/cost -- only "Bonus Stops" (backup
+     alternatives that never made the schedule) adds information the timeline
+     doesn't have, so keep just that column. */
+  .priority-guide-grid { grid-template-columns: 1fr !important; }
+  .priority-column:nth-child(1), .priority-column:nth-child(2) { display: none !important; }
+
+  /* The Food Plan tab's per-day grid restates every meal as full sentences --
+     the same primary/backup/cost/notes already sit in a compact table under each
+     day in the Itinerary tab. Dietary Handling and Food Areas above it are
+     trip-wide summaries, not per-day duplicates, so they stay. */
+  .meal-day-grid { display: none !important; }
 }
