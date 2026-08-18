@@ -1066,20 +1066,12 @@ function TripBasicsHeaderGraphic() {
   return headerImage("src/assets/header-trip-basics.png", "Scenic mountain lake destination illustration", "trip-basics-graphic");
 }
 
-function TravelersHeaderGraphic() {
-  return headerImage("src/assets/header-travelers.png", "Travelers enjoying a scenic waterfront illustration", "travelers-graphic");
-}
-
 function TripStyleHeaderGraphic() {
   return headerImage("src/assets/header-trip-style.png", "Mountain exploration route illustration", "trip-style-graphic");
 }
 
 function FoodEveningsHeaderGraphic() {
   return headerImage("src/assets/header-food-evenings.png", "Waterfront dinner at sunset illustration", "food-evenings-graphic");
-}
-
-function ComfortBudgetHeaderGraphic() {
-  return headerImage("src/assets/header-comfort-budget.png", "Hotel suitcase passport and travel budget illustration", "comfort-budget-graphic");
 }
 
 function ReviewHeaderGraphic() {
@@ -1747,7 +1739,7 @@ function styleStep() {
       </div>
       ${scheduleIssues.length ? stepIssueTable(scheduleIssues) : ""}
     </section>
-    <section class="compact-section premium-section">
+    <section class="compact-section premium-section experience-categories-section">
       <div class="section-head"><div><h2>Experience Categories</h2><p>Choose only the environments, activities, and moments that should shape the itinerary.</p></div></div>
       ${experienceCategoryTable()}
     </section>

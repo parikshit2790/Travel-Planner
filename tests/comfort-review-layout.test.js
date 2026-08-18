@@ -14,21 +14,24 @@ assert.ok(css.includes("@media (max-width: 1280px)"));
 assert.ok(css.includes(".comfort-card-grid, .review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }"));
 assert.ok(css.includes(".status-grid, .form-grid, .chip-grid, .split, .compact-grid, .comfort-card-grid, .review-grid, .food-summary-layout, .food-detail-row { grid-template-columns: 1fr; }"));
 
-const comfortStep = app.match(/function comfortStep\(\) \{([\s\S]*?)\nfunction reviewStep/)?.[1] || "";
+// comfortStep() was removed -- Daily Schedule and Physical Comfort moved
+// into styleStep(); Transportation Limits (Electric Vehicle Charging Needs,
+// Prefer Fastest Route, Use Tolls When Helpful, Interested in Ferries,
+// comfort-tip) was dropped entirely with no replacement.
+const styleStep = app.match(/function styleStep\(\) \{([\s\S]*?)(?=\nfunction \w)/)?.[1] || "";
 const reviewStep = app.match(/function reviewStep\(\) \{([\s\S]*?)\nfunction quickInterpretTable/)?.[1] || "";
 
-assert.ok(comfortStep.includes("Hiking is not currently selected as an interest."));
-assert.ok(comfortStep.includes("Add Hiking Interest"));
-assert.ok(comfortStep.includes("Electric Vehicle Charging Needs"));
-assert.ok(comfortStep.includes("evRelevant ?"));
-assert.ok(comfortStep.includes("comfortCard(1"));
-assert.ok(comfortStep.includes("comfort-tip"));
-assert.ok(comfortStep.includes("Prefer Fastest Route"));
-assert.ok(comfortStep.includes("Use Tolls When Helpful"));
-assert.ok(comfortStep.includes("Interested in Ferries"));
-assert.ok(comfortStep.includes("stepIssueTable"));
-assert.ok(!comfortStep.includes("Latest end"));
-assert.ok(!comfortStep.includes("Dinner time"));
+assert.ok(styleStep.includes("Hiking is not currently selected as an interest."));
+assert.ok(styleStep.includes("Add Hiking Interest"));
+assert.ok(styleStep.includes("comfortCard(1"));
+assert.ok(styleStep.includes("stepIssueTable"));
+assert.ok(!styleStep.includes("Latest end"));
+assert.ok(!styleStep.includes("Dinner time"));
+assert.ok(!app.includes("Electric Vehicle Charging Needs"), "Transportation Limits card was dropped");
+assert.ok(!app.includes("Prefer Fastest Route"), "Transportation Limits card was dropped");
+assert.ok(!app.includes("Use Tolls When Helpful"), "Transportation Limits card was dropped");
+assert.ok(!app.includes("Interested in Ferries"), "Transportation Limits card was dropped");
+assert.ok(!app.includes("comfort-tip"), "Transportation Limits card was dropped");
 
 assert.ok(reviewStep.includes("Ready with Warnings"));
 assert.ok(reviewStep.includes("Ready to Build"));
