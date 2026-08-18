@@ -29,11 +29,7 @@ assert.ok(!stepBodies.foodStep.includes("Latest Return"));
 assert.ok(stepBodies.foodStep.includes("Preferred Dinner Time"));
 assert.ok(stepBodies.foodStep.includes("Food Budget per Person"));
 assert.ok(!stepBodies.styleStep.includes("Food Budget per Person"));
-// Total Budget lives in budgetAccommodationDetails(), a helper basicsStep()
-// calls rather than inlines, so it falls outside the \w+Step() body regex
-// above -- check app.js broadly instead, and confirm it stayed out of the
-// other two steps.
-assert.ok(app.includes("Total Budget"));
+assert.ok(stepBodies.basicsStep.includes("Total Budget"));
 assert.ok(!stepBodies.foodStep.includes("Total Budget"));
 assert.ok(!stepBodies.styleStep.includes("Total Budget"));
 
