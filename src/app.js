@@ -1343,6 +1343,7 @@ function basicsStep() {
   const issues = visibleTripBasicsIssues();
   const blocking = issues.some((issue) => issue.blocking);
   const status = stepStatus(trip, issues);
+  const fieldIssues = new Map(issues.filter((issue) => issue.blocking && issue.field).map((issue) => [issue.field, issue]));
   return `<div class="trip-basics-experience">
     <section class="trip-basics-status-strip">
       <div><p class="eyebrow">Step 1</p><h2>Trip Basics</h2></div>${badge(status)}
@@ -1351,13 +1352,13 @@ function basicsStep() {
     <section class="trip-essentials-section step-1-zone" aria-label="Trip Essentials">
       <div class="zone-head"><span aria-hidden="true">${iconSvg("mapPin")}</span><div><p class="eyebrow">Trip Essentials</p><h2>Tell us where and when.</h2></div></div>
       <div class="form-grid basics-grid">
-        ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus)}
-        ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus)}
+        ${locationField("from", "Traveling From", trip.from, trip.fromLocation, trip.fromVerificationStatus, fieldIssues.get("trip.from"))}
+        ${locationField("destination", "Destination", trip.destination, trip.destinationLocation, trip.destinationVerificationStatus, fieldIssues.get("trip.destination"))}
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
-        ${fieldShell("Start Date", dateTimeField("trip.startDate", trip.startDate, "Start Date", "trip.routePreferences.arrivalTime", trip.routePreferences?.arrivalTime || "08:00", "Arrival Time"), "First travel day and arrival time (defaults to 8:00 AM).")}
-        ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.")}
+        ${fieldShell("Start Date", dateTimeField("trip.startDate", trip.startDate, "Start Date", "trip.routePreferences.arrivalTime", trip.routePreferences?.arrivalTime || "08:00", "Arrival Time"), "First travel day and arrival time (defaults to 8:00 AM).", fieldIssues.get("trip.startDate"))}
+        ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.", fieldIssues.get("trip.endDate"))}
         ${fieldShell("Trip Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Trip Style"), "Sets the overall spending tier.")}
-        ${fieldShell("Total Budget", select("trip.budget.total", trip.budget.total, totalBudgetOptions, "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; picking a range improves itinerary accuracy.")}
+        ${fieldShell("Total Budget", select("trip.budget.total", trip.budget.total, totalBudgetOptions, "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; picking a range improves itinerary accuracy.", fieldIssues.get("trip.budget.total"))}
         ${fieldShell("Maximum Nightly Lodging Budget", select("trip.budget.lodging", trip.budget.lodging, nightlyLodgingBudgetOptions, "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
       </div>
       ${destinationRegionsField(trip)}
@@ -1569,26 +1570,27 @@ function sampleTripPanel(trip) {
   </section>`;
 }
 
-function fieldShell(labelText, control, helper = "") {
+function fieldShell(labelText, control, helper = "", issue = null) {
   const id = `field-${labelText.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-  return `<div class="field-shell"><label for="${id}">${esc(labelText)}</label>${control.replace(/<(input|select|textarea)/, `<$1 id="${id}"`)}<small class="field-helper">${esc(helper || " ")}</small></div>`;
+  const helperText = issue ? issue.issue : helper;
+  return `<div class="field-shell${issue ? " has-error" : ""}"><label for="${id}">${esc(labelText)}</label>${control.replace(/<(input|select|textarea)/, `<$1 id="${id}"`)}<small class="field-helper${issue ? " field-helper-error" : ""}">${esc(helperText || " ")}</small></div>`;
 }
 
-function locationField(field, labelText, value, location, verificationStatus) {
+function locationField(field, labelText, value, location, verificationStatus, issue = null) {
   const active = ui.activeLocationField === field;
-  const helper = locationVerificationLabel(location, verificationStatus === "Location Not Verified" ? "Select a suggestion to verify this location." : verificationStatus);
+  const helper = issue ? issue.issue : locationVerificationLabel(location, verificationStatus === "Location Not Verified" ? "Select a suggestion to verify this location." : verificationStatus);
   const statusClass = location?.verificationStatus === "Verified" ? "verified" : "needs-review";
   const panelId = `location-results-${field}`;
   const activeId = ui.locationHighlight[field] >= 0 ? `${panelId}-${ui.locationHighlight[field]}` : "";
   const clearLabel = field === "from" ? "Clear Traveling From" : field === "destination" ? "Clear Destination" : "Clear Location";
-  return `<div class="field-shell location-field">
+  return `<div class="field-shell location-field${issue ? " has-error" : ""}">
     <label for="location-${field}">${esc(labelText)}</label>
     <div class="location-control">
       <input id="location-${field}" role="combobox" aria-autocomplete="list" aria-expanded="${active}" aria-controls="${panelId}" ${activeId ? `aria-activedescendant="${activeId}"` : ""} aria-describedby="location-helper-${field}" autocomplete="off" data-location-field="${esc(field)}" value="${esc(value || "")}" placeholder="${field === "from" ? "City, airport, state, or country" : "City, region, state, or country"}">
       ${String(value || "").trim() ? `<button class="location-clear" type="button" aria-label="${esc(clearLabel)}" data-action="clearLocation:${esc(field)}">×</button>` : ""}
       <span class="verification-pill ${statusClass}" aria-label="${esc(helper)}">${location?.verificationStatus === "Verified" ? "✓ Verified" : "Select from suggestions"}</span>
     </div>
-    <small id="location-helper-${field}" class="field-helper">${esc(helper)}</small>
+    <small id="location-helper-${field}" class="field-helper${issue ? " field-helper-error" : ""}">${esc(helper)}</small>
   </div>`;
 }
 
