@@ -66,22 +66,11 @@ export const optionSets = {
 };
 
 export const travelerRestrictionOptions = [
-  "Food allergy",
-  "Gluten intolerance",
-  "Lactose intolerance",
-  "Mandatory vegetarian",
-  "Mandatory vegan",
-  "Halal requirement",
-  "Kosher requirement",
-  "Jain food requirement",
-  "Avoid beef",
-  "Avoid pork",
-  "Avoid seafood",
   "Mobility limitation",
-  "Wheelchair accessibility",
   "Stroller requirement",
-  "Minimal walking",
   "Medical travel consideration",
+  "Minimal walking",
+  "Wheelchair accessibility",
   "Other"
 ];
 
