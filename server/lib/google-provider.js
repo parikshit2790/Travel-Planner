@@ -780,6 +780,13 @@ function buildGoogleRegions(destinationLocation, places) {
       : { lat: destinationLocation.latitude, lng: destinationLocation.longitude };
     const representative = clusterNamingRepresentative(members, center);
     let name = regionNameForCluster(city, representative, members);
+    // "Central" is a real Google-tagged neighborhood/sublocality name in some
+    // cities (confirmed live: Denver) -- appended with " area" like every
+    // other cluster name here, it collides with our own internal
+    // central-area region-id convention and reads as leaked internal jargon
+    // to the quality gate. openai-destination-provider.js already renames
+    // this exact case for its own region names; match that here.
+    if (/^central area$/i.test(name.trim())) name = "Downtown area";
     if (usedRegionNames.has(name)) name = regionNameFromPlace(city, representative, "area");
     usedRegionNames.add(name);
     return {
