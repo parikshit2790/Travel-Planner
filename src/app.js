@@ -1292,6 +1292,13 @@ function stepView() {
   return reviewStep();
 }
 
+const totalBudgetOptions = [
+  "$1,000-$1,500", "$1,500-$2,000", "$2,000-$2,500", "$2,500-$3,000",
+  "$3,000-$3,500", "$3,500-$4,000", "$4,000-$4,500", "$4,500-$5,000",
+  "$5,000-$5,500", "$5,500-$6,000", "$6,000-$6,500", "$6,500-$7,000",
+  "$7,000+"
+];
+
 function basicsStep() {
   const trip = state.trip;
   const issues = visibleTripBasicsIssues();
@@ -1310,8 +1317,8 @@ function basicsStep() {
         ${fieldShell("Transportation", select("trip.transportation", trip.transportation, optionSets.transportation, "Transportation"), "Used for route feasibility.")}
         ${fieldShell("Start Date", dateTimeField("trip.startDate", trip.startDate, "Start Date", "trip.routePreferences.arrivalTime", trip.routePreferences?.arrivalTime || "08:00", "Arrival Time"), "First travel day and arrival time (defaults to 8:00 AM).")}
         ${fieldShell("End Date", dateTimeField("trip.endDate", trip.endDate, "End Date", "trip.routePreferences.departureTime", trip.routePreferences?.departureTime || "20:00", "Departure Time"), "Last travel day and departure time (defaults to 8:00 PM); trip length is calculated from the two dates.")}
-        ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
-        ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; an exact total improves itinerary accuracy.")}
+        ${fieldShell("Trip Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Trip Style"), "Sets the overall spending tier.")}
+        ${fieldShell("Total Budget", select("trip.budget.total", trip.budget.total, totalBudgetOptions, "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; picking a range improves itinerary accuracy.")}
         ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
       </div>
       ${destinationRegionsField(trip)}
@@ -2256,7 +2263,7 @@ function reviewStep() {
         ["Transportation", trip.transportation],
         ["Approved Route", approvedRouteSummary(trip)],
         ["Travelers", `${trip.groupType} · ${trip.adults} adult${Number(trip.adults) === 1 ? "" : "s"}${Number(trip.children) ? `, ${trip.children} child${Number(trip.children) === 1 ? "" : "ren"}` : ""}${Number(trip.seniors) ? `, ${trip.seniors} senior${Number(trip.seniors) === 1 ? "" : "s"}` : ""}`],
-        ["Budget Range", trip.budget.total || "$1,500-$3,500"]
+        ["Budget Range", trip.budget.total || "Not selected"]
       ])}
       ${reviewCard("Trip Style", 2, "style", [
         ["Nature Focus", trip.style.balance],
