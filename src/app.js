@@ -79,7 +79,6 @@ let ui = {
   openFoodSection: null,
   foodDraft: null,
   foodSearch: "",
-  openLodgingPicker: false,
   openSpecialNeeds: false,
   planSection: "overview",
   planDialog: null,
@@ -460,7 +459,6 @@ function renderView() {
     ${datePickerOverlay()}
     ${experienceOverlay()}
     ${foodSectionOverlay()}
-    ${lodgingOverlay()}
     ${specialNeedsOverlay()}
     ${savedTripsDrawer()}
     ${globalFooter()}`;
@@ -1405,7 +1403,6 @@ function budgetAccommodationDetails(trip) {
       ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
       ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; an exact total improves itinerary accuracy.")}
       ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
-      ${fieldShell("Accommodation Preferences", `${esc(chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel", "Free parking", "Free breakfast"]))} <button class="small" data-action="openLodging">Edit</button>`, "Room type, amenities, and other lodging preferences.")}
     </div>
     ${budgetIssues.length ? stepIssueTable(budgetIssues) : ""}
   </details>`;
@@ -2202,17 +2199,6 @@ function saveFoodDraft() {
   ui.foodSearch = "";
 }
 
-function lodgingOverlay() {
-  if (!ui.openLodgingPicker) return "";
-  return `<div class="restriction-layer" data-action="closeLodging">
-    <div class="choice-panel" role="dialog" aria-label="Accommodation Preferences">
-      <div class="restriction-title">Accommodation Preferences</div>
-      <div class="choice-list">${optionSets.lodging.map((option) => `<label class="restriction-option">${checkbox(`lodging.styles.${option}`, state.trip.lodging.styles.includes(option), option)}<span class="restriction-check" aria-hidden="true">${state.trip.lodging.styles.includes(option) ? "✓" : ""}</span><span>${esc(option)}</span></label>`).join("")}</div>
-      <div class="restriction-actions"><button data-action="closeLodging">Done</button></div>
-    </div>
-  </div>`;
-}
-
 function specialNeedsOverlay() {
   if (!ui.openSpecialNeeds) return "";
   return `<div class="restriction-layer" data-action="closeSpecialNeeds">
@@ -2237,7 +2223,7 @@ function specialNeedsTick(trip) {
   const values = trip.specialNeeds || [];
   const hasValues = values.length > 0;
   return `<div class="special-needs-tick">
-    <span class="special-needs-tick-summary">${hasValues ? `<i aria-hidden="true">${iconSvg("check")}</i>${values.length} selected` : "None selected"}</span>
+    <div class="special-needs-tick-summary">${hasValues ? foodValuePills(values, 6) : `<span class="special-needs-tick-empty">None selected</span>`}</div>
     <button type="button" class="small" data-step="3">${hasValues ? "Edit in Food and Evenings" : "Add in Food and Evenings"}</button>
   </div>`;
 }
@@ -2277,8 +2263,7 @@ function reviewStep() {
         ["Transportation", trip.transportation],
         ["Approved Route", approvedRouteSummary(trip)],
         ["Travelers", `${trip.groupType} · ${trip.adults} adult${Number(trip.adults) === 1 ? "" : "s"}${Number(trip.children) ? `, ${trip.children} child${Number(trip.children) === 1 ? "" : "ren"}` : ""}${Number(trip.seniors) ? `, ${trip.seniors} senior${Number(trip.seniors) === 1 ? "" : "s"}` : ""}`],
-        ["Budget Range", trip.budget.total || "$1,500-$3,500"],
-        ["Accommodation", chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel with free parking and breakfast"])]
+        ["Budget Range", trip.budget.total || "$1,500-$3,500"]
       ])}
       ${reviewCard("Trip Style", 2, "style", [
         ["Nature Focus", trip.style.balance],
@@ -2667,7 +2652,7 @@ function closeDialogsOnEscape(event) {
     ui.openExperienceCategory = null;
     ui.experienceSearch = "";
   } else if (ui.openFoodSection) ui.openFoodSection = null;
-  else if (ui.openLodgingPicker) ui.openLodgingPicker = false;
+  else if (ui.openSpecialNeeds) ui.openSpecialNeeds = false;
   else if (ui.planningPrinciplesOpen) closePlanningPrinciples();
   else return;
   persist("Updated");
@@ -3682,8 +3667,6 @@ function action(name) {
   }
   if (name === "clearFoodDraft" && ui.foodDraft) clearFoodDraft();
   if (name === "saveFoodSection" && ui.foodDraft) saveFoodDraft();
-  if (name === "openLodging") ui.openLodgingPicker = true;
-  if (name === "closeLodging") ui.openLodgingPicker = false;
   if (name === "openSpecialNeeds") ui.openSpecialNeeds = true;
   if (name === "closeSpecialNeeds") ui.openSpecialNeeds = false;
   if (name === "toggleWarnings") ui.showWarnings = !ui.showWarnings;

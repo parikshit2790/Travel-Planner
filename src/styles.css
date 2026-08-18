@@ -571,10 +571,9 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .travelers-composition-grid { grid-template-columns: 1.35fr repeat(4, minmax(120px, 0.75fr)); align-items: end; margin-bottom: 18px; }
 .travelers-composition-grid label { color: #31496b; font-weight: 750; }
 .special-needs-cell { grid-column: 1 / -1; display: grid; gap: 6px; }
-.special-needs-tick { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 9px 11px; background: linear-gradient(180deg, #fff, #fbfdff); font-weight: 600; }
-.special-needs-tick-summary { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
-.special-needs-tick-summary i { width: 16px; height: 16px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--good); color: #fff; }
-.special-needs-tick-summary i svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.special-needs-tick { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 9px 11px; background: linear-gradient(180deg, #fff, #fbfdff); }
+.special-needs-tick-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.special-needs-tick-empty { color: var(--muted); font-weight: 600; }
 .compact-chip-grid { gap: 6px; }
 .compact-chip { padding: 5px 9px; font-weight: 600; font-size: 0.85rem; }
 .small { min-height: 32px; padding: 5px 8px; }

@@ -30,7 +30,6 @@ assert.equal(draft.activity.walking, "Not Specified");
 assert.equal(draft.activity.hiking, "No hiking");
 assert.equal(draft.transport.maxDrivingDay, "");
 assert.equal(draft.budget.style, "Not Specified");
-assert.equal(draft.lodging.styles.length, 0);
 
 assert.equal(initialState.activeStep, 1);
 assert.equal(initialState.preview, null);

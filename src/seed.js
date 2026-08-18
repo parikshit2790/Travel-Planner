@@ -75,7 +75,6 @@ export function createSampleLosAngelesTrip(today = new Date()) {
   sample.budget.style = "Moderate";
   sample.budget.total = "$1,500-$3,500";
   sample.budget.strictness = "Flexible";
-  sample.lodging.styles = ["Hotel", "Free parking", "Free breakfast"];
   ["Beaches", "Scenic drives", "Photography", "Museums", "Architecture", "Food experiences", "Local culture", "Sunset"].forEach((label) => addOrUpdatePreference(sample, "experiences", label, label === "Beaches" ? "Strong preference" : "Nice to have", "Sample Trip"));
   syncTravelersToCounts(sample);
   sample.travelers[1].restrictions = ["Mobility limitation"];
