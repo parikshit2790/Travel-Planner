@@ -119,7 +119,27 @@ async function handleTripGeneration({ trip, destinationProfile, variationSeed = 
     if (registeredProfile && config.placeProvider === "google") {
       registeredProfile.transitEstimates = await precomputeFlagshipTransitEstimates(registeredProfile, config);
     }
-    const result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics, destinationProfileId: registeredProfile?.id });
+    // A quality-rejected result isn't necessarily a bad trip input -- the
+    // opportunity graph and day-building draw on live, non-deterministic
+    // research (candidate ranking ties, LLM-assisted destination research),
+    // so the exact same trip can pass or fail run to run. Retrying in-process
+    // with a different variationSeed re-rolls candidate selection using the
+    // already-fetched destinationProfile (no extra provider calls), which
+    // resolves most of these without the user ever seeing a rejection.
+    const maxAttempts = 3;
+    let result = generateTripPlan(normalizedTrip, { variationSeed, sourceDiagnostics, destinationProfileId: registeredProfile?.id });
+    for (let attempt = 1; result.status === "quality-rejected" && attempt < maxAttempts; attempt += 1) {
+      logPlannerEvent({
+        requestId,
+        action: "generate-trip",
+        mode: config.placeProvider === "mock" || config.routeProvider === "mock" ? "mock" : "live",
+        stage: "quality-rejected-retry",
+        destination,
+        errorCode: "PLAN_QUALITY_REJECTED",
+        attempt
+      });
+      result = generateTripPlan(normalizedTrip, { variationSeed: variationSeed + attempt, sourceDiagnostics, destinationProfileId: registeredProfile?.id });
+    }
     if (result?.plan?.generationMetadata) {
       result.plan.generationMetadata.sourceDiagnostics = sourceDiagnostics;
     }
