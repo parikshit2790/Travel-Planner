@@ -8,7 +8,16 @@ const tripBasicsChrome = app.match(/function tripBasicsChrome\(trip, travelerCou
 
 assert.ok(app.includes("Where should your next trip take you?"));
 assert.ok(app.includes("Add the essential details. RouteMosaic will use them to shape a realistic itinerary."));
-assert.ok(app.includes("Who is going on this trip?"));
+assert.ok(!app.includes("Who is going on this trip?"), "Travelers is no longer a standalone step");
+assert.ok(app.includes("Who's Traveling"));
+assert.ok(app.includes("Group and special needs."));
+assert.ok(app.includes("function whosTravelingSection"));
+assert.ok(app.includes("function specialNeedsField"));
+assert.ok(app.includes("function budgetAccommodationDetails"));
+assert.ok(app.includes("Budget and accommodation"));
+assert.ok(app.includes("function dateTimeField"));
+assert.ok(app.includes("Arrival Time"));
+assert.ok(app.includes("Departure Time"));
 assert.ok(app.includes("Interpret My Trip"));
 assert.ok(app.includes("Try a sample trip"));
 assert.ok(app.includes("Load a realistic Los Angeles example."));

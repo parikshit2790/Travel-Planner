@@ -5,10 +5,8 @@ import { readFileSync } from "node:fs";
 const app = readFileSync("src/app.js", "utf8");
 const assets = [
   "header-trip-basics.png",
-  "header-travelers.png",
   "header-trip-style.png",
   "header-food-evenings.png",
-  "header-comfort-budget.png",
   "header-review.png"
 ];
 

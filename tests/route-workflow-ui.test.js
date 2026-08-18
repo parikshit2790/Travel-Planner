@@ -10,8 +10,8 @@ assert.ok(app.includes("routeRecommendationStep()"), "Wizard must include route 
 assert.ok(app.includes("Approve your trip shape before daily planning."), "Route approval screen copy should be present");
 assert.ok(app.includes("approveRouteOption(state.trip"), "Route approval action must store approved shape");
 assert.ok(app.includes("routeRecommendationRequired(state.trip) && !approvedRouteStillValid(state.trip)"), "Build flow must gate on route approval");
-assert.ok(!app.includes("state.activeStep === 2 && routeRecommendationRequired(state.trip)"), "Route approval must not replace Step 2 Travelers");
-assert.ok(app.includes("state.activeStep === 6 && routeRecommendationRequired(state.trip)"), "Route approval should live at the Review/build boundary");
+assert.ok(!app.includes("state.activeStep === 2 && routeRecommendationRequired(state.trip)"), "Route approval must not replace Step 2 Trip Style");
+assert.ok(app.includes("state.activeStep === 4 && routeRecommendationRequired(state.trip)"), "Route approval should live at the Review/build boundary");
 assert.ok(!app.includes("Choose and approve a route shape before traveler details."), "Trip Basics Continue must not force route approval before Travelers");
 assert.ok(app.includes("Fewer Hotel Changes"));
 assert.ok(app.includes("Reduce Driving"));
