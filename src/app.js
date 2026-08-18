@@ -27,6 +27,7 @@ import {
   reconcileTripStylePreferences,
   saveProfile,
   syncTravelersToCounts,
+  calculateTripEndDate,
   calculateTripNights,
   tripBasicsIssues,
   travelerTotal,
@@ -311,8 +312,15 @@ function datePickerDropdown(path, currentValue) {
   const parsed = parseDateTextValue(currentValue);
   const view = ui.datePickerViewMonth || (parsed ? { year: parsed.year, month: parsed.month } : todayDateParts());
   const { year, month } = view;
-  const today = todayDateParts();
   const todayValue = todayDateValue();
+  // End Date must land after Start Date, not merely not-in-the-past --
+  // calculateTripEndDate(startDate, 2) is "start date + 1 day", i.e. the
+  // earliest valid End Date. Falls back to today's floor if Start Date isn't
+  // set yet or the "+1 day" math can't resolve.
+  const minValue = path === "trip.endDate" && state.trip.startDate
+    ? (calculateTripEndDate(state.trip.startDate, 2) || todayValue)
+    : todayValue;
+  const minValueParts = parseDateTextValue(minValue) || todayDateParts();
   const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const firstWeekday = new Date(year, month - 1, 1).getDay();
   const totalDays = new Date(year, month, 0).getDate();
@@ -321,19 +329,20 @@ function datePickerDropdown(path, currentValue) {
   for (let day = 1; day <= totalDays; day += 1) {
     const value = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const selected = currentValue === value;
-    if (value < todayValue) {
+    if (value < minValue) {
       cells.push(`<span class="date-picker-cell disabled" aria-hidden="true">${day}</span>`);
     } else {
       cells.push(`<button type="button" class="date-picker-cell${selected ? " selected" : ""}" data-action="pickDate:${esc(path)}:${value}">${day}</button>`);
     }
   }
-  const atOrBeforeCurrentMonth = year < today.year || (year === today.year && month <= today.month);
+  const atOrBeforeMinMonth = year < minValueParts.year || (year === minValueParts.year && month <= minValueParts.month);
   return `<div class="date-picker-dropdown" data-date-picker-panel="${esc(path)}">
     <div class="date-picker-header">
-      <button type="button" class="date-picker-nav" aria-label="Previous month" data-action="datePickerNav:-1" ${atOrBeforeCurrentMonth ? "disabled" : ""}>&#8249;</button>
+      <button type="button" class="date-picker-nav" aria-label="Previous month" data-action="datePickerNav:-1" ${atOrBeforeMinMonth ? "disabled" : ""}>&#8249;</button>
       <strong>${esc(monthLabel)}</strong>
       <button type="button" class="date-picker-nav" aria-label="Next month" data-action="datePickerNav:1">&#8250;</button>
     </div>
+    ${path === "trip.endDate" && state.trip.startDate ? `<p class="date-picker-hint">Must be after ${esc(formatFriendlyDate(state.trip.startDate))}.</p>` : ""}
     <div class="date-picker-weekdays">${["S", "M", "T", "W", "T", "F", "S"].map((label) => `<span>${label}</span>`).join("")}</div>
     <div class="date-picker-grid">${cells.join("")}</div>
   </div>`;
@@ -1227,8 +1236,7 @@ function tripContextBar(trip, travelerCount, issueCount) {
 }
 
 function warningTray() {
-  const warnings = visibleReviewIssues().map((issue) => issue.issue);
-  return `<section class="panel warning-tray">${table(["Issue"], warnings.map((warning) => `<tr><td>${esc(warning)}</td></tr>`), "No issues.")}</section>`;
+  return `<section class="panel warning-tray">${stepIssueTable(visibleReviewIssues())}</section>`;
 }
 
 function acceptedPreferencesTray() {
@@ -1257,6 +1265,17 @@ function blockingValidationIssues() {
   return reviewIssues().filter((issue) => issue.blocking).map((issue) => issue.issue);
 }
 
+// Builds a toast message that names the specific problem(s) instead of a
+// generic "resolve issues" -- shows every message when there are a few,
+// caps the list and adds a "+N more" tail once it would otherwise get long.
+function describeBlockingIssues(messages, prefix = "") {
+  if (!messages.length) return "";
+  if (messages.length === 1) return `${prefix}${messages[0]}`;
+  const shown = messages.slice(0, 3);
+  const remainder = messages.length - shown.length;
+  return `${prefix}${messages.length} issues to resolve: ${shown.join(" ")}${remainder > 0 ? ` (+${remainder} more)` : ""}`;
+}
+
 function routeRelevantField(path) {
   return [
     "trip.from",
@@ -1272,11 +1291,13 @@ function routeRelevantField(path) {
 function stepNavButton(step, stepNumber) {
   const complete = stepNumber < state.activeStep || (stepNumber === 1 && !tripBasicsIssues(state.trip).some((issue) => issue.blocking));
   const futureDisabled = stepNumber > 1 && tripBasicsIssues(state.trip).some((issue) => issue.blocking);
-  const classes = [state.activeStep === stepNumber ? "active" : "", complete ? "complete" : ""].filter(Boolean).join(" ");
+  const ownStepIssueCount = stepNumber > 1 ? reviewIssues().filter((issue) => issue.blocking && (issue.owningStep || 1) === stepNumber).length : 0;
+  const classes = [state.activeStep === stepNumber ? "active" : "", complete ? "complete" : "", ownStepIssueCount ? "has-issue" : ""].filter(Boolean).join(" ");
   return `<button class="${classes}" data-step="${stepNumber}" ${state.activeStep === stepNumber ? `aria-current="step"` : ""} ${futureDisabled ? "disabled" : ""}>
     <span>${complete ? "✓" : stepNumber}</span>
     <strong>${esc(step)}</strong>
     <small class="step-subtitle">${esc(stepSubtitles[stepNumber - 1])}</small>
+    ${ownStepIssueCount ? `<em class="step-issue-badge" aria-label="${ownStepIssueCount} issue${ownStepIssueCount === 1 ? "" : "s"} on this step">${ownStepIssueCount}</em>` : ""}
   </button>`;
 }
 
@@ -2358,8 +2379,8 @@ function reviewIssuesCard(issues) {
   return `<article class="review-card review-issues issues-card">
     <div class="review-card-art" aria-hidden="true"></div>
     <div class="review-card-content">
-      <div class="panel-head mini-head"><h3>Issues and Advisories</h3>${providerIssue ? `<button data-action="refreshProviderStatus">Retry</button>` : `<button data-step="${firstIssue?.owningStep || 1}">Edit</button>`}</div>
-      ${firstIssue ? `<div class="issue-summary"><strong>${esc(firstIssue.issue)}</strong><p>${esc(firstIssue.action || "Review this item before building your trip.")}</p></div>` : `<div class="issue-summary clear"><strong>No issues found.</strong><p>Your trip is ready to build.</p></div>`}
+      <div class="panel-head mini-head"><h3>Issues and Advisories</h3>${providerIssue ? `<button data-action="refreshProviderStatus">Retry</button>` : ""}</div>
+      ${issues.length ? stepIssueTable(issues) : `<div class="issue-summary clear"><strong>No issues found.</strong><p>Your trip is ready to build.</p></div>`}
     </div>
   </article>`;
 }
@@ -3252,9 +3273,10 @@ async function buildTripPlanAction(name) {
     persist("Updated");
     return;
   }
-  if (blockingValidationIssues().length) {
+  const blocking = blockingValidationIssues();
+  if (blocking.length) {
     ui.showWarnings = true;
-    ui.toast = "Resolve blocking issues before building your trip.";
+    ui.toast = describeBlockingIssues(blocking);
     persist("Updated");
     return;
   }
@@ -3487,6 +3509,12 @@ function action(name) {
     ui.planAnnouncement = "Meals regenerated while activities stayed in place.";
   }
   if (name === "next") {
+    const ownStepBlocking = reviewIssues().filter((issue) => issue.blocking && (issue.owningStep || 1) === state.activeStep);
+    if (ownStepBlocking.length) {
+      ui.showWarnings = true;
+      ui.toast = describeBlockingIssues(ownStepBlocking.map((issue) => issue.issue));
+      return persist("Updated");
+    }
     state.activeStep = Math.min(4, state.activeStep + 1);
     if (state.activeStep === 4) {
       ui.openExperienceCategory = null;
@@ -3502,9 +3530,10 @@ function action(name) {
   }
   if (name === "continueBasics") {
     ui.basicsSubmitAttempted = true;
-    if ([...tripBasicsIssues(state.trip), ...locationVerificationIssues(state.trip)].some((issue) => issue.blocking)) {
+    const basicsBlocking = [...tripBasicsIssues(state.trip), ...locationVerificationIssues(state.trip)].filter((issue) => issue.blocking);
+    if (basicsBlocking.length) {
       ui.showWarnings = true;
-      ui.toast = "Resolve Step 1 issues before continuing.";
+      ui.toast = describeBlockingIssues(basicsBlocking.map((issue) => issue.issue));
     } else {
       ensureRouteArchitecture(state.trip);
       state.activeStep = 2;
@@ -3600,7 +3629,7 @@ function action(name) {
     const [, field, step] = name.split(":");
     state.activeStep = Number(step || state.activeStep);
     requestAnimationFrame(() => {
-      if (field) document.querySelector(`[data-field="${CSS.escape(field)}"]`)?.focus();
+      if (field) (document.querySelector(`[data-field="${CSS.escape(field)}"]`) || document.querySelector(`[data-location-field="${CSS.escape(field.replace("trip.", ""))}"]`))?.focus();
     });
   }
   if (name === "addHikingInterest") {
@@ -3713,9 +3742,10 @@ function action(name) {
   }
   if (name === "saveProfile") saveProfile(state, `Profile ${state.profiles.length + 1}`, state.trip);
   if (name === "generatePreview") {
-    if (blockingValidationIssues().length) {
+    const blocking = blockingValidationIssues();
+    if (blocking.length) {
       ui.showWarnings = true;
-      ui.toast = "Resolve blocking issues before building your trip.";
+      ui.toast = describeBlockingIssues(blocking);
     } else {
       state.preview = generatePlanPreview(state.trip);
       state.activeStep = 4;
