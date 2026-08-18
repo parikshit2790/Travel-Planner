@@ -14,7 +14,7 @@ assert.ok(foodStep.includes("Meals"));
 assert.ok(foodStep.includes("Evening Preferences"));
 assert.ok(foodStep.includes("Food Planning Details"));
 assert.ok(foodStep.includes("food-summary-layout"));
-assert.ok(foodStep.includes("foodSummaryLine(\"Group Diet\""));
+assert.ok(foodStep.includes("foodSummaryLine(\"Preferred diet\""));
 assert.ok(foodStep.includes("foodSummaryLine(\"Food Avoidances\""));
 assert.ok(foodStep.includes("foodCuisinePreview(trip.food.cuisine"));
 assert.ok(app.includes("function foodCuisinePreview"));
