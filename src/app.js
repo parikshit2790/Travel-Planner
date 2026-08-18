@@ -80,6 +80,7 @@ let ui = {
   foodDraft: null,
   foodSearch: "",
   openLodgingPicker: false,
+  openSpecialNeeds: false,
   planSection: "overview",
   planDialog: null,
   planDialogItemId: "",
@@ -460,6 +461,7 @@ function renderView() {
     ${experienceOverlay()}
     ${foodSectionOverlay()}
     ${lodgingOverlay()}
+    ${specialNeedsOverlay()}
     ${savedTripsDrawer()}
     ${globalFooter()}`;
   bind();
@@ -1343,7 +1345,7 @@ function whosTravelingSection(trip) {
       <label>Children (0-17) ${input("trip.children", trip.children, "Children", "number")}</label>
       ${Number(trip.children || 0) > 0 ? childAges.map((age, index) => `<label>Child ${index + 1} age ${input(`childAge.${index}`, age, `Child ${index + 1} age`)}</label>`).join("") : ""}
       <label>Seniors (65+) ${input("trip.seniors", trip.seniors, "Seniors", "number")}</label>
-      <label class="special-needs-cell">Special Needs${specialNeedsField(trip)}</label>
+      <label class="special-needs-cell">Special Needs${specialNeedsTick(trip)}</label>
     </div>
   </section>`;
 }
@@ -1387,10 +1389,8 @@ function tripStructureSection(trip) {
         ${fieldShell("Open to Early Starts", select("trip.routePreferences.earlyStarts", prefs.earlyStarts, ["Yes", "Open if worth it", "Prefer not"], "Open to Early Starts"), "Useful for parks, ferries, and long transfers.")}
         ${fieldShell("Sunrise Interest", select("trip.routePreferences.sunriseInterest", prefs.sunriseInterest, ["High", "Optional", "No"], "Sunrise Interest"), "Only used when it fits the route.")}
         ${fieldShell("Sunset Interest", select("trip.routePreferences.sunsetInterest", prefs.sunsetInterest, ["High", "Interested", "No"], "Sunset Interest"), "Helps place scenic evenings.")}
-        ${fieldShell("Photography Importance", select("trip.routePreferences.photographyImportance", prefs.photographyImportance, ["High", "Medium", "Low"], "Photography Importance"), "Raises scenic viewpoints and timing quality.")}
-        ${fieldShell("Remote-area Comfort", select("trip.routePreferences.remoteAreaComfort", prefs.remoteAreaComfort, ["High", "Moderate", "Low"], "Remote-area Comfort"), "Important for parks and rural road trips.")}
-        ${fieldShell("Offline-map Preference", select("trip.routePreferences.offlineMaps", prefs.offlineMaps, ["Yes", "No", "Only remote areas"], "Offline-map Preference"), "Adds prep reminders for route days.")}
       </div>
+      ${["Secluded", "Quiet Area"].includes(trip.style?.locationFeel) ? `<p class="field-note remote-advisory">Your Location Feel leans toward secluded or remote areas -- downloading offline maps before you go is recommended.</p>` : ""}
     </details>
     ${budgetAccommodationDetails(trip)}
   </section>`;
@@ -1403,10 +1403,8 @@ function budgetAccommodationDetails(trip) {
     <summary><span><i aria-hidden="true">${iconSvg("bed")}</i>Budget and accommodation</span>${preferenceChips([`${trip.budget.style || "Moderate"} budget`, `${trip.lodging.changeHotels || "Minimize hotel changes"}`])}</summary>
     <div class="form-grid route-detail-grid">
       ${fieldShell("Budget Style", select("trip.budget.style", trip.budget.style === "Not Specified" ? "Moderate" : trip.budget.style, ["Budget", "Moderate", "Premium", "Luxury", "Custom amount"], "Budget Style"), "Sets the overall spending tier.")}
-      ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.strictness === "Strict" || trip.budget.style === "Custom amount" ? "Required for strict or custom budgets." : "Optional; an exact total improves itinerary accuracy.")}
-      ${fieldShell("Budget Strictness", select("trip.budget.strictness", trip.budget.strictness, ["Strict", "Flexible"], "Budget Strictness"), "Strict enforces the total; flexible allows some variance.")}
+      ${fieldShell("Total Budget", input("trip.budget.total", trip.budget.total || "$1,500-$3,500", "Total Budget"), trip.budget.style === "Custom amount" ? "Required for a custom budget." : "Optional; an exact total improves itinerary accuracy.")}
       ${fieldShell("Maximum Nightly Lodging Budget", input("trip.budget.lodging", trip.budget.lodging || "$260", "Maximum Nightly Lodging Budget"), "Used for hotel-tier suggestions.")}
-      ${fieldShell("Lodging Flexibility", select("trip.lodging.changeHotels", trip.lodging.changeHotels, ["Stay in one place", "Minimize hotel changes", "Open to moving"], "Lodging Flexibility"), "Shapes packing and checkout tips. The hotel-change limit used to build route options is set above, in Route-shaping details.")}
       ${fieldShell("Accommodation Preferences", `${esc(chipSummary(trip.lodging.styles.length ? trip.lodging.styles : ["Hotel", "Free parking", "Free breakfast"]))} <button class="small" data-action="openLodging">Edit</button>`, "Room type, amenities, and other lodging preferences.")}
     </div>
     ${budgetIssues.length ? stepIssueTable(budgetIssues) : ""}
@@ -1895,21 +1893,27 @@ function priorityCard(pref) {
   </article>`;
 }
 
+const priorityImportanceOptions = ["Must have", "Strong preference", "Nice to have", "Avoid"];
+
 function prioritySelect(pref) {
+  const value = pref.importance === "Must avoid" ? "Avoid" : pref.importance;
   return `<select aria-label="${esc(`${pref.label} importance`)}" data-field="prefImportance.${esc(pref.id)}" class="priority-select priority-${esc(priorityTone(pref.importance))}">
-    ${activeImportanceOptions().map((option) => `<option value="${esc(option)}" ${option === pref.importance ? "selected" : ""}>${esc(priorityDisplayLabel(option))}</option>`).join("")}
+    ${priorityImportanceOptions.map((option) => `<option value="${esc(option)}" ${option === value ? "selected" : ""}>${esc(priorityDisplayLabel(option))}</option>`).join("")}
   </select>`;
 }
 
 function priorityDisplayLabel(importance) {
-  if (importance === "Must have" || importance === "Strong preference") return "High Priority";
-  if (importance === "Nice to have") return "Medium Priority";
+  if (importance === "Must have") return "High";
+  if (importance === "Strong preference") return "Medium";
+  if (importance === "Nice to have") return "Low";
   if (importance === "Avoid" || importance === "Must avoid") return "Avoid";
   return importance;
 }
 
 function priorityTone(importance) {
-  if (importance === "Must have" || importance === "Strong preference") return "high";
+  if (importance === "Must have") return "high";
+  if (importance === "Strong preference") return "medium";
+  if (importance === "Nice to have") return "low";
   if (importance === "Avoid" || importance === "Must avoid") return "avoid";
   return "medium";
 }
@@ -1949,7 +1953,6 @@ function experienceDescription(option) {
 function foodStep() {
   const trip = state.trip;
   const foodWarnings = foodAndRestrictionWarnings(trip);
-  const specialNeedsFoodCount = (trip.specialNeeds || []).filter((need) => /food|gluten|lactose|vegetarian|vegan|halal|kosher|jain|beef|pork|seafood/i.test(need)).length;
   const eveningActivities = selectedEveningActivities(trip);
   const nightlife = selectedNightlifeAndDrinks(trip);
   const mealRows = [
@@ -1958,14 +1961,17 @@ function foodStep() {
     ["Dinner", trip.food.dinner || "Relaxed & indulgent", trip.food.dinnerTime || "6:30 - 7:30 PM", "Enjoy local specialties", "Preferred Dinner Time"]
   ];
   return `<section class="panel food-panel">
-    <div class="panel-head"><div><p class="eyebrow">Step 3</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group. Special Needs are managed on the Trip Basics step.">Group Preferences</span></div>
+    <div class="panel-head"><div><p class="eyebrow">Step 3</p><h2>Food and Evenings</h2><p>Help us plan meals and experiences you'll love.</p></div><span class="badge food-context" title="These preferences apply to the whole group.">Group Preferences</span></div>
     <div class="food-layout food-summary-layout">
       <div class="food-column">
         <section class="food-summary-card diet-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("leaf")}</span><h3>Diet and Restrictions</h3></div>
-          ${foodSummaryLine("Group Diet", trip.food.diet, "No group diet selected", "diet")}
+          ${foodSummaryLine("Preferred diet", trip.food.diet, "No group diet selected", "diet")}
           ${foodSummaryLine("Food Avoidances", trip.food.restrictions, "No group-wide avoidances", "avoid")}
-          ${specialNeedsFoodCount ? `<div class="traveler-food-notice"><span aria-hidden="true">${iconSvg("travelers")}</span><p>${specialNeedsFoodCount} special-need dietary restriction${specialNeedsFoodCount === 1 ? "" : "s"} will also be applied.</p><button class="link-button" data-step="1">Review Special Needs</button></div>` : ""}
+        </section>
+        <section class="food-summary-card special-needs-card">
+          <div class="food-card-title"><span aria-hidden="true">${iconSvg("travelers")}</span><h3>Special Needs</h3></div>
+          ${specialNeedsSummaryLine(trip)}
         </section>
         <section class="food-summary-card cuisine-card">
           <div class="food-card-title"><span aria-hidden="true">${iconSvg("chef")}</span><h3>Cuisine Interests</h3></div>
@@ -1999,9 +2005,19 @@ function foodStep() {
   </section>`;
 }
 
-function foodSummaryLine(label, values, emptyText, key) {
+function specialNeedsSummaryLine(trip) {
+  const values = trip.specialNeeds || [];
   const hasValues = values.length > 0;
   return `<div class="food-summary-line">
+    <div><strong>Group-wide needs</strong>${foodSelectedSummary(values, "No special needs selected", "", "", false)}</div>
+    <span class="selected-count">${hasValues ? `${values.length} selected` : "None selected"}</span>
+    <button class="small" aria-label="${esc(`${hasValues ? "Edit" : "Add"} Special Needs`)}" data-action="openSpecialNeeds">${hasValues ? "Edit" : "Add"}</button>
+  </div>`;
+}
+
+function foodSummaryLine(label, values, emptyText, key) {
+  const hasValues = values.length > 0;
+  return `<div class="food-summary-line ${key === "avoid" ? "food-summary-line-bad" : ""}">
     <div><strong>${esc(label)}</strong>${foodSelectedSummary(values, emptyText, "", key, false)}</div>
     <span class="selected-count">${hasValues ? `${values.length} selected` : "None selected"}</span>
     <button class="small" aria-label="${esc(`${hasValues ? "Edit" : "Add"} ${label}`)}" data-action="openFoodSection:${esc(key)}">${hasValues ? "Edit" : "Add"}</button>
@@ -2104,7 +2120,7 @@ function foodSectionOverlay() {
   if (!ui.openFoodSection) return "";
   const draft = ui.foodDraft || createFoodDraft(ui.openFoodSection);
   const sections = {
-    diet: ["Group Diet", [["Group Diet", "food.diet", ["Vegetarian", "Vegan", "Pescatarian", "Non-vegetarian", "Chicken preferred", "Seafood acceptable", "Halal", "Kosher", "Jain", "Gluten-free", "Dairy-free", "Low-carb", "Diabetic-conscious", "Other"]]]],
+    diet: ["Preferred diet", [["Preferred diet", "food.diet", ["Vegetarian", "Vegan", "Pescatarian", "Non-vegetarian", "Chicken preferred", "Seafood acceptable", "Halal", "Kosher", "Jain", "Gluten-free", "Dairy-free", "Low-carb", "Diabetic-conscious", "Other"]]]],
     avoid: ["Food Avoidances", [["Food Avoidances", "food.restrictions", ["Avoid beef", "Avoid pork", "Avoid seafood", "Limited seafood", "Avoid eggs", "Avoid dairy", "Avoid spicy food", "Other"]]]],
     cuisine: ["Cuisine Interests", [["Cuisine Interests", "food.cuisine", ["No preference", ...optionSets.cuisine]]]],
     eveningActivities: ["Evening Activities", [["Evening Activities", "alcohol.preferences", ["Quiet evening venues", "Evening walks", "Sunset activities", "Live music", "Dessert or cafe evenings"]]]],
@@ -2197,6 +2213,17 @@ function lodgingOverlay() {
   </div>`;
 }
 
+function specialNeedsOverlay() {
+  if (!ui.openSpecialNeeds) return "";
+  return `<div class="restriction-layer" data-action="closeSpecialNeeds">
+    <div class="choice-panel" role="dialog" aria-label="Special Needs">
+      <div class="restriction-title">Special Needs</div>
+      ${specialNeedsField(state.trip)}
+      <div class="restriction-actions"><button data-action="closeSpecialNeeds">Done</button></div>
+    </div>
+  </div>`;
+}
+
 function multiSelect(path, title, options, values) {
   return `<div class="picker"><h3>${title}</h3><div class="small-chip-grid">${options.map((option) => `<label class="small-chip ${values.includes(option) ? "selected" : ""}">${checkbox(`${path}.${option}`, values.includes(option), option)}${esc(option)}</label>`).join("")}</div></div>`;
 }
@@ -2206,6 +2233,15 @@ function multiSelect(path, title, options, values) {
 // traveler identity to attach the answer to anymore. Skips multiSelect()'s
 // own <h3> since this renders as one column inside a labeled grid row, not a
 // full-width section.
+function specialNeedsTick(trip) {
+  const values = trip.specialNeeds || [];
+  const hasValues = values.length > 0;
+  return `<div class="special-needs-tick">
+    <span class="special-needs-tick-summary">${hasValues ? `<i aria-hidden="true">${iconSvg("check")}</i>${values.length} selected` : "None selected"}</span>
+    <button type="button" class="small" data-step="3">${hasValues ? "Edit in Food and Evenings" : "Add in Food and Evenings"}</button>
+  </div>`;
+}
+
 function specialNeedsField(trip) {
   const values = trip.specialNeeds || [];
   return `<div class="special-needs-field">
@@ -2453,11 +2489,6 @@ function crossStepIssues() {
 
 function stepIssueTable(issues) {
   return `<div class="issue-table">${table(["Severity", "Issue", "Action"], issues.map((issue) => `<tr><td>${esc(issue.severity)}</td><td>${esc(issue.issue)}</td><td><button class="small" data-action="focusIssue:${esc(issue.field || "")}:${issue.owningStep || state.activeStep}">${esc(issue.action)}</button></td></tr>`))}</div>`;
-}
-
-function budgetHint(trip) {
-  if (trip.budget.strictness === "Strict" || trip.budget.style === "Custom amount") return `<small class="field-note">Required for strict or custom budgets.</small>`;
-  return `<small class="field-note">Optional; an exact total improves itinerary accuracy.</small>`;
 }
 
 function whyItFits() {
@@ -3653,6 +3684,8 @@ function action(name) {
   if (name === "saveFoodSection" && ui.foodDraft) saveFoodDraft();
   if (name === "openLodging") ui.openLodgingPicker = true;
   if (name === "closeLodging") ui.openLodgingPicker = false;
+  if (name === "openSpecialNeeds") ui.openSpecialNeeds = true;
+  if (name === "closeSpecialNeeds") ui.openSpecialNeeds = false;
   if (name === "toggleWarnings") ui.showWarnings = !ui.showWarnings;
   if (name === "togglePreferences") ui.showPreferences = !ui.showPreferences;
   if (name === "togglePlanningPrinciples") {

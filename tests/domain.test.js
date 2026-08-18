@@ -75,7 +75,7 @@ assert.ok(getTripIssues(timeTrip).some((issue) => issue.issue.includes("Preferre
 const budgetTrip = createTripDraft();
 budgetTrip.from = "Charlotte";
 budgetTrip.destination = "Chicago";
-budgetTrip.budget.strictness = "Strict";
+budgetTrip.budget.style = "Custom amount";
 budgetTrip.budget.total = "";
 assert.ok(getTripIssues(budgetTrip).some((issue) => issue.blocking && issue.field === "trip.budget.total"));
 

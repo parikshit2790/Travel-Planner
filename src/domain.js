@@ -874,8 +874,8 @@ export function getTripIssues(trip) {
   if (dinner !== null && latestReturn !== null && dinner > latestReturn) {
     issues.push({ severity: "Warning", issue: "Preferred Dinner Time is later than Latest Return.", action: "Edit Food or Trip Style", field: "trip.schedule.latestReturn", owningStep: 2, blocking: false });
   }
-  if ((trip.budget?.strictness === "Strict" || trip.budget?.style === "Custom amount") && !String(trip.budget?.total || "").trim()) {
-    issues.push({ severity: "Critical", issue: "Strict or custom budget requires a Total Budget.", action: "Add Total Budget", field: "trip.budget.total", owningStep: 1, blocking: true });
+  if (trip.budget?.style === "Custom amount" && !String(trip.budget?.total || "").trim()) {
+    issues.push({ severity: "Critical", issue: "Custom budget requires a Total Budget.", action: "Add Total Budget", field: "trip.budget.total", owningStep: 1, blocking: true });
   }
   return issues;
 }
@@ -899,9 +899,6 @@ export function analyzeTrip(trip) {
   }
   if (trip.activity.walking === "Minimal walking" && (has("experiences", "Moderate hikes") || has("experiences", "Difficult hikes"))) {
     warnings.push("Hiking preferences may conflict with minimal walking. Clearly warn before suggesting strenuous activities.");
-  }
-  if (trip.budget.strictness === "Strict" && trip.budget.style === "Luxury") {
-    warnings.push("Strict budget and luxury style may conflict. Show budget impact before generating.");
   }
   if (avoids("environment", "Urban") && has("environment", "Major cities")) {
     warnings.push("Urban preferences conflict. Prefer quieter neighborhoods or explain city tradeoffs.");

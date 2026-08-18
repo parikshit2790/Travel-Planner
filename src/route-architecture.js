@@ -243,9 +243,8 @@ export function destinationExpansionScore(trip, primaryDestination, candidate, d
   const routeCompatibility = transferBurdenMinutes <= (parseHoursToMinutes(trip.routePreferences?.maxTransferDriveTime) || 180) ? 14 : -60;
   const interestMatch = explicitMention ? 18 : /\b(scenic|coast|beach|mountain|lake|waterfall|museum|history|food|culture)\b/i.test(text) ? 10 : 6;
   const dayCountFit = Number(trip.days || 0) >= 4 ? 12 : -20;
-  const budgetImpact = /strict/i.test(trip.budget?.strictness || "") ? -8 : 4;
-  const total = addedExperienceValue + uniqueness + transferBurden + lodgingBurden + routeCompatibility + interestMatch + dayCountFit + budgetImpact;
-  return { total, addedExperienceValue, uniqueness, transferBurden, transferBurdenMinutes, lodgingBurden, routeCompatibility, interestMatch, budgetImpact, dayCountFit };
+  const total = addedExperienceValue + uniqueness + transferBurden + lodgingBurden + routeCompatibility + interestMatch + dayCountFit;
+  return { total, addedExperienceValue, uniqueness, transferBurden, transferBurdenMinutes, lodgingBurden, routeCompatibility, interestMatch, dayCountFit };
 }
 
 function primaryDestinationCoordinates(trip) {
