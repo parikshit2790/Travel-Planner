@@ -1164,7 +1164,16 @@ export function buildDays(profile, input, constraints, scored, intelligence = nu
     // computed above from the same activity-and-evening item set the day's
     // own summary and dayRouteLabel use), falling back to the pre-scheduling
     // guess only when nothing got scheduled at all.
+    // A logistics-only day (nothing real got scheduled -- contentItems is
+    // empty) has no better signal than the same kind of pre-scheduling guess
+    // firstRegion above already learned not to trust: selected[0] and
+    // themeRegions[0] can both name a candidate/theme that scheduleDay
+    // dropped entirely for time-budget reasons. The traveler's actual hotel
+    // base is what they're really starting/ending that day from -- prefer it
+    // over either guess once there's no real scheduled content to derive
+    // from at all.
     const region = profile.regions.find((item) => item.id === actualRegionIds[0])
+      || (contentItems.length === 0 && profile.regions.find((item) => item.id === profile.planningRules?.defaultHotelRegion))
       || profile.regions.find((item) => item.id === selected[0]?.place.regionId)
       || profile.regions.find((item) => item.id === themeRegions[0])
       || profile.regions[0];
@@ -1650,7 +1659,19 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   // silently relocates them to the primary destination -- e.g. Grand Canyon's
   // breakfast/lunch/dinner recommending Phoenix restaurants. Prefer the day's
   // own approved base region (homeRegionId) before that trip-wide default.
-  const firstRegion = places[0]?.regionId || homeRegionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "";
+  // On an arrival/departure logistics day, though, places[0] is a
+  // pre-scheduling guess that scheduleDay can (and often does) drop entirely
+  // -- confirmed live: a departure day's sole candidate was theme-assigned to
+  // a regional-extension city (Annapolis) for an 8-day DC trip, got dropped
+  // for time-budget reasons leaving zero real activities that day, and its
+  // regionId still seeded breakfast/lunch, sourcing them from genuine
+  // Annapolis restaurants with no activity or transfer anywhere near there
+  // that day. The traveler is actually starting/ending an arrival or
+  // departure day from their real hotel base, not a leftover theme guess --
+  // prefer that over places[0] specifically on those days.
+  const firstRegion = (isArrivalDay || isDepartureDay)
+    ? (homeRegionId || profile.planningRules?.defaultHotelRegion || places[0]?.regionId || profile.regions[0]?.id || "")
+    : (places[0]?.regionId || homeRegionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "");
   if (isArrivalDay) {
     // Breakfast sits at a fixed early-morning slot regardless of when the
     // arrival travel block itself lands -- confirmed live: an 8:00 AM flight
