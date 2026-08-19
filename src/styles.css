@@ -1050,6 +1050,24 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 @media print {
   @page { margin: 0.55in; }
   body { background: #fff !important; color: #111 !important; }
+  /* position: fixed repeats on every printed page in Chrome's print engine, so
+     this needs no per-page markup -- it doubles as a reminder that the plan is
+     an estimate, echoing the "Planning estimates -- not live availability"
+     disclaimer already shown on the Overview tab. */
+  body::after {
+    content: "ROUTEMOSAIC · PLANNING DRAFT";
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-32deg);
+    font-size: 3.2rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    color: rgba(6, 38, 67, 0.07);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 9999;
+  }
   .plan-section-panel.print-excluded { display: none !important; }
   .plan-section-panel:not(.print-excluded) { display: block !important; break-before: page; page-break-before: always; }
   .plan-section-panel.print-first { break-before: auto; page-break-before: auto; }
