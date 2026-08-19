@@ -912,6 +912,11 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .priority-column span { margin-top: 4px; color: #25405f; font-weight: 800; }
 .priority-column small { margin-top: 4px; color: var(--muted); }
 .timeline { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 12px; }
+.timeline-print-table { display: none; width: 100%; border-collapse: collapse; margin: 14px 0; }
+.timeline-print-table th, .timeline-print-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
+.timeline-print-table th { color: var(--muted); font-weight: 800; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; }
+.timeline-print-table td:first-child { white-space: nowrap; font-weight: 700; }
+.timeline-print-table td:last-child, .timeline-print-table td:nth-child(3) { white-space: nowrap; }
 .timeline-item { display: grid; grid-template-columns: 86px 34px 1fr; gap: 12px; align-items: start; }
 .timeline-time { display: grid; gap: 4px; color: var(--navy); font-weight: 900; padding-top: 8px; }
 .timeline-time span { color: var(--muted); font-size: 0.86rem; }
@@ -1102,20 +1107,15 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
      dropping them here cuts the printed itinerary by roughly two-thirds without
      removing anything from the on-screen, editable view. */
   .top-five, .execution-guide, .backup-options { display: none !important; }
-  .timeline-note { display: none !important; }
-  .timeline-item p {
-    display: -webkit-box !important;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    font-size: 0.78rem !important;
-    margin: 2px 0 !important;
-  }
-  /* Comes after the line-clamp rule above so it wins the tie in source order --
-     meal descriptions are fully redundant with the Food table below each day. */
-  .item-breakfast p, .item-lunch p, .item-dinner p, .item-coffee-break p { display: none !important; }
-  .timeline-item { padding: 6px 0 !important; }
-  .timeline-meta { font-size: 0.75rem !important; gap: 6px !important; }
+  /* The interactive .timeline (a card per item, with a description paragraph,
+     Replace/Move/Lock buttons, and per-item disclaimer notes) is exactly the
+     kind of one-row-per-page-of-content format that made an 11-day trip run
+     71 printed pages. Swap it for .timeline-print-table -- the same time,
+     item, duration, and cost, one line per row -- which is what actually
+     gets a day's schedule down near a single printed page, the way a
+     printed travel guide's own timeline table reads. */
+  .timeline { display: none !important; }
+  .timeline-print-table { display: table !important; }
   .priority-column article { padding: 4px 0 !important; }
   .priority-column small { font-size: 0.7rem !important; }
   .daily-guide-panel { margin: 6px 0 !important; }
