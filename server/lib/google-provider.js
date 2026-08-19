@@ -205,7 +205,26 @@ async function researchRegionalExtensionCandidate(cityName, primaryLocation, max
   if (!primaryLocation || !candidateCenter) return null;
   const route = await googleRouteEstimate(primaryLocation, candidateCenter, "driving", config);
   if (!route?.durationMinutes || route.durationMinutes > maxDriveMinutes) return null;
-  const rankedPlaces = [...candidateProfile.places].sort((a, b) => {
+  // googleDestinationResearch's own "best day trips and nearby attractions
+  // from {cityName}" query (see its query list) surfaces places by plain
+  // text relevance, which can and does return the PRIMARY destination's own
+  // landmarks -- confirmed live: an Annapolis extension researched for a DC
+  // trip pulled in Lincoln Memorial, National Gallery of Art, and the
+  // Smithsonian Natural History Museum (all ~25-30mi away, actually in DC)
+  // tagged as Annapolis-region places. Those then won Annapolis's own
+  // high-priority-score candidate slice below, got scheduled on an
+  // "Annapolis" day under a second, extension-prefixed placeId that the
+  // trip-wide dedup Set never recognized as the same real-world landmark,
+  // and leaked into the macro route/trip-shape stop list. A place genuinely
+  // local to this extension city should sit closer to its own center than
+  // to the primary destination's -- drop anything that fails that test
+  // before it can enter the extension's place pool at all.
+  const hasCoordinates = (value) => Number.isFinite(value?.lat) && Number.isFinite(value?.lng);
+  const localPlaces = candidateProfile.places.filter((place) => {
+    if (!hasCoordinates(place.coordinates)) return true;
+    return distanceMiles(place.coordinates, candidateCenter) <= distanceMiles(place.coordinates, primaryLocation);
+  });
+  const rankedPlaces = [...localPlaces].sort((a, b) => {
     const boost = (place) => activeKeywordPatterns.some((pattern) => pattern.test(`${place.name} ${place.shortDescription} ${(place.tags || []).join(" ")}`)) ? 1000 : 0;
     return (boost(b) + b.priorityScore) - (boost(a) + a.priorityScore);
   });
