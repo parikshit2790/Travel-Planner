@@ -70,10 +70,10 @@ label small { color: var(--muted); font-size: 0.86rem; line-height: 1.35; }
   radial-gradient(circle at 36% 18%, rgb(22 119 210 / 0.08), transparent 25%),
   radial-gradient(circle at 78% 68%, rgb(255 122 26 / 0.1), transparent 30%);
 }
-.side { position: sticky; top: 0; height: 100vh; background: radial-gradient(circle at 82% 72%, rgb(0 142 189 / 0.24), transparent 27%), linear-gradient(180deg, #0d2a2a 0%, #123634 54%, #1a3330 100%); color: #fff; padding: 26px 18px 18px; display: flex; flex-direction: column; gap: 18px; box-shadow: 15px 0 40px rgb(6 38 67 / 0.16), 22px 0 60px rgb(86 202 231 / 0.18); }
+.side { position: sticky; top: 0; height: 100vh; background: radial-gradient(circle at 82% 72%, rgb(0 142 189 / 0.24), transparent 27%), linear-gradient(180deg, #062b3a 0%, #0d3f52 54%, #134a5a 100%); color: #fff; padding: 26px 18px 18px; display: flex; flex-direction: column; gap: 18px; box-shadow: 15px 0 40px rgb(6 38 67 / 0.16), 22px 0 60px rgb(86 202 231 / 0.18); }
 .brand { display: flex; align-items: center; gap: 12px; background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; }
 .brand:hover { background: rgb(255 255 255 / 0.08); border-color: transparent; }
-.brand-mark { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 10px; display: grid; place-items: center; background: #0d2a2a; box-shadow: 0 10px 20px rgb(0 0 0 / 0.18); overflow: hidden; }
+.brand-mark { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 10px; display: grid; place-items: center; background: #062b3a; box-shadow: 0 10px 20px rgb(0 0 0 / 0.18); overflow: hidden; }
 .brand-icon { width: 100%; height: 100%; display: block; object-fit: contain; }
 .brand strong { display: block; line-height: 1.1; }
 .brand small { color: #c7d8e6; }
@@ -186,7 +186,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .panel { padding: 20px; margin-bottom: 16px; max-width: 100%; min-width: 0; border-color: var(--line-soft); }
 .step-2 .panel, .step-3 .panel, .step-4 .panel, .step-5 .panel, .step-6 .panel { padding: 18px; border-radius: 14px; }
 .trip-basics-experience { display: grid; gap: 18px; position: relative; z-index: 1; animation: stepRise 0.42s ease both; }
-.trip-basics-status-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgb(255 255 255 / 0.7); border-radius: 18px; padding: 13px 16px; background: linear-gradient(110deg, rgb(13 42 42 / 0.92) 0%, rgb(18 84 76 / 0.8) 60%, rgb(255 122 26 / 0.55) 100%); color: #fff; box-shadow: 0 18px 38px rgb(6 43 74 / 0.18); }
+.trip-basics-status-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgb(255 255 255 / 0.7); border-radius: 18px; padding: 13px 16px; background: linear-gradient(110deg, rgb(6 43 58 / 0.92) 0%, rgb(13 74 92 / 0.8) 60%, rgb(255 122 26 / 0.55) 100%); color: #fff; box-shadow: 0 18px 38px rgb(6 43 74 / 0.18); }
 .trip-basics-status-strip .eyebrow, .trip-basics-status-strip h2 { color: #fff; margin: 0; }
 .trip-basics-status-strip .badge { background: rgb(255 255 255 / 0.92); color: var(--accent-dark); }
 .step-1-zone { position: relative; overflow: hidden; border-radius: 24px; padding: 22px; border: 1px solid rgb(255 255 255 / 0.72); box-shadow: 0 24px 56px rgb(16 42 67 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.62); }
@@ -197,8 +197,8 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .zone-head h2 { margin: 2px 0 0; color: #092a55; }
 .zone-head .eyebrow { color: var(--blue); font-weight: 900; }
 .trip-essentials-section { background:
-  radial-gradient(circle at 90% 12%, rgb(255 255 255 / 0.5), transparent 18%),
-  linear-gradient(135deg, #fffaf2 0%, #fdf7ea 58%, #fffdf7 100%); }
+  radial-gradient(circle at 90% 12%, rgb(255 255 255 / 0.42), transparent 18%),
+  linear-gradient(135deg, #dff4ff 0%, #dff7f1 58%, #ecfbff 100%); }
 .trip-essentials-section::before { content: ""; position: absolute; right: 24px; top: 24px; width: 240px; height: 90px; opacity: 0.16; background:
   radial-gradient(circle at 12px 42px, #062b4a 0 5px, transparent 6px),
   radial-gradient(circle at 170px 16px, #ff7a1a 0 5px, transparent 6px),
@@ -438,7 +438,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .interpret-action svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .trip-structure-section { position: relative; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.72); border-radius: 20px; background:
   radial-gradient(circle at 94% 18%, rgb(255 122 26 / 0.16), transparent 22%),
-  linear-gradient(135deg, #f1ecff 0%, #fff0df 54%, #fffaf2 100%);
+  linear-gradient(135deg, #eee8ff 0%, #fff0df 54%, #f5fbff 100%);
   padding: 16px; box-shadow: 0 24px 56px rgb(16 42 67 / 0.13), inset 0 1px 0 rgb(255 255 255 / 0.62);
 }
 .trip-structure-section::before { content: ""; position: absolute; inset: -28px auto auto 58%; width: 360px; height: 120px; border-radius: 999px; background: rgb(255 255 255 / 0.22); transform: rotate(-8deg); pointer-events: none; }
