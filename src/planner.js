@@ -423,8 +423,23 @@ function buildHotelBase(profile, input, days) {
       splitStaySuggestion: `${schedule.hotelChanges} hotel change${schedule.hotelChanges === 1 ? "" : "s"} as approved on the Review step.`
     };
   }
-  const primaryRegion = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
-  const alternatives = profile.regions.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
+  // defaultHotelRegion is picked purely by distance to the destination's own
+  // center coordinate (see buildGoogleRegions), with no check for whether
+  // the region is actually a lodging-viable neighborhood -- confirmed live:
+  // "National Mall & Memorial Parks" (a federal park/monument reservation,
+  // not a commercial district) was recommended as DC's primary hotel base.
+  // A region named after an NPS-style park/monument/historic-site
+  // designation has no real hotel inventory regardless of how central it
+  // is; exclude those from the base pool. This is deliberately narrower
+  // than matching any region with "park" in its name -- "Hyde Park" or
+  // "Lincoln Park" are real, hotel-viable urban neighborhoods that happen
+  // to share a word with "National Mall & Memorial Parks", not the same
+  // kind of place.
+  const isParkOrMonumentZone = (region) => /\b(national\s+mall|memorial\s+park|national\s+park|national\s+monument|national\s+historic(al)?\s+(park|site)|national\s+battlefield|national\s+recreation\s+area|national\s+forest|wildlife\s+refuge)\b/i.test(region.name);
+  const lodgingViableRegions = profile.regions.filter((region) => !isParkOrMonumentZone(region));
+  const regionPool = lodgingViableRegions.length ? lodgingViableRegions : profile.regions;
+  const primaryRegion = regionPool.find((region) => region.id === profile.planningRules.defaultHotelRegion) || regionPool[0];
+  const alternatives = regionPool.filter((region) => region.name !== primaryRegion.name).slice(0, 2).map((region) => region.name);
   return {
     primary: primaryRegion.name,
     alternatives,
@@ -3064,12 +3079,22 @@ function buildTripShapeOptions(profile, input, intelligence) {
   const base = profile.regions.find((region) => region.id === profile.planningRules.defaultHotelRegion) || profile.regions[0];
   const maxSightseeingDays = Math.max(1, input.numberOfDays - (input.transportation && !sameAreaTrip(input, profile) ? 2 : 0));
   const dayTripRoundTripMinutes = dayTrips.reduce((sum, item) => sum + Number(item.routeFeasibility?.estimatedRoundTripMinutes || 0), 0);
+  // The "Route:" line is meant to read as a sequence of bases/day-trip
+  // regions (e.g. "Washington, D.C. -> Alexandria, Virginia"), not a list of
+  // individual attractions -- a single day trip's own place name (e.g. "Old
+  // Town Alexandria Waterfront") leaks in here otherwise, and two attractions
+  // in the same region duplicate that region's name back to back. Use each
+  // day trip's own region name (already used for lodging-base naming at
+  // overnightBaseName below) and dedupe.
+  const dayTripRegionNames = [...new Set(dayTrips.map((item) =>
+    (profile.regions.find((region) => region.id === item.place.regionId)?.name) || item.place.name
+  ))];
   const options = [
     tripShapeOption({
       id: "shape-single-base",
       title: "City-focused base with selective nearby nature",
       structureType: dayTrips.length ? "One base plus local day trips" : "Single-city depth",
-      routeSequence: [profile.canonicalName, ...dayTrips.map((item) => item.place.name)],
+      routeSequence: [profile.canonicalName, ...dayTripRegionNames],
       overnightBases: [{ base: base?.name || profile.canonicalName, nights: Math.max(0, calculateTripNights(input.numberOfDays)) }],
       hotelChanges: 0,
       majorTransferDays: ["Arrival day", input.numberOfDays > 1 ? "Departure day" : ""].filter(Boolean),
