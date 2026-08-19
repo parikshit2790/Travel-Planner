@@ -394,10 +394,10 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .mini-head { margin-bottom: 8px; align-items: center; }
 .mini-head h3 { margin: 0; }
 .reason-list { margin: 0; padding-left: 20px; line-height: 1.5; }
-.wizard-footer { position: sticky; bottom: 0; z-index: 30; display: flex; justify-content: flex-end; gap: 14px; border-top: 1px solid var(--line-soft); background: linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.98)); backdrop-filter: blur(12px); box-shadow: 0 -10px 22px rgb(16 42 67 / 0.08); padding: 14px 0 max(14px, env(safe-area-inset-bottom)); margin-top: 18px; }
-.step-1 .wizard-footer { margin: 4px 0 0; padding: 14px 16px max(14px, env(safe-area-inset-bottom)); border: 1px solid rgb(255 255 255 / 0.72); border-radius: 18px; background: linear-gradient(135deg, rgb(221 244 255 / 0.86), rgb(255 244 222 / 0.94)); box-shadow: 0 -8px 28px rgb(16 42 67 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.78); }
+.wizard-footer { position: sticky; bottom: 0; z-index: 30; display: flex; justify-content: flex-end; gap: 14px; border-top: 2px solid var(--line); background: linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.98)); backdrop-filter: blur(12px); box-shadow: 0 -14px 28px rgb(16 42 67 / 0.12); padding: 14px 0 max(14px, env(safe-area-inset-bottom)); margin-top: 18px; }
+.step-1 .wizard-footer { margin: 4px 0 0; padding: 14px 16px max(14px, env(safe-area-inset-bottom)); border: 1px solid rgb(255 255 255 / 0.72); border-top: 2px solid rgb(255 122 26 / 0.16); border-radius: 18px; background: linear-gradient(135deg, rgb(255 250 242 / 0.92), rgb(255 244 222 / 0.96)); box-shadow: 0 -14px 32px rgb(16 42 67 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.78); }
 .step-1 .wizard-footer .primary { border-radius: 14px; box-shadow: 0 14px 30px rgb(255 107 0 / 0.28); }
-.step-1 .wizard-footer button:first-child { background: rgb(255 255 255 / 0.56); border-color: rgb(22 119 210 / 0.18); }
+.step-1 .wizard-footer button:first-child { background: rgb(255 255 255 / 0.7); border-color: rgb(255 122 26 / 0.18); }
 .wizard-footer button:first-child { margin-right: auto; }
 .wizard-footer button { min-width: 132px; }
 .secondary { background: color-mix(in srgb, var(--surface) 80%, var(--soft)); }
@@ -438,7 +438,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .interpret-action svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .trip-structure-section { position: relative; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.72); border-radius: 20px; background:
   radial-gradient(circle at 94% 18%, rgb(255 122 26 / 0.16), transparent 22%),
-  linear-gradient(135deg, #eee8ff 0%, #fff0df 54%, #f5fbff 100%);
+  linear-gradient(135deg, #f1ecff 0%, #fff0df 54%, #fffaf2 100%);
   padding: 16px; box-shadow: 0 24px 56px rgb(16 42 67 / 0.13), inset 0 1px 0 rgb(255 255 255 / 0.62);
 }
 .trip-structure-section::before { content: ""; position: absolute; inset: -28px auto auto 58%; width: 360px; height: 120px; border-radius: 999px; background: rgb(255 255 255 / 0.22); transform: rotate(-8deg); pointer-events: none; }
@@ -461,7 +461,7 @@ main { min-width: 0; padding: 28px 30px 96px; max-width: 1460px; width: 100%; }
 .structure-multi-city i { background: linear-gradient(135deg, #d9ceff, #f4edff); }
 .structure-recommend { color: var(--accent-dark); }
 .structure-recommend i { background: linear-gradient(135deg, #ffd3b4, #fff0df); }
-.trip-structure-card.selected { border-color: #ff7a1a; background-color: color-mix(in srgb, currentColor 10%, var(--surface)); box-shadow: 0 0 0 4px rgb(255 122 26 / 0.16), 0 20px 38px rgb(255 122 26 / 0.14); }
+.trip-structure-card.selected { border-color: #ff7a1a; background-color: color-mix(in srgb, currentColor 6%, var(--surface)); box-shadow: 0 0 0 4px rgb(255 122 26 / 0.16), 0 20px 38px rgb(255 122 26 / 0.14); }
 .trip-structure-card strong { display: block; color: var(--ink); line-height: 1.15; font-size: 0.92rem; }
 .trip-structure-card small { display: block; margin-top: 2px; color: var(--muted); line-height: 1.25; font-size: 0.78rem; }
 .progressive-fields { border: 1px solid rgb(255 255 255 / 0.64); border-radius: 18px; padding: 13px 14px; background: rgb(255 255 255 / 0.28); box-shadow: 0 12px 26px rgb(16 42 67 / 0.08); position: relative; z-index: 1; }
