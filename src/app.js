@@ -910,6 +910,19 @@ function planFoodSection() {
   </section>`;
 }
 
+function lodgingNightGroups(nightlyPlan) {
+  const groups = [];
+  for (const night of nightlyPlan) {
+    const last = groups[groups.length - 1];
+    if (last && last.sleepArea === night.sleepArea && last.whyThisBase === night.whyThisBase) {
+      last.endNight = night.night;
+    } else {
+      groups.push({ startNight: night.night, endNight: night.night, sleepArea: night.sleepArea, whyThisBase: night.whyThisBase });
+    }
+  }
+  return groups;
+}
+
 function planRouteSection() {
   const route = state.plan.routeSummary;
   return `<section class="plan-section route-plan-section">
@@ -917,7 +930,7 @@ function planRouteSection() {
     <div class="route-schematic">${route.mapPlaceholderData.map((day) => `<article><span>Day ${day.dayNumber}</span><strong>${esc(day.region)}</strong><small>${esc(day.stops.slice(0, 3).join(" → "))}</small></article>`).join("")}</div>
     <article class="plan-payoff-card wide"><h3>Major Stop Sequence</h3><p>${esc(route.orderedStops.join(" → "))}</p><p>${esc(route.trafficDisclaimer)}</p><p>Estimated distance: ${route.totalEstimatedDistanceMiles} miles.</p></article>
     ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Trip Shape Options Considered</h3><div class="shape-options-list">${state.plan.tripGuide.tripShapeOptions.map((option) => tripShapeOptionCard(option)).join("")}</div></article>` : ""}
-    ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Lodging Logic</h3><p><strong>${esc(state.plan.tripGuide.lodgingPlan.recommendedBase)}</strong> · ${esc(String(state.plan.tripGuide.lodgingPlan.nights))} nights</p><div class="lodging-night-grid">${state.plan.tripGuide.lodgingPlan.nightlyPlan.map((night) => `<span><strong>${esc(`Night ${night.night}`)}</strong><small>${esc(night.sleepArea)} · ${esc(night.whyThisBase)}</small></span>`).join("")}</div></article>` : ""}
+    ${state.plan.tripGuide ? `<article class="plan-payoff-card wide"><h3>Lodging Logic</h3><p><strong>${esc(state.plan.tripGuide.lodgingPlan.recommendedBase)}</strong> · ${esc(String(state.plan.tripGuide.lodgingPlan.nights))} nights</p><div class="lodging-night-grid">${lodgingNightGroups(state.plan.tripGuide.lodgingPlan.nightlyPlan).map((group) => `<span><strong>${esc(group.startNight === group.endNight ? `Night ${group.startNight}` : `Nights ${group.startNight}-${group.endNight}`)}</strong><small>${esc(group.sleepArea)} · ${esc(group.whyThisBase)}</small></span>`).join("")}</div></article>` : ""}
   </section>`;
 }
 
