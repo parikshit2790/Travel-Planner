@@ -1080,8 +1080,17 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
     z-index: 9999;
   }
   .plan-section-panel.print-excluded { display: none !important; }
-  .plan-section-panel:not(.print-excluded) { display: block !important; break-before: page; page-break-before: always; }
-  .plan-section-panel.print-first { break-before: auto; page-break-before: auto; }
+  .plan-section-panel:not(.print-excluded) { display: block !important; }
+  /* Every included tab used to force its own fresh page regardless of how
+     short its content was -- confirmed live: Food (about a page),
+     Budget (about half a page), and Advisories (often a third of a page or
+     less) each still burned a full page purely from the forced break,
+     inflating a 10-day trip's back matter to 5+ pages of mostly white
+     space. Only the day-by-day itinerary is large and self-contained
+     enough to deserve starting on its own page; every other included
+     section now just flows on, separated by its own heading like the rest
+     of a normal report. */
+  .plan-section-panel[data-plan-section="itinerary"]:not(.print-excluded):not(.print-first) { break-before: page; page-break-before: always; }
   .side, .plan-tabs, .plan-hero-actions, .item-actions, .day-actions, .global-footer, .saved-trips-drawer, .restriction-layer, .planning-diagnostics, .toast { display: none !important; }
   .app-shell, .plan-shell { display: block !important; }
   .wizard-main, .trip-plan-main { padding: 0 !important; background: #fff !important; }
@@ -1141,4 +1150,12 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
      Confirmed live: a 10-day Denver trip carried this as its own printed
      page for zero new information. */
   .day-preview-grid { display: none !important; }
+
+  /* The Route tab's "Trip Shape Options Considered" first card is a verbatim
+     repeat of the Overview page's own "Recommended Trip Shape" (same route,
+     sleep, hotel-change, and fit text for the option that was actually
+     chosen) -- confirmed live, character-for-character identical. The other
+     two cards describe shapes the traveler did NOT pick; useful while
+     deciding, not in a finished plan. Drop the whole section in print. */
+  .trip-shape-options-card { display: none !important; }
 }
