@@ -1133,4 +1133,12 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
      day in the Itinerary tab. Dietary Handling and Food Areas above it are
      trip-wide summaries, not per-day duplicates, so they stay. */
   .meal-day-grid { display: none !important; }
+
+  /* The day-preview grid is a click-to-jump navigation aid (title, theme,
+     budget per day) -- clicking does nothing on a printed page, and it's a
+     third restatement of the same per-day summary the Quick Reference table
+     already gives a few pages earlier and each day's own page gives in full.
+     Confirmed live: a 10-day Denver trip carried this as its own printed
+     page for zero new information. */
+  .day-preview-grid { display: none !important; }
 }
