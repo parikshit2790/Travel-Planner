@@ -835,6 +835,7 @@ function dayCard(day) {
     ${day.prioritySections ? priorityGuide(day) : ""}
     ${day.warnings.length ? `<div class="warning-list">${day.warnings.map((warning) => `<p>${esc(warning)}</p>`).join("")}</div>` : ""}
     <ol class="timeline">${day.scheduleItems.map((item) => timelineItem(item)).join("")}</ol>
+    ${timelinePrintTable(day)}
     ${day.dailyFoodPlan ? dailyFoodGuide(day) : ""}
     ${day.expectedSpending ? dailyExecutionGuide(day) : ""}
     <div class="backup-options"><h4>Backup options</h4>${day.backupOptions.length ? day.backupOptions.map((backup) => `<article><strong>${esc(backup.title)}</strong><p>${esc(backup.reason)}</p><small>${esc(formatMinutes(backup.estimatedDurationMinutes))} · ${esc(backup.indoorOutdoor)} · ${esc(backup.accessibilityNotes)}</small></article>`).join("") : `<p>No same-region backup is available for this day.</p>`}</div>
@@ -894,6 +895,22 @@ function timelineItem(item) {
       </div>
     </div>
   </li>`;
+}
+
+// Print-only compact alternative to the interactive .timeline list above --
+// hidden on screen (that list keeps its Replace/Move/Lock buttons and full
+// descriptions), shown only in print via CSS, matching a printed-guide
+// density (time/item/duration/cost per row) instead of a card per item.
+function timelinePrintTable(day) {
+  return `<table class="timeline-print-table">
+    <thead><tr><th>Time</th><th>Plan</th><th>Duration</th><th>Cost</th></tr></thead>
+    <tbody>${day.scheduleItems.map((item) => timelineTableRow(item)).join("")}</tbody>
+  </table>`;
+}
+
+function timelineTableRow(item) {
+  const cost = item.estimatedCostPerPerson ? moneyRangeDisplay(item.estimatedCostPerPerson.low, item.estimatedCostPerPerson.high) : "—";
+  return `<tr><td>${esc(item.startTime)}</td><td>${timelineIcon(item.type)} ${esc(item.title)}</td><td>${esc(formatMinutes(item.durationMinutes))}</td><td>${cost}</td></tr>`;
 }
 
 function timelineIcon(type) {
