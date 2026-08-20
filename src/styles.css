@@ -912,8 +912,20 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 .priority-column span { margin-top: 4px; color: #25405f; font-weight: 800; }
 .priority-column small { margin-top: 4px; color: var(--muted); }
 .timeline { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 12px; }
-.timeline-print-table { display: none; width: 100%; border-collapse: collapse; margin: 14px 0; }
-.timeline-print-table th, .timeline-print-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); font-size: 0.85rem; }
+/* Explicit display values here (table/table-row-group/table-row/table-cell)
+   aren't decorative -- a global mobile rule elsewhere (`th, td { display:
+   block }` under a max-width media query) also matches during print
+   rendering and, with nothing here overriding `display`, was stacking every
+   cell onto its own line instead of laying the row out horizontally --
+   confirmed live: an exported PDF showed each of Time/Plan/Duration/Cost on
+   a separate line per schedule item, the exact bulk this table exists to
+   avoid. Class-scoped selectors win on specificity once they actually
+   declare a value to compete with. */
+.timeline-print-table { display: none; width: 100%; table-layout: auto !important; min-width: 0; border-collapse: collapse; margin: 14px 0; }
+.timeline-print-table thead { display: table-header-group; }
+.timeline-print-table tbody { display: table-row-group; }
+.timeline-print-table tr { display: table-row; }
+.timeline-print-table th, .timeline-print-table td { display: table-cell; text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); font-size: 0.85rem; width: auto !important; }
 .timeline-print-table th { color: var(--muted); font-weight: 800; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; }
 .timeline-print-table td:first-child { white-space: nowrap; font-weight: 700; }
 .timeline-print-table td:last-child, .timeline-print-table td:nth-child(3) { white-space: nowrap; }
