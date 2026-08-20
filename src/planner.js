@@ -1672,6 +1672,14 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   const firstRegion = (isArrivalDay || isDepartureDay)
     ? (homeRegionId || profile.planningRules?.defaultHotelRegion || places[0]?.regionId || profile.regions[0]?.id || "")
     : (places[0]?.regionId || homeRegionId || profile.planningRules?.defaultHotelRegion || profile.regions[0]?.id || "");
+  // Set inside the arrival-day block below when arrival breakfast lands close
+  // enough to the lunch slot that adding both would be the same meal twice.
+  // The generic lunch-safety-net further down (guarded only by
+  // !longArrivalDrive) doesn't know why lunch is missing on an arrival day --
+  // confirmed live: it silently re-added the exact lunch this flag is meant
+  // to suppress, undoing the skip and putting a "lunch" back after
+  // breakfast's actual (later) slot every time.
+  let arrivalBreakfastCoversLunch = false;
   if (isArrivalDay) {
     // Breakfast sits at a fixed early-morning slot regardless of when the
     // arrival travel block itself lands -- confirmed live: an 8:00 AM flight
@@ -1716,9 +1724,24 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
     // back to back after a day spent entirely driving. Skip this pre-arrival
     // lunch entirely when the drive is long; the day's one real meal is the
     // dinner scheduled after check-in below.
-    if (!longArrivalDrive) {
+    // Separately, this arrival lunch's slot (noon, or 45min before arrival if
+    // that's later) is computed independently from breakfastActualStart just
+    // above -- for a late-morning flight arrival, "arrival breakfast" (~30min
+    // after touchdown) and this "arrival lunch" slot can land within minutes
+    // of each other, or even invert. Confirmed live: an 11:52 AM arrival put
+    // breakfast at 12:22 PM, five minutes after this lunch's noon floor --
+    // sortAndFormat's own overlap-avoidance then silently pushed that
+    // breakfast to display AFTER lunch in the printed schedule, since nothing
+    // here checks the two slots against each other before adding both. When
+    // they're this close, it's one meal, not two -- keep the earlier
+    // breakfast (the traveler's actual first food after landing) and skip
+    // the redundant lunch, the same call already made for longArrivalDrive.
+    const arrivalLunchStart = Math.max(12 * 60, travelContext.arrivalMinutes - 45);
+    if (!longArrivalDrive && breakfastActualStart + 45 < arrivalLunchStart) {
       const arrivalLunchRecommendation = mealRecommendation(profile, input, firstRegion, "lunch", mealUsage, places[0]);
-      addMeal(items, "lunch", Math.max(12 * 60, travelContext.arrivalMinutes - 45), mealDuration, mealTitle(profile, arrivalLunchRecommendation.primaryPlaceRegionId, "lunch"), arrivalLunchRecommendation, firstRegion, input, constraints, mealUsage);
+      addMeal(items, "lunch", arrivalLunchStart, mealDuration, mealTitle(profile, arrivalLunchRecommendation.primaryPlaceRegionId, "lunch"), arrivalLunchRecommendation, firstRegion, input, constraints, mealUsage);
+    } else if (!longArrivalDrive) {
+      arrivalBreakfastCoversLunch = true;
     }
     items.push(simpleItem("lodging", Math.max(15 * 60, travelContext.arrivalMinutes + 45), 45, "Hotel check-in and reset", "Check in, park, unpack lightly, and leave a buffer before any first-evening plans."));
   } else {
@@ -1787,7 +1810,7 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
         cursor += anchorTravel.durationMinutes + buffers;
       }
     }
-    if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30) {
+    if (index === 1 && !items.some((item) => item.type === "lunch") && cursor > constraints.lunchMinutes - 30 && !arrivalBreakfastCoversLunch) {
       const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, place.regionId) : mealRecommendation(profile, input, place.regionId, "lunch", mealUsage, place);
       addMeal(items, "lunch", constraints.lunchMinutes, mealDuration, mealTitle(profile, lunchRecommendation.primaryPlaceRegionId, "lunch"), lunchRecommendation, place.regionId, input, constraints, parkRouteDay ? null : mealUsage);
       cursor = Math.max(cursor, constraints.lunchMinutes + mealDuration + buffers);
@@ -1800,8 +1823,11 @@ function scheduleDay(profile, input, constraints, places, dayIndex, mealUsage = 
   // The lunch-safety-net below assumes the traveler is at the destination by
   // a normal midday hour; on a long-drive arrival day they are still en
   // route at that point (see the deliberate skip above), so it must not
-  // fire here either.
-  if (!items.some((item) => item.type === "lunch") && !longArrivalDrive) {
+  // fire here either. Same for a normal arrival day where breakfast already
+  // landed close enough to the lunch slot to be the same meal (see
+  // arrivalBreakfastCoversLunch above) -- without this check the safety net
+  // silently re-added the exact lunch that skip was meant to suppress.
+  if (!items.some((item) => item.type === "lunch") && !longArrivalDrive && !arrivalBreakfastCoversLunch) {
     const lunchRegion = places[0]?.regionId || firstRegion;
     const lunchRecommendation = parkRouteDay ? packedLunchRecommendation(profile, input, lunchRegion) : mealRecommendation(profile, input, lunchRegion, "lunch", mealUsage, places[0]);
     // On a departure day, the return-travel block (computed backward from a
@@ -2963,6 +2989,67 @@ function centroid(points) {
   };
 }
 
+// "$150-$200" -> {low:150, high:200}; "$750+" -> {low:750, high:750*1.4}.
+// Mirrors the exact option strings nightlyLodgingBudgetOptions renders in
+// the Trip Basics form (src/app.js), not a general-purpose money parser.
+function parseNightlyLodgingRange(text) {
+  const cleaned = String(text || "").replace(/[$,\s]/g, "");
+  const plusMatch = cleaned.match(/^(\d+)\+$/);
+  if (plusMatch) {
+    const low = Number(plusMatch[1]);
+    return { low, high: Math.round(low * 1.4) };
+  }
+  const rangeMatch = cleaned.match(/^(\d+)-(\d+)$/);
+  if (!rangeMatch) return null;
+  return { low: Number(rangeMatch[1]), high: Number(rangeMatch[2]) };
+}
+
+// A generic, destination-agnostic nightly range per trip style -- not
+// calibrated to real local hotel rates, just enough to keep the budget
+// total from silently omitting the single largest line item on most trips.
+// Values are point estimates from broad US mid-size-city hotel norms, which
+// is a real limitation for very expensive (Amsterdam, Mumbai's better
+// districts) or very cheap destinations -- flagged as a rough ballpark in
+// the description, not presented as destination-specific.
+const NIGHTLY_LODGING_BALLPARK_BY_STYLE = {
+  Budget: [70, 110],
+  Moderate: [130, 190],
+  Premium: [220, 320],
+  Luxury: [350, 550],
+  "Custom amount": [130, 190]
+};
+
+// The budget total previously never included lodging at all -- "shown only
+// as a preference because confirmed lodging costs are not collected."
+// Confirmed live: this made RouteMosaic's total look dramatically cheaper
+// than a plan that does include a lodging line for reasons that have
+// nothing to do with better planning, since lodging is usually the largest
+// single cost on a multi-night trip. Give a real number either way: the
+// traveler's own Maximum Nightly Lodging Budget when they set one (median
+// of that range x nights x an estimated room count), or a labeled, generic
+// ballpark by trip style when they didn't -- never silence.
+function lodgingEstimate(input) {
+  const nights = Math.max(1, calculateTripNights(input.numberOfDays));
+  const rooms = Math.max(1, Math.ceil((input.travelers || 1) / 2));
+  const roomsSuffix = rooms > 1 ? ` × ${rooms} rooms` : "";
+  const parsed = parseNightlyLodgingRange(input.budget?.lodging);
+  if (parsed) {
+    const median = Math.round((parsed.low + parsed.high) / 2);
+    const total = median * nights * rooms;
+    return {
+      low: total,
+      high: total,
+      description: `Based on your Maximum Nightly Lodging Budget (~$${median}/night median) × ${nights} night${nights === 1 ? "" : "s"}${roomsSuffix}.`
+    };
+  }
+  const [nightlyLow, nightlyHigh] = NIGHTLY_LODGING_BALLPARK_BY_STYLE[input.budget?.style] || NIGHTLY_LODGING_BALLPARK_BY_STYLE.Moderate;
+  return {
+    low: nightlyLow * nights * rooms,
+    high: nightlyHigh * nights * rooms,
+    description: `Rough planning ballpark for a ${(input.budget?.style || "Moderate").toLowerCase()}-tier stay (~$${nightlyLow}-$${nightlyHigh}/night) × ${nights} night${nights === 1 ? "" : "s"}${roomsSuffix} -- not calibrated to real local rates. Set a Maximum Nightly Lodging Budget on Trip Basics for a more targeted estimate.`
+  };
+}
+
 function buildBudgetSummary(input, days) {
   const travelers = input.travelers || 1;
   const activityLow = sumCost(days, "low") * travelers;
@@ -2976,7 +3063,9 @@ function buildBudgetSummary(input, days) {
   const parkingHigh = input.numberOfDays * 45;
   const contingencyLow = 100;
   const contingencyHigh = 220;
+  const lodging = lodgingEstimate(input);
   const categories = [
+    { category: "Lodging", low: roundMoney(lodging.low), high: roundMoney(lodging.high), description: lodging.description },
     { category: "Activities and admissions", low: roundMoney(activityLow), high: roundMoney(activityHigh), description: "Curated attraction cost estimates." },
     { category: "Food", low: roundMoney(foodLow), high: roundMoney(foodHigh), description: "Based on per-person food budget and three planned meals per day." },
     { category: "Local transportation or driving", low: roundMoney(driveLow), high: roundMoney(driveHigh), description: "Rental-car local driving and fuel-style planning estimate." },
@@ -2993,8 +3082,8 @@ function buildBudgetSummary(input, days) {
     perPersonLow: Math.round(totalLow / travelers),
     perPersonHigh: Math.round(totalHigh / travelers),
     categories,
-    assumptions: ["Estimates exclude airfare.", "Lodging is shown only as a preference because confirmed lodging costs are not collected.", "No live prices or availability were checked."],
-    excludedCosts: ["Airfare", "Confirmed hotel costs", "Real-time tickets", "Rideshare surge pricing"]
+    assumptions: ["Estimates exclude airfare.", "Lodging is a planning estimate, not a confirmed or booked rate -- see the Lodging line for how it was calculated.", "No live prices or availability were checked."],
+    excludedCosts: ["Airfare", "Booked/confirmed hotel rates", "Real-time tickets", "Rideshare surge pricing"]
   };
 }
 
@@ -3031,6 +3120,18 @@ function buildAdvisories(profile, input, constraints, days, budget) {
       ));
     });
   });
+  const missingMustDos = unfulfilledMustDoPlaces(profile, input);
+  if (missingMustDos.length) {
+    const list = missingMustDos.join(", ");
+    advisories.push(advisory(
+      "must-do-not-covered",
+      "caution",
+      "route",
+      missingMustDos.length === 1 ? "A must-do place isn't in this itinerary" : "Some must-do places aren't in this itinerary",
+      `You listed ${list} in Must-do Places, but ${missingMustDos.length === 1 ? "it isn't" : "they aren't"} included anywhere in this plan. This usually means it's too far from ${profile.canonicalName} to reach as a day or overnight trip -- multi-city routes that need a flight or train between cities aren't built automatically yet.`,
+      "Plan this as a separate leg of your trip with its own flights or trains and hotel, or remove it from Must-do Places if it's not part of this trip."
+    ));
+  }
   if (input.unknownPreferences.length) advisories.push(advisory("unknown-preferences", "info", "preferences", "Some preferences were retained but not fully interpreted", input.unknownPreferences.join(", "), "Review generated days and replace items as needed."));
   if (budget.totalHigh < budget.totalLow) advisories.push(advisory("budget", "blocking", "budget", "Budget estimate failed validation", "Budget high estimate is lower than low estimate.", "Regenerate or review budget settings."));
   return advisories;
@@ -4488,6 +4589,32 @@ function explicitlyRequestedPlace(input, place) {
   if (!requestedText.trim()) return false;
   const placeName = normalizeText(place?.name || "");
   return Boolean(placeName) && requestedText.includes(placeName);
+}
+
+// A must-do place that never shows up anywhere in the researched profile
+// (not as a region, not as a place) almost always means it's outside what
+// this planner can actually reach -- confirmed live: "Paris, France;
+// Amsterdam, Netherlands" typed into Must-do Places for a London trip were
+// silently dropped with zero mention anywhere in the plan, because regional-
+// extension discovery only researches candidates within same-day driving
+// distance and neither city is one. The itinerary read as complete and
+// correct on its own; only a side-by-side with what was actually requested
+// showed the gap. Surface it directly instead of failing silently -- see
+// buildAdvisories, which turns this into a named advisory rather than
+// attempting real multi-city flight/train routing (a much larger feature
+// this fix deliberately does not build).
+function unfulfilledMustDoPlaces(profile, input) {
+  const requested = String(input.routePreferences?.mustDoPlaces || "")
+    .split(/[,;\n]+/)
+    .map((phrase) => phrase.trim())
+    .filter((phrase) => phrase.length >= 3);
+  if (!requested.length) return [];
+  const haystack = normalizeText([
+    profile.canonicalName,
+    ...profile.regions.map((region) => region.name),
+    ...profile.places.map((place) => place.name)
+  ].join(" "));
+  return [...new Set(requested.filter((phrase) => !haystack.includes(normalizeText(phrase))))];
 }
 
 function seasonalMismatchPenalty(place, input) {
