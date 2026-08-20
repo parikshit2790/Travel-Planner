@@ -1170,4 +1170,26 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
      two cards describe shapes the traveler did NOT pick; useful while
      deciding, not in a finished plan. Drop the whole section in print. */
   .trip-shape-options-card { display: none !important; }
+
+  /* day.generationReasoningSummary is a near-paraphrase of day.summary,
+     already shown right under the day title -- confirmed live across every
+     day of a real generated trip ("A lighter balanced day for travel, hotel
+     check-in..." vs "Kept the day light for travel and check-in..."). With
+     .itinerary-day forced to avoid splitting across a page, this one
+     trailing sentence was routinely the only thing pushing a day that
+     otherwise fit on one page onto a second, nearly blank one. */
+  .reasoning-summary { display: none !important; }
+
+  /* Even with the redundant content above gone, several on-screen spacing
+     values (sized for a comfortable click target, not a printed page) were
+     still enough on their own to push a day's last line onto an otherwise
+     blank continuation page -- confirmed live: a real day's content filled
+     page 7 almost exactly, with nothing but the diagonal watermark on page
+     8. None of these were touched by the per-item compaction earlier
+     because they're card/section-level spacing, not per-item. */
+  .itinerary-day { padding: 10px 14px !important; }
+  .day-card-head h3 { margin: 2px 0 4px !important; font-size: 1.2rem !important; }
+  .weather-note { margin: 6px 0 !important; }
+  .priority-guide-grid { margin: 6px 0 !important; }
+  .timeline-print-table { margin: 6px 0 !important; }
 }
