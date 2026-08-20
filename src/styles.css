@@ -1072,28 +1072,49 @@ td { background: color-mix(in srgb, #fff 98%, var(--soft)); }
 }
 
 @media print {
-  @page { margin: 0.55in; }
-  body { background: #fff !important; color: #111 !important; }
   /* A page-repeating position: fixed icon was tried here first, but Chrome's
      print pagination places fixed elements relative to each page's content
-     box (not the physical sheet), so any offset that clears one page's first
-     line collides with another's -- measured real overlaps (including a
-     clipped budget figure) on 5 of 14 pages of a real generated plan. Scoping
-     the icon to .plan-hero instead keeps it deterministic: that header only
-     ever renders once, at the top of page 1, with fixed padding and known
-     empty space in its corner. */
-  .plan-hero::before {
-    content: "";
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    width: 30px;
-    height: 30px;
-    background: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRpdGxlPlJvdXRlTW9zYWljIHRyYXZlbCByb3V0ZSBwbGFubmVyIGljb248L3RpdGxlPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJ0aWxlIiB4MT0iNzQiIHkxPSI0NCIgeDI9IjQzOCIgeTI9IjQ2OCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBzdG9wLWNvbG9yPSIjMEEzQjYzIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC41OCIgc3RvcC1jb2xvcj0iIzA2MjY0MyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNDFEMzQiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InBpbiIgeDE9IjEzOSIgeTE9Ijg5IiB4Mj0iMzg0IiB5Mj0iNDI3IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiMxMjZCOUYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIwLjU1IiBzdG9wLWNvbG9yPSIjMDc0NDZFIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA1Mjg0NCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0id2F0ZXIiIHgxPSIxNjAiIHkxPSIyOTIiIHgyPSIzNTYiIHkyPSI0MDMiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iIzgzRTJENyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMxNkE5Q0UiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InJvdXRlIiB4MT0iMTc3IiB5MT0iMzEwIiB4Mj0iMzY3IiB5Mj0iMjUzIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNGRkIyM0QiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjRkY2QjAwIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGZpbHRlciBpZD0ic2hhZG93IiB4PSI1OCIgeT0iMzgiIHdpZHRoPSIzOTYiIGhlaWdodD0iNDI0IiBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxmZURyb3BTaGFkb3cgZHg9IjAiIGR5PSIxNiIgc3RkRGV2aWF0aW9uPSIxOCIgZmxvb2QtY29sb3I9IiMwMjE5MkQiIGZsb29kLW9wYWNpdHk9IjAuMzQiLz4KICAgIDwvZmlsdGVyPgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjEwOCIgZmlsbD0idXJsKCN0aWxlKSIvPgogIDxwYXRoIGQ9Ik0zOTAgMjIyQzM5MCAzMjEgMjgyIDQwNyAyNTYgNDI3QzIzMCA0MDcgMTIyIDMyMSAxMjIgMjIyQzEyMiAxNDMgMTgxIDg0IDI1NiA4NEMzMzEgODQgMzkwIDE0MyAzOTAgMjIyWiIgZmlsbD0idXJsKCNwaW4pIiBmaWx0ZXI9InVybCgjc2hhZG93KSIvPgogIDxwYXRoIGQ9Ik0xNjEgMjcwTDIxOCAyMTBMMjY2IDI2MEwyOTQgMjI4TDM1NyAyOTRWMzUwSDE2MVYyNzBaIiBmaWxsPSIjRjlGQkZGIi8+CiAgPHBhdGggZD0iTTE2MSAyOTRMMjE2IDIzN0wyNTggMjgxTDI5MiAyNDdMMzU3IDMxNlYzNTBIMTYxVjI5NFoiIGZpbGw9InVybCgjd2F0ZXIpIi8+CiAgPHBhdGggZD0iTTE0NiAzNDJDMjA2IDI5NSAyNTUgMjgwIDMyNiAyNzUiIHN0cm9rZT0iI0Y4RkNGRiIgc3Ryb2tlLXdpZHRoPSIzMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHBhdGggZD0iTTE3MiAzNDVDMjE0IDMwOSAyNTkgMjkyIDMzNyAyODYiIHN0cm9rZT0idXJsKCNyb3V0ZSkiIHN0cm9rZS13aWR0aD0iMTgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWRhc2hhcnJheT0iMzQgMjIiLz4KICA8Y2lyY2xlIGN4PSIzMjEiIGN5PSIxNzciIHI9IjQ4IiBmaWxsPSIjRkZGN0REIi8+CiAgPGNpcmNsZSBjeD0iMzIxIiBjeT0iMTc3IiByPSIzMiIgZmlsbD0iI0ZGOEEwMCIvPgogIDxjaXJjbGUgY3g9IjM2MyIgY3k9IjI4MyIgcj0iMjAiIGZpbGw9IiNGRjZCMDAiIHN0cm9rZT0iI0ZGRjhFOCIgc3Ryb2tlLXdpZHRoPSIxMCIvPgo8L3N2Zz4K") no-repeat center / contain;
-    border-radius: 8px;
-    box-shadow: 0 2px 6px rgba(6, 38, 67, 0.25);
-    z-index: 2;
+     box (not the physical sheet), so any offset that cleared one page's
+     first line collided with another's -- measured real overlaps (including
+     a clipped budget figure) on 5 of 14 pages of a real generated plan.
+     CSS Paged Media's @page margin boxes are the real fix: content placed in
+     @top-left/@top-right/@bottom-left/@bottom-right lives in the page margin
+     itself, structurally outside the content flow, so it can never overlap a
+     card or table row no matter how the content paginates -- and it repeats
+     on every page for free, without consuming any body layout space (the
+     margin already reserves it). Chrome doesn't support the CSS spec's
+     `string-set`/`content: string(...)` for pulling a live heading into a
+     running header, so the destination line in the footer is injected as a
+     small separate stylesheet by printPageFooterStyle() in app.js instead;
+     @page rules from separate <style> blocks merge per margin box rather
+     than replacing each other, so it layers in cleanly next to the static
+     wordmark/icon/page-count rules below. */
+  @page {
+    margin: 0.8in 0.6in 0.75in 0.6in;
+    @top-left {
+      content: "RouteMosaic";
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-weight: 800;
+      font-size: 11pt;
+      color: #0b2341;
+    }
+    @top-right {
+      content: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDx0aXRsZT5Sb3V0ZU1vc2FpYyB0cmF2ZWwgcm91dGUgcGxhbm5lciBpY29uPC90aXRsZT4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0idGlsZSIgeDE9Ijc0IiB5MT0iNDQiIHgyPSI0MzgiIHkyPSI0NjgiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iIzBBM0I2MyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjAuNTgiIHN0b3AtY29sb3I9IiMwNjI2NDMiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMDQxRDM0Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJwaW4iIHgxPSIxMzkiIHkxPSI4OSIgeDI9IjM4NCIgeTI9IjQyNyIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBzdG9wLWNvbG9yPSIjMTI2QjlGIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC41NSIgc3RvcC1jb2xvcj0iIzA3NDQ2RSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNTI4NDQiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9IndhdGVyIiB4MT0iMTYwIiB5MT0iMjkyIiB4Mj0iMzU2IiB5Mj0iNDAzIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiM4M0UyRDciLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTZBOUNFIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJyb3V0ZSIgeDE9IjE3NyIgeTE9IjMxMCIgeDI9IjM2NyIgeTI9IjI1MyIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBzdG9wLWNvbG9yPSIjRkZCMjNEIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI0ZGNkIwMCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxmaWx0ZXIgaWQ9InNoYWRvdyIgeD0iNTgiIHk9IjM4IiB3aWR0aD0iMzk2IiBoZWlnaHQ9IjQyNCIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8ZmVEcm9wU2hhZG93IGR4PSIwIiBkeT0iMTYiIHN0ZERldmlhdGlvbj0iMTgiIGZsb29kLWNvbG9yPSIjMDIxOTJEIiBmbG9vZC1vcGFjaXR5PSIwLjM0Ii8+CiAgICA8L2ZpbHRlcj4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMDgiIGZpbGw9InVybCgjdGlsZSkiLz4KICA8cGF0aCBkPSJNMzkwIDIyMkMzOTAgMzIxIDI4MiA0MDcgMjU2IDQyN0MyMzAgNDA3IDEyMiAzMjEgMTIyIDIyMkMxMjIgMTQzIDE4MSA4NCAyNTYgODRDMzMxIDg0IDM5MCAxNDMgMzkwIDIyMloiIGZpbGw9InVybCgjcGluKSIgZmlsdGVyPSJ1cmwoI3NoYWRvdykiLz4KICA8cGF0aCBkPSJNMTYxIDI3MEwyMTggMjEwTDI2NiAyNjBMMjk0IDIyOEwzNTcgMjk0VjM1MEgxNjFWMjcwWiIgZmlsbD0iI0Y5RkJGRiIvPgogIDxwYXRoIGQ9Ik0xNjEgMjk0TDIxNiAyMzdMMjU4IDI4MUwyOTIgMjQ3TDM1NyAzMTZWMzUwSDE2MVYyOTRaIiBmaWxsPSJ1cmwoI3dhdGVyKSIvPgogIDxwYXRoIGQ9Ik0xNDYgMzQyQzIwNiAyOTUgMjU1IDI4MCAzMjYgMjc1IiBzdHJva2U9IiNGOEZDRkYiIHN0cm9rZS13aWR0aD0iMzEiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik0xNzIgMzQ1QzIxNCAzMDkgMjU5IDI5MiAzMzcgMjg2IiBzdHJva2U9InVybCgjcm91dGUpIiBzdHJva2Utd2lkdGg9IjE4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1kYXNoYXJyYXk9IjM0IDIyIi8+CiAgPGNpcmNsZSBjeD0iMzIxIiBjeT0iMTc3IiByPSI0OCIgZmlsbD0iI0ZGRjc0RCIvPgogIDxjaXJjbGUgY3g9IjMyMSIgY3k9IjE3NyIgcj0iMzIiIGZpbGw9IiNGRjhBMDAiLz4KICA8Y2lyY2xlIGN4PSIzNjMiIGN5PSIyODMiIHI9IjIwIiBmaWxsPSIjRkY2QjAwIiBzdHJva2U9IiNGRkY4RTgiIHN0cm9rZS13aWR0aD0iMTAiLz4KPC9zdmc+Cg==");
+    }
+    @bottom-left {
+      content: "routemosaic.com";
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-size: 8pt;
+      color: #66788a;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-size: 8pt;
+      color: #66788a;
+    }
   }
+  body { background: #fff !important; color: #111 !important; }
   /* position: fixed repeats on every printed page in Chrome's print engine, so
      this needs no per-page markup -- it doubles as a reminder that the plan is
      an estimate, echoing the "Planning estimates -- not live availability"
