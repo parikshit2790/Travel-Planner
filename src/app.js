@@ -233,6 +233,27 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
 }
 
+// CSS string-literal escaping for content injected into a `content: "...";`
+// declaration -- distinct from esc()'s HTML escaping, since this text lands
+// inside a <style> block, not an HTML attribute or text node.
+function escCssString(value) {
+  return String(value ?? "").replace(/[\\"]/g, (char) => `\\${char}`);
+}
+
+// @page margin-box rules (the print header/footer) can't read live DOM state
+// -- Chrome doesn't support CSS's `string-set`/`content: string(...)` for
+// pulling a heading's text into a running header, so the one piece that's
+// genuinely per-trip (the destination line in the footer) gets its own small
+// inline stylesheet here rather than living in styles.css. The brand
+// wordmark, icon, and page counters are page-content-independent and stay in
+// the static print stylesheet; this rule just adds the @bottom-left text
+// alongside them -- @page rules from separate <style> blocks merge per
+// margin box, they don't replace each other.
+function printPageFooterStyle(plan) {
+  const label = `${plan.destination} · routemosaic.com`;
+  return `<style>@media print { @page { @bottom-left { content: "${escCssString(label)}"; } } }</style>`;
+}
+
 function input(path, value, label, type = "text", { min, max } = {}) {
   const bounds = type === "number" ? `${min !== undefined ? ` min="${esc(min)}"` : ""}${max !== undefined ? ` max="${esc(max)}"` : ""}` : "";
   return `<input aria-label="${esc(label)}" placeholder="${esc(label)}" data-field="${esc(path)}" type="${type}"${bounds} value="${esc(value ?? "")}">`;
@@ -618,6 +639,7 @@ function renderUnsupportedPlan() {
 function renderTripPlan() {
   const plan = state.plan;
   document.querySelector("#app").innerHTML = `
+    ${printPageFooterStyle(plan)}
     <div class="app-shell plan-shell">
       <aside class="side">
         ${Brand()}
